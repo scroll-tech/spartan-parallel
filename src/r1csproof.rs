@@ -179,19 +179,31 @@ impl R1CSProof {
     let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
 
     // append input to variables to create a single vector z
-    let z = {
-      let num_inputs = input.len();
-      let num_vars = vars.len();
-      let mut z = vars;
-      z.extend(&vec![Scalar::one()]); // add constant term in z
-      z.extend(input);
-      z.extend(&vec![Scalar::zero(); num_vars - num_inputs - 1]); // we will pad with zeros
-      z
-    };
+    let z_list = Vec::new();
+    for i in 0..inputList.len() {
+      let z = {
+        let input = inputList[i];
+        let vars = varsList[i];
+        let num_inputs = input.len();
+        let num_vars = vars.len();
+        let mut z = vars;
+        z.extend(&vec![Scalar::one()]); // add constant term in z
+        z.extend(input);
+        z.extend(&vec![Scalar::zero(); num_vars - num_inputs - 1]); // we will pad with zeros
+        z
+      };
+      z_list.push(z);
+    }
 
-    // derive the verifier's challenge tau
-    let (num_rounds_x, num_rounds_y) = (inst.get_num_cons().log_2(), z.len().log_2());
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x);
+    // derive the verifier's challenge tau, r_q
+    // tau selects a random row
+    // r_q selects a random proof
+    let (num_rounds_x, num_rounds_y) = (inst.get_num_cons().log_2(), z_list[0].len().log_2());
+    let mut tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x);
+    let r_q = transcript.challenge_vector(b"challenge_r_q", z_list.len().log_2());
+
+    tau.extend(r_q);
+
     // compute the initial evaluation table for R(\tau, x)
     let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
