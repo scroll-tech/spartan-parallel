@@ -141,8 +141,8 @@ impl R1CSProof {
 
   pub fn prove(
     inst: &R1CSInstance,
-    vars: Vec<Scalar>,
-    input: &[Scalar],
+    varsList: Vec<Vec<Scalar>>,
+    inputList: &Vec<Vec<Scalar>>,
     gens: &R1CSGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -150,8 +150,15 @@ impl R1CSProof {
     let timer_prove = Timer::new("R1CSProof::prove");
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
+    // We require there are same amount of vars and input
+    assert!(inputList.len() == varsList.len());
     // we currently require the number of |inputs| + 1 to be at most number of vars
-    assert!(input.len() < vars.len());
+    for i in 0..inputList.len() {
+      assert!(inputList[i].len() < varsList[i].len());
+    }
+
+    let input = &inputList[0];
+    let vars = varsList[0].clone();
 
     input.append_to_transcript(b"input", transcript);
 

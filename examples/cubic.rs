@@ -20,15 +20,18 @@ fn produce_r1cs() -> (
   usize,
   usize,
   usize,
+  usize,
   Instance,
-  VarsAssignment,
-  InputsAssignment,
+  Vec<VarsAssignment>,
+  Vec<InputsAssignment>,
 ) {
   // parameters of the R1CS instance
   let num_cons = 4;
   let num_vars = 4;
   let num_inputs = 1;
   let num_non_zero_entries = 8;
+  // Number of copies of the proof, used by data-parallelism
+  let num_proofs = 2;
 
   // We will encode the above constraints into three matrices, where
   // the coefficients in the matrix are in the little-endian byte order
@@ -71,36 +74,45 @@ fn produce_r1cs() -> (
 
   let inst = Instance::new(num_cons, num_vars, num_inputs, &A, &B, &C).unwrap();
 
-  // compute a satisfying assignment
-  let mut csprng: OsRng = OsRng;
-  let z0 = Scalar::random(&mut csprng);
-  let z1 = z0 * z0; // constraint 0
-  let z2 = z1 * z0; // constraint 1
-  let z3 = z2 + z0; // constraint 2
-  let i0 = z3 + Scalar::from(5u32); // constraint 3
+  let mut assignment_vars = Vec::new();
+  let mut assignment_inputs = Vec::new();
 
-  // create a VarsAssignment
-  let mut vars = vec![Scalar::zero().to_bytes(); num_vars];
-  vars[0] = z0.to_bytes();
-  vars[1] = z1.to_bytes();
-  vars[2] = z2.to_bytes();
-  vars[3] = z3.to_bytes();
-  let assignment_vars = VarsAssignment::new(&vars).unwrap();
+  for _ in 0..num_proofs {
+    // compute a satisfying assignment
+    let mut csprng: OsRng = OsRng;
+    let z0 = Scalar::random(&mut csprng);
+    let z1 = z0 * z0; // constraint 0
+    let z2 = z1 * z0; // constraint 1
+    let z3 = z2 + z0; // constraint 2
+    let i0 = z3 + Scalar::from(5u32); // constraint 3
 
-  // create an InputsAssignment
-  let mut inputs = vec![Scalar::zero().to_bytes(); num_inputs];
-  inputs[0] = i0.to_bytes();
-  let assignment_inputs = InputsAssignment::new(&inputs).unwrap();
+    // create a VarsAssignment
+    let mut vars = vec![Scalar::zero().to_bytes(); num_vars];
+    vars[0] = z0.to_bytes();
+    vars[1] = z1.to_bytes();
+    vars[2] = z2.to_bytes();
+    vars[3] = z3.to_bytes();
+    let next_assignment_vars = VarsAssignment::new(&vars).unwrap();
 
-  // check if the instance we created is satisfiable
-  let res = inst.is_sat(&assignment_vars, &assignment_inputs);
-  assert!(res.unwrap(), "should be satisfied");
+    // create an InputsAssignment
+    let mut inputs = vec![Scalar::zero().to_bytes(); num_inputs];
+    inputs[0] = i0.to_bytes();
+    let next_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
+
+    // check if the instance we created is satisfiable
+    let res = inst.is_sat(&next_assignment_vars, &next_assignment_inputs);
+    assert!(res.unwrap(), "should be satisfied");
+
+    assignment_vars.push(next_assignment_vars);
+    assignment_inputs.push(next_assignment_inputs);
+  }
 
   (
     num_cons,
     num_vars,
     num_inputs,
     num_non_zero_entries,
+    num_proofs,
     inst,
     assignment_vars,
     assignment_inputs,
@@ -114,6 +126,7 @@ fn main() {
     num_vars,
     num_inputs,
     num_non_zero_entries,
+    num_proofs,
     inst,
     assignment_vars,
     assignment_inputs,
@@ -140,7 +153,7 @@ fn main() {
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
-    .verify(&comm, &assignment_inputs, &mut verifier_transcript, &gens)
+    .verify(&comm, &assignment_inputs[0], &mut verifier_transcript, &gens)
     .is_ok());
   println!("proof verification successful!");
 }

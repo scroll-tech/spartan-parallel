@@ -33,6 +33,7 @@ mod unipoly;
 
 use core::cmp::max;
 use errors::{ProofVerifyError, R1CSError};
+use itertools::Itertools;
 use merlin::Transcript;
 use r1csinstance::{
   R1CSCommitment, R1CSCommitmentGens, R1CSDecommitment, R1CSEvalProof, R1CSInstance,
@@ -340,8 +341,8 @@ impl SNARK {
     inst: &Instance,
     comm: &ComputationCommitment,
     decomm: &ComputationDecommitment,
-    vars: VarsAssignment,
-    inputs: &InputsAssignment,
+    varsList: Vec<VarsAssignment>,
+    inputsList: &Vec<InputsAssignment>,
     gens: &SNARKGens,
     transcript: &mut Transcript,
   ) -> Self {
@@ -357,20 +358,24 @@ impl SNARK {
     let (r1cs_sat_proof, rx, ry) = {
       let (proof, rx, ry) = {
         // we might need to pad variables
-        let padded_vars = {
-          let num_padded_vars = inst.inst.get_num_vars();
-          let num_vars = vars.assignment.len();
-          if num_padded_vars > num_vars {
-            vars.pad(num_padded_vars)
-          } else {
-            vars
-          }
-        };
+        let mut padded_varsList = Vec::new();
+        for i in 0..varsList.len() {
+          let padded_vars = {
+            let num_padded_vars = inst.inst.get_num_vars();
+            let num_vars = varsList[i].assignment.len();
+            if num_padded_vars > num_vars {
+              varsList[i].pad(num_padded_vars)
+            } else {
+              varsList[i].clone()
+            }
+          };
+          padded_varsList.push(padded_vars);
+        }
 
         R1CSProof::prove(
           &inst.inst,
-          padded_vars.assignment,
-          &inputs.assignment,
+          padded_varsList.into_iter().map(|v| v.assignment).collect_vec(),
+          &inputsList.into_iter().map(|v| v.assignment.clone()).collect_vec(),
           &gens.gens_r1cs_sat,
           transcript,
           &mut random_tape,
@@ -464,6 +469,7 @@ impl SNARK {
   }
 }
 
+/*
 /// `NIZKGens` holds public parameters for producing and verifying proofs with the Spartan NIZK
 pub struct NIZKGens {
   gens_r1cs_sat: R1CSGens,
@@ -751,3 +757,4 @@ mod tests {
       .is_ok());
   }
 }
+*/
