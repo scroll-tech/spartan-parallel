@@ -264,6 +264,38 @@ impl R1CSInstance {
     res == 0
   }
 
+  // Pad the result of each A * z[i] to a power of 2 and concatenate them together
+  // So the result looks like [A * z[0], 0, ..., 0, A * z[1], 0, ..., 0, A * z[3], ...]
+  pub fn multiply_vec_bunched(
+    &self,
+    num_rows: usize,
+    num_cols: usize,
+    num_copies: usize,
+    z_list: &Vec<Vec<Scalar>>
+  ) -> (DensePolynomial, DensePolynomial, DensePolynomial) {
+    assert_eq!(num_rows, self.num_cons);
+    assert_eq!(z_list.len(), num_copies);
+    assert!(num_cols > self.num_vars);
+    let padding_len = num_copies.next_power_of_two() - num_copies;
+    let mut Az = Vec::new();
+    let mut Bz = Vec::new();
+    let mut Cz = Vec::new();
+    for z in z_list {
+      assert_eq!(z.len(), num_cols);
+      Az.append(&mut self.A.multiply_vec(num_rows, num_cols, z));
+      Az.append(&mut vec![Scalar::from(0); padding_len]);
+      Bz.append(&mut self.B.multiply_vec(num_rows, num_cols, z));
+      Bz.append(&mut vec![Scalar::from(0); padding_len]);
+      Cz.append(&mut self.C.multiply_vec(num_rows, num_cols, z));
+      Cz.append(&mut vec![Scalar::from(0); padding_len]);
+    };
+    (
+      DensePolynomial::new(Az),
+      DensePolynomial::new(Bz),
+      DensePolynomial::new(Cz),
+    )
+  }
+
   pub fn multiply_vec(
     &self,
     num_rows: usize,

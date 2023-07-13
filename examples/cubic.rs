@@ -132,6 +132,9 @@ fn main() {
     assignment_inputs,
   ) = produce_r1cs();
 
+  assert_eq!(num_proofs, assignment_vars.len());
+  assert_eq!(num_proofs, assignment_inputs.len());
+
   // produce public parameters
   let gens = SNARKGens::new(num_cons, num_vars, num_inputs, num_non_zero_entries);
 

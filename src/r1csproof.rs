@@ -179,11 +179,11 @@ impl R1CSProof {
     let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
 
     // append input to variables to create a single vector z
-    let z_list = Vec::new();
+    let mut z_list = Vec::new();
     for i in 0..inputList.len() {
       let z = {
-        let input = inputList[i];
-        let vars = varsList[i];
+        let input = inputList[i].clone();
+        let vars = varsList[i].clone();
         let num_inputs = input.len();
         let num_vars = vars.len();
         let mut z = vars;
@@ -195,22 +195,19 @@ impl R1CSProof {
       z_list.push(z);
     }
 
-    // derive the verifier's challenge tau, r_q
-    // tau selects a random row
-    // r_q selects a random proof
-    let (num_rounds_x, num_rounds_y) = (inst.get_num_cons().log_2(), z_list[0].len().log_2());
-    let mut tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x);
-    let r_q = transcript.challenge_vector(b"challenge_r_q", z_list.len().log_2());
-
-    tau.extend(r_q);
+    // derive the verifier's challenge \tau
+    let (num_rounds_x, num_rounds_q, num_rounds_y) = 
+      (inst.get_num_cons().log_2(), z_list.len().log_2(), z_list[0].len().log_2());
+    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q);
 
     // compute the initial evaluation table for R(\tau, x)
     let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
-      inst.multiply_vec(inst.get_num_cons(), z.len(), &z);
+      inst.multiply_vec_bunched(inst.get_num_cons(), z_list[0].len(), z_list.len(), &z_list);
+      // inst.multiply_vec(inst.get_num_cons(), z_list[0].len(), &z_list[0]);
 
     let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::prove_phase_one(
-      num_rounds_x,
+      num_rounds_x + num_rounds_q,
       &mut poly_tau,
       &mut poly_Az,
       &mut poly_Bz,
@@ -278,6 +275,11 @@ impl R1CSProof {
       &blind_claim_postsc1,
     );
 
+    // Separate the result rx into rx and rq
+    let (rx, rq) = rx.split_at(num_rounds_x);
+    let rx = rx.to_vec();
+    let rq = rq.to_vec();
+
     let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
     // combine the three claims into a single claim
     let r_A = transcript.challenge_scalar(b"challenege_Az");
@@ -290,7 +292,7 @@ impl R1CSProof {
       // compute the initial evaluation table for R(\tau, x)
       let evals_rx = EqPolynomial::new(rx.clone()).evals();
       let (evals_A, evals_B, evals_C) =
-        inst.compute_eval_table_sparse(inst.get_num_cons(), z.len(), &evals_rx);
+        inst.compute_eval_table_sparse(inst.get_num_cons(), z_list[0].len(), &evals_rx);
 
       assert_eq!(evals_A.len(), evals_B.len());
       assert_eq!(evals_A.len(), evals_C.len());
@@ -298,6 +300,11 @@ impl R1CSProof {
         .map(|i| r_A * evals_A[i] + r_B * evals_B[i] + r_C * evals_C[i])
         .collect::<Vec<Scalar>>()
     };
+
+    // Construct a q * len(z) matrix Z, interpolate into a sparse polynomial, and evaluate r_q on it
+    let evals_Z = {
+
+    }
 
     // another instance of the sum-check protocol
     let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::prove_phase_two(
