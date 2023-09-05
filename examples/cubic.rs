@@ -136,7 +136,7 @@ fn main() {
   assert_eq!(num_proofs, assignment_inputs.len());
 
   // produce public parameters
-  let gens = SNARKGens::new(num_cons, num_vars, num_inputs, num_non_zero_entries);
+  let gens = SNARKGens::new(num_cons, num_vars, num_inputs, num_proofs, num_non_zero_entries);
 
   // create a commitment to the R1CS instance
   let (comm, decomm) = SNARK::encode(&inst, &gens);
@@ -156,7 +156,7 @@ fn main() {
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
-    .verify(&comm, &assignment_inputs[0], &mut verifier_transcript, &gens)
+    .verify(&comm, &assignment_inputs, &mut verifier_transcript, &gens)
     .is_ok());
   println!("proof verification successful!");
 }

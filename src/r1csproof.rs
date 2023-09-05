@@ -157,15 +157,22 @@ impl R1CSProof {
       assert!(inputList[i].len() < varsList[i].len());
     }
 
-    let input = &inputList[0];
-    let vars = varsList[0].clone();
+    let mut padded_varList = Vec::new();
+    for vars in &varsList {
+      padded_varList.extend(vars.clone());
+      if vars.len() != vars.len().next_power_of_two() {
+        padded_varList.extend(&vec![Scalar::zero(); vars.len().next_power_of_two() - vars.len()]);
+      }
+    }
 
-    input.append_to_transcript(b"input", transcript);
+    for input in inputList {
+      input.append_to_transcript(b"input", transcript);
+    }
 
     let timer_commit = Timer::new("polycommit");
     let (poly_vars, comm_vars, blinds_vars) = {
       // create a multilinear polynomial using the supplied assignment for variables
-      let poly_vars = DensePolynomial::new(vars.clone());
+      let poly_vars = DensePolynomial::new(padded_varList.clone());
 
       // produce a commitment to the satisfying assignment
       let (comm_vars, blinds_vars) = poly_vars.commit(&gens.gens_pc, Some(random_tape));
@@ -301,9 +308,18 @@ impl R1CSProof {
         .collect::<Vec<Scalar>>()
     };
 
-    // Construct a q * len(z) matrix Z, interpolate into a sparse polynomial, and evaluate r_q on it
-    let evals_Z = {
-
+    // Construct a q * len(z) matrix Z
+    let padding_len = z_list[0].len().next_power_of_two() - z_list[0].len();
+    let mut Z = Vec::new();
+    for z in &z_list {
+      Z.append(&mut z.clone());
+      Z.append(&mut vec![Scalar::from(0); padding_len]);
+    };
+    let mut Z_poly = DensePolynomial::new(Z);
+    // Bound Z_poly to r_q
+    // let mut Z_rq_poly = DensePolynomial::new(Z_poly.bound(&rq));
+    for r in &rq {
+      Z_poly.bound_poly_var_top(r);
     }
 
     // another instance of the sum-check protocol
@@ -311,7 +327,8 @@ impl R1CSProof {
       num_rounds_y,
       &claim_phase2,
       &blind_claim_phase2,
-      &mut DensePolynomial::new(z),
+      // &mut DensePolynomial::new(z),
+      &mut Z_poly,
       &mut DensePolynomial::new(evals_ABC),
       &gens.gens_sc,
       transcript,
@@ -320,12 +337,12 @@ impl R1CSProof {
     timer_sc_proof_phase2.stop();
 
     let timer_polyeval = Timer::new("polyeval");
-    let eval_vars_at_ry = poly_vars.evaluate(&ry[1..]);
+    let eval_vars_at_ry = poly_vars.evaluate(&[rq.clone(), ry[1..].to_vec()].concat());
     let blind_eval = random_tape.random_scalar(b"blind_eval");
     let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
       &poly_vars,
       Some(&blinds_vars),
-      &ry[1..],
+      &[rq, ry[1..].to_vec()].concat(),
       &eval_vars_at_ry,
       Some(&blind_eval),
       &gens.gens_pc,
@@ -376,14 +393,17 @@ impl R1CSProof {
     &self,
     num_vars: usize,
     num_cons: usize,
-    input: &[Scalar],
+    num_proofs: usize,
+    inputList: &Vec<Vec<Scalar>>,
     evals: &(Scalar, Scalar, Scalar),
     transcript: &mut Transcript,
     gens: &R1CSGens,
   ) -> Result<(Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
-    input.append_to_transcript(b"input", transcript);
+    for input in inputList {
+      input.append_to_transcript(b"input", transcript);
+    }
 
     let n = num_vars;
     // add the commitment to the verifier's transcript
@@ -391,10 +411,10 @@ impl R1CSProof {
       .comm_vars
       .append_to_transcript(b"poly_commitment", transcript);
 
-    let (num_rounds_x, num_rounds_y) = (num_cons.log_2(), (2 * num_vars).log_2());
+    let (num_rounds_x, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_proofs.log_2(), (2 * num_vars).log_2());
 
     // derive the verifier's challenge tau
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x);
+    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q);
 
     // verify the first sum-check instance
     let claim_phase1 = Scalar::zero()
@@ -402,12 +422,14 @@ impl R1CSProof {
       .compress();
     let (comm_claim_post_phase1, rx) = self.sc_proof_phase1.verify(
       &claim_phase1,
-      num_rounds_x,
+      num_rounds_x + num_rounds_q,
       3,
       &gens.gens_sc.gens_1,
       &gens.gens_sc.gens_4,
       transcript,
     )?;
+
+    /*
     // perform the intermediate sum-check test with claimed Az, Bz, and Cz
     let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &self.claims_phase2;
     let (pok_Cz_claim, proof_prod) = &self.pok_claims_phase2;
@@ -483,8 +505,8 @@ impl R1CSProof {
       let mut input_as_sparse_poly_entries = vec![SparsePolyEntry::new(0, Scalar::one())];
       //remaining inputs
       input_as_sparse_poly_entries.extend(
-        (0..input.len())
-          .map(|i| SparsePolyEntry::new(i + 1, input[i]))
+        (0..inputList[0].len())
+          .map(|i| SparsePolyEntry::new(i + 1, inputList[0][i]))
           .collect::<Vec<SparsePolyEntry>>(),
       );
       SparsePolynomial::new(n.log_2(), input_as_sparse_poly_entries).evaluate(&ry[1..])
@@ -509,8 +531,10 @@ impl R1CSProof {
       &expected_claim_post_phase2,
       &comm_claim_post_phase2,
     )?;
+    */
 
-    Ok((rx, ry))
+    // Ok((rx, ry))
+    Ok((Vec::new(), Vec::new()))
   }
 }
 

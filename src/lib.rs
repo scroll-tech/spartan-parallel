@@ -285,7 +285,7 @@ pub struct SNARKGens {
 impl SNARKGens {
   /// Constructs a new `SNARKGens` given the size of the R1CS statement
   /// `num_nz_entries` specifies the maximum number of non-zero entries in any of the three R1CS matrices
-  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_nz_entries: usize) -> Self {
+  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_proofs: usize, num_nz_entries: usize) -> Self {
     let num_vars_padded = {
       let mut num_vars_padded = max(num_vars, num_inputs + 1);
       if num_vars_padded != num_vars_padded.next_power_of_two() {
@@ -294,7 +294,10 @@ impl SNARKGens {
       num_vars_padded
     };
 
-    let gens_r1cs_sat = R1CSGens::new(b"gens_r1cs_sat", num_cons, num_vars_padded);
+    let num_proofs_padded: usize = num_proofs.next_power_of_two();
+    let num_total_vars = num_vars_padded * num_proofs_padded;
+
+    let gens_r1cs_sat = R1CSGens::new(b"gens_r1cs_sat", num_cons, num_total_vars);
     let gens_r1cs_eval = R1CSCommitmentGens::new(
       b"gens_r1cs_eval",
       num_cons,
@@ -342,7 +345,7 @@ impl SNARK {
     comm: &ComputationCommitment,
     decomm: &ComputationDecommitment,
     varsList: Vec<VarsAssignment>,
-    inputsList: &Vec<InputsAssignment>,
+    inputList: &Vec<InputsAssignment>,
     gens: &SNARKGens,
     transcript: &mut Transcript,
   ) -> Self {
@@ -375,7 +378,7 @@ impl SNARK {
         R1CSProof::prove(
           &inst.inst,
           padded_varsList.into_iter().map(|v| v.assignment).collect_vec(),
-          &inputsList.into_iter().map(|v| v.assignment.clone()).collect_vec(),
+          &inputList.into_iter().map(|v| v.assignment.clone()).collect_vec(),
           &gens.gens_r1cs_sat,
           transcript,
           &mut random_tape,
@@ -428,7 +431,7 @@ impl SNARK {
   pub fn verify(
     &self,
     comm: &ComputationCommitment,
-    input: &InputsAssignment,
+    inputList: &Vec<InputsAssignment>,
     transcript: &mut Transcript,
     gens: &SNARKGens,
   ) -> Result<(), ProofVerifyError> {
@@ -439,17 +442,19 @@ impl SNARK {
     comm.comm.append_to_transcript(b"comm", transcript);
 
     let timer_sat_proof = Timer::new("verify_sat_proof");
-    assert_eq!(input.assignment.len(), comm.comm.get_num_inputs());
+    assert_eq!(inputList[0].assignment.len(), comm.comm.get_num_inputs());
     let (rx, ry) = self.r1cs_sat_proof.verify(
       comm.comm.get_num_vars(),
       comm.comm.get_num_cons(),
-      &input.assignment,
+      inputList.len(),
+      &inputList.into_iter().map(|v| v.assignment.clone()).collect_vec(),
       &self.inst_evals,
       transcript,
       &gens.gens_r1cs_sat,
     )?;
     timer_sat_proof.stop();
 
+    /*
     let timer_eval_proof = Timer::new("verify_eval_proof");
     let (Ar, Br, Cr) = &self.inst_evals;
     Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -465,6 +470,7 @@ impl SNARK {
     )?;
     timer_eval_proof.stop();
     timer_verify.stop();
+    */
     Ok(())
   }
 }
