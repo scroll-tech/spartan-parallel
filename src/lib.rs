@@ -358,8 +358,8 @@ impl SNARK {
     transcript.append_protocol_name(SNARK::protocol_name());
     comm.comm.append_to_transcript(b"comm", transcript);
 
-    let (r1cs_sat_proof, rx, ry) = {
-      let (proof, rx, ry) = {
+    let (r1cs_sat_proof, rq, rx, ry) = {
+      let (proof, rq, rx, ry) = {
         // we might need to pad variables
         let mut padded_varsList = Vec::new();
         for i in 0..varsList.len() {
@@ -388,7 +388,7 @@ impl SNARK {
       let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
       Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-      (proof, rx, ry)
+      (proof, rq, rx, ry)
     };
 
     // We send evaluations of A, B, C at r = (rx, ry) as claims

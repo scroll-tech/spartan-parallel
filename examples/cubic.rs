@@ -77,7 +77,7 @@ fn produce_r1cs() -> (
   let mut assignment_vars = Vec::new();
   let mut assignment_inputs = Vec::new();
 
-  for _ in 0..num_proofs {
+  for proof in 0..num_proofs {
     // compute a satisfying assignment
     let mut csprng: OsRng = OsRng;
     let z0 = Scalar::random(&mut csprng);
