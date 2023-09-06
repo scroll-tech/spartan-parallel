@@ -164,6 +164,7 @@ impl R1CSProof {
         padded_varList.extend(&vec![Scalar::zero(); vars.len().next_power_of_two() - vars.len()]);
       }
     }
+    // padded_varList.extend(&vec![Scalar::zero(); padded_varList.len().next_power_of_two() - padded_varList.len()]);
 
     for input in inputList {
       input.append_to_transcript(b"input", transcript);
@@ -282,16 +283,17 @@ impl R1CSProof {
       &blind_claim_postsc1,
     );
 
-    // Separate the result rx into rx and rq
-    let (rx, rq) = rx.split_at(num_rounds_x);
-    let rx = rx.to_vec();
+    // Separate the result rx into rq and rx
+    let (rq, rx) = rx.split_at(num_rounds_q);
     let rq = rq.to_vec();
+    let rx = rx.to_vec();
 
     let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
     // combine the three claims into a single claim
     let r_A = transcript.challenge_scalar(b"challenge_Az");
     let r_B = transcript.challenge_scalar(b"challenge_Bz");
     let r_C = transcript.challenge_scalar(b"challenge_Cz");
+
     let claim_phase2 = r_A * Az_claim + r_B * Bz_claim + r_C * Cz_claim;
     let blind_claim_phase2 = r_A * Az_blind + r_B * Bz_blind + r_C * Cz_blind;
 
@@ -313,7 +315,7 @@ impl R1CSProof {
     let mut Z = Vec::new();
     for z in &z_list {
       Z.append(&mut z.clone());
-      Z.append(&mut vec![Scalar::from(0); padding_len]);
+      Z.append(&mut vec![Scalar::zero(); padding_len]);
     };
     let mut Z_poly = DensePolynomial::new(Z);
     // Bound Z_poly to r_q
@@ -399,7 +401,7 @@ impl R1CSProof {
     evals: &(Scalar, Scalar, Scalar),
     transcript: &mut Transcript,
     gens: &R1CSGens,
-  ) -> Result<(Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
+  ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
     for input in inputList {
@@ -423,7 +425,7 @@ impl R1CSProof {
       .compress();
     let (comm_claim_post_phase1, rx) = self.sc_proof_phase1.verify(
       &claim_phase1,
-      num_rounds_x + num_rounds_q,
+      num_rounds_q + num_rounds_x,
       3,
       &gens.gens_sc.gens_1,
       &gens.gens_sc.gens_4,
@@ -465,9 +467,9 @@ impl R1CSProof {
     )?;
 
     // derive three public challenges and then derive a joint claim
-    let r_A = transcript.challenge_scalar(b"challenege_Az");
-    let r_B = transcript.challenge_scalar(b"challenege_Bz");
-    let r_C = transcript.challenge_scalar(b"challenege_Cz");
+    let r_A = transcript.challenge_scalar(b"challenge_Az");
+    let r_B = transcript.challenge_scalar(b"challenge_Bz");
+    let r_C = transcript.challenge_scalar(b"challenge_Cz");
 
     // r_A * comm_Az_claim + r_B * comm_Bz_claim + r_C * comm_Cz_claim;
     let comm_claim_phase2 = GroupElement::vartime_multiscalar_mul(
@@ -492,10 +494,10 @@ impl R1CSProof {
       transcript,
     )?;
 
-    // Separate rx into rx and rq
-    let (rx, rq) = rx.split_at(num_rounds_x);
-    let rx = rx.to_vec();
+    // Separate the result rx into rq and rx
+    let (rq, rx) = rx.split_at(num_rounds_q);
     let rq = rq.to_vec();
+    let rx = rx.to_vec();
 
     // verify Z(rq, ry) proof against the initial commitment
     self.proof_eval_vars_at_ry.verify(
@@ -547,8 +549,7 @@ impl R1CSProof {
       &comm_claim_post_phase2,
     )?;
 
-    // Ok((rx, ry))
-    Ok((Vec::new(), Vec::new()))
+    Ok((rq, rx, ry))
   }
 }
 

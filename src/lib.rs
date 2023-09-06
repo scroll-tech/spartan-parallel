@@ -443,7 +443,7 @@ impl SNARK {
 
     let timer_sat_proof = Timer::new("verify_sat_proof");
     assert_eq!(inputList[0].assignment.len(), comm.comm.get_num_inputs());
-    let (rx, ry) = self.r1cs_sat_proof.verify(
+    let (rq, rx, ry) = self.r1cs_sat_proof.verify(
       comm.comm.get_num_vars(),
       comm.comm.get_num_cons(),
       inputList.len(),
@@ -454,7 +454,6 @@ impl SNARK {
     )?;
     timer_sat_proof.stop();
 
-    /*
     let timer_eval_proof = Timer::new("verify_eval_proof");
     let (Ar, Br, Cr) = &self.inst_evals;
     Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -470,7 +469,6 @@ impl SNARK {
     )?;
     timer_eval_proof.stop();
     timer_verify.stop();
-    */
     Ok(())
   }
 }

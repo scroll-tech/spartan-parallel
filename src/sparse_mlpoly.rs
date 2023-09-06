@@ -1559,8 +1559,8 @@ impl SparseMatPolyEvalProof {
 }
 
 pub struct SparsePolyEntry {
-  idx: usize,
-  val: Scalar,
+  pub idx: usize,
+  pub val: Scalar,
 }
 
 impl SparsePolyEntry {

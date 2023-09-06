@@ -31,7 +31,7 @@ fn produce_r1cs() -> (
   let num_inputs = 1;
   let num_non_zero_entries = 8;
   // Number of copies of the proof, used by data-parallelism
-  let num_proofs = 2;
+  let num_proofs = 4;
 
   // We will encode the above constraints into three matrices, where
   // the coefficients in the matrix are in the little-endian byte order

@@ -104,7 +104,7 @@ impl ZKSumcheckInstanceProof {
       // append the prover's polynomial to the transcript
       comm_poly.append_to_transcript(b"comm_poly", transcript);
 
-      //derive the verifier's challenge for the next round
+      // derive the verifier's challenge for the next round
       let r_i = transcript.challenge_scalar(b"challenge_nextround");
 
       // verify the proof of sum-check and evals
