@@ -285,7 +285,7 @@ pub struct SNARKGens {
 impl SNARKGens {
   /// Constructs a new `SNARKGens` given the size of the R1CS statement
   /// `num_nz_entries` specifies the maximum number of non-zero entries in any of the three R1CS matrices
-  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_proofs: usize, num_nz_entries: usize) -> Self {
+  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_instances:usize, num_proofs: usize, num_nz_entries: usize) -> Self {
     let num_vars_padded = {
       let mut num_vars_padded = max(num_vars, num_inputs + 1);
       if num_vars_padded != num_vars_padded.next_power_of_two() {
@@ -294,8 +294,9 @@ impl SNARKGens {
       num_vars_padded
     };
 
+    let num_instances_padded: usize = num_instances.next_power_of_two();
     let num_proofs_padded: usize = num_proofs.next_power_of_two();
-    let num_total_vars = num_vars_padded * num_proofs_padded;
+    let num_total_vars = num_instances_padded * num_vars_padded * num_proofs_padded;
 
     let gens_r1cs_sat = R1CSGens::new(b"gens_r1cs_sat", num_cons, num_total_vars);
     let gens_r1cs_eval = R1CSCommitmentGens::new(
@@ -344,8 +345,8 @@ impl SNARK {
     inst: &Instance,
     comm: &ComputationCommitment,
     decomm: &ComputationDecommitment,
-    varsList: Vec<VarsAssignment>,
-    inputList: &Vec<InputsAssignment>,
+    varsMat: Vec<Vec<VarsAssignment>>,
+    inputMat: &Vec<Vec<InputsAssignment>>,
     gens: &SNARKGens,
     transcript: &mut Transcript,
   ) -> Self {
@@ -358,27 +359,31 @@ impl SNARK {
     transcript.append_protocol_name(SNARK::protocol_name());
     comm.comm.append_to_transcript(b"comm", transcript);
 
-    let (r1cs_sat_proof, rq, rx, ry) = {
-      let (proof, rq, rx, ry) = {
+    let (r1cs_sat_proof, rp, rq, rx, ry) = {
+      let (proof, rp, rq, rx, ry) = {
         // we might need to pad variables
-        let mut padded_varsList = Vec::new();
-        for i in 0..varsList.len() {
-          let padded_vars = {
-            let num_padded_vars = inst.inst.get_num_vars();
-            let num_vars = varsList[i].assignment.len();
-            if num_padded_vars > num_vars {
-              varsList[i].pad(num_padded_vars)
-            } else {
-              varsList[i].clone()
-            }
-          };
-          padded_varsList.push(padded_vars);
+        // assume both varsMat.len() and varsMat[i].len() are power of 2
+        let mut padded_varsMat = Vec::new();
+        for i in 0..varsMat.len() {
+          padded_varsMat.push(Vec::new());
+          for j in 0..varsMat[i].len() {
+            let padded_vars = {
+              let num_padded_vars = inst.inst.get_num_vars();
+              let num_vars = varsMat[i][j].assignment.len();
+              if num_padded_vars > num_vars {
+                varsMat[i][j].pad(num_padded_vars)
+              } else {
+                varsMat[i][j].clone()
+              }
+            };
+            padded_varsMat[i].push(padded_vars);
+          }
         }
 
         R1CSProof::prove(
           &inst.inst,
-          padded_varsList.into_iter().map(|v| v.assignment).collect_vec(),
-          &inputList.into_iter().map(|v| v.assignment.clone()).collect_vec(),
+          padded_varsMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
+          &inputMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
           &gens.gens_r1cs_sat,
           transcript,
           &mut random_tape,

@@ -141,8 +141,8 @@ impl R1CSProof {
 
   pub fn prove(
     inst: &R1CSInstance,
-    varsList: Vec<Vec<Scalar>>,
-    inputList: &Vec<Vec<Scalar>>,
+    varsMat: Vec<Vec<Vec<Scalar>>>,
+    inputMat: &Vec<Vec<Vec<Scalar>>>,
     gens: &R1CSGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -151,29 +151,34 @@ impl R1CSProof {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
     // We require there are same amount of vars and input
-    assert!(inputList.len() == varsList.len());
+    assert!(inputMat.len() == varsMat.len());
     // we currently require the number of |inputs| + 1 to be at most number of vars
-    for i in 0..inputList.len() {
-      assert!(inputList[i].len() < varsList[i].len());
-    }
-
-    let mut padded_varList = Vec::new();
-    for vars in &varsList {
-      padded_varList.extend(vars.clone());
-      if vars.len() != vars.len().next_power_of_two() {
-        padded_varList.extend(&vec![Scalar::zero(); vars.len().next_power_of_two() - vars.len()]);
+    for i in 0..inputMat.len() {
+      for j in 0..inputMat[i].len() {
+        assert!(inputMat[i][j].len() < varsMat[i][j].len());
       }
     }
-    // padded_varList.extend(&vec![Scalar::zero(); padded_varList.len().next_power_of_two() - padded_varList.len()]);
 
-    for input in inputList {
-      input.append_to_transcript(b"input", transcript);
+    let mut padded_varMat = Vec::new();
+    for varsList in &varsMat {
+      for vars in varsList {
+        padded_varMat.extend(vars.clone());
+        if vars.len() != vars.len().next_power_of_two() {
+          padded_varMat.extend(&vec![Scalar::zero(); vars.len().next_power_of_two() - vars.len()]);
+        }
+      }
+    }
+
+    for inputList in inputMat {
+      for input in inputList {
+        input.append_to_transcript(b"input", transcript);
+      }
     }
 
     let timer_commit = Timer::new("polycommit");
     let (poly_vars, comm_vars, blinds_vars) = {
       // create a multilinear polynomial using the supplied assignment for variables
-      let poly_vars = DensePolynomial::new(padded_varList.clone());
+      let poly_vars = DensePolynomial::new(padded_varMat.clone());
 
       // produce a commitment to the satisfying assignment
       let (comm_vars, blinds_vars) = poly_vars.commit(&gens.gens_pc, Some(random_tape));
@@ -188,25 +193,28 @@ impl R1CSProof {
 
     // append input to variables to create a single vector z
     let mut z_list = Vec::new();
-    for i in 0..inputList.len() {
-      let z = {
-        let input = inputList[i].clone();
-        let vars = varsList[i].clone();
-        let num_inputs = input.len();
-        let num_vars = vars.len();
-        let mut z = vars;
-        z.extend(&vec![Scalar::one()]); // add constant term in z
-        z.extend(input);
-        z.extend(&vec![Scalar::zero(); num_vars - num_inputs - 1]); // we will pad with zeros
-        z
-      };
-      z_list.push(z);
+    for i in 0..inputMat.len() {
+      z_list.push(Vec::new());
+      for j in 0..inputMat[i].len() {
+        let z = {
+          let input = inputMat[i][j].clone();
+          let vars = varsMat[i][j].clone();
+          let num_inputs = input.len();
+          let num_vars = vars.len();
+          let mut z = vars;
+          z.extend(&vec![Scalar::one()]); // add constant term in z
+          z.extend(input);
+          z.extend(&vec![Scalar::zero(); num_vars - num_inputs - 1]); // we will pad with zeros
+          z
+        };
+        z_list[i].push(z);
+      }
     }
 
     // derive the verifier's challenge \tau
-    let (num_rounds_x, num_rounds_q, num_rounds_y) = 
-      (inst.get_num_cons().log_2(), z_list.len().log_2(), z_list[0].len().log_2());
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q);
+    let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = 
+      (inst.get_num_cons().log_2(), z_list.len().log_2(), z_list[0].len().log_2(), z_list[0][0].len().log_2());
+    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_p + num_rounds_q + num_rounds_x);
 
     // compute the initial evaluation table for R(\tau, x)
     let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
