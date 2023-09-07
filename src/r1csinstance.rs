@@ -270,25 +270,25 @@ impl R1CSInstance {
     &self,
     num_rows: usize,
     num_cols: usize,
-    num_copies: usize,
-    z_list: &Vec<Vec<Scalar>>
+    num_instances: usize,
+    num_proofs: usize,
+    z_mat: &Vec<Vec<Vec<Scalar>>>
   ) -> (DensePolynomial, DensePolynomial, DensePolynomial) {
     assert_eq!(num_rows, self.num_cons);
-    assert_eq!(z_list.len(), num_copies);
+    assert_eq!(z_mat.len(), num_instances);
     assert!(num_cols > self.num_vars);
-    let padding_len = num_copies.next_power_of_two() - num_copies;
     let mut Az = Vec::new();
     let mut Bz = Vec::new();
     let mut Cz = Vec::new();
-    for z in z_list {
-      assert_eq!(z.len(), num_cols);
-      Az.append(&mut self.A.multiply_vec(num_rows, num_cols, z));
-      Az.append(&mut vec![Scalar::from(0); padding_len]);
-      Bz.append(&mut self.B.multiply_vec(num_rows, num_cols, z));
-      Bz.append(&mut vec![Scalar::from(0); padding_len]);
-      Cz.append(&mut self.C.multiply_vec(num_rows, num_cols, z));
-      Cz.append(&mut vec![Scalar::from(0); padding_len]);
-    };
+    for z_list in z_mat {
+      assert_eq!(z_list.len(), num_proofs);
+      for z in z_list {
+        assert_eq!(z.len(), num_cols);
+        Az.append(&mut self.A.multiply_vec(num_rows, num_cols, z));
+        Bz.append(&mut self.B.multiply_vec(num_rows, num_cols, z));
+        Cz.append(&mut self.C.multiply_vec(num_rows, num_cols, z));
+      }
+    }
     (
       DensePolynomial::new(Az),
       DensePolynomial::new(Bz),

@@ -359,7 +359,7 @@ impl SNARK {
     transcript.append_protocol_name(SNARK::protocol_name());
     comm.comm.append_to_transcript(b"comm", transcript);
 
-    let (r1cs_sat_proof, rp, rq, rx, ry) = {
+    let (r1cs_sat_proof, _rp, _rq, rx, ry) = {
       let (proof, rp, rq, rx, ry) = {
         // we might need to pad variables
         // assume both varsMat.len() and varsMat[i].len() are power of 2
@@ -383,7 +383,7 @@ impl SNARK {
         R1CSProof::prove(
           &inst.inst,
           padded_varsMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
-          &inputMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
+          &inputMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
           &gens.gens_r1cs_sat,
           transcript,
           &mut random_tape,
@@ -393,7 +393,7 @@ impl SNARK {
       let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
       Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-      (proof, rq, rx, ry)
+      (proof, rp, rq, rx, ry)
     };
 
     // We send evaluations of A, B, C at r = (rx, ry) as claims
@@ -436,7 +436,7 @@ impl SNARK {
   pub fn verify(
     &self,
     comm: &ComputationCommitment,
-    inputList: &Vec<InputsAssignment>,
+    inputMat: &Vec<Vec<InputsAssignment>>,
     transcript: &mut Transcript,
     gens: &SNARKGens,
   ) -> Result<(), ProofVerifyError> {
@@ -447,12 +447,13 @@ impl SNARK {
     comm.comm.append_to_transcript(b"comm", transcript);
 
     let timer_sat_proof = Timer::new("verify_sat_proof");
-    assert_eq!(inputList[0].assignment.len(), comm.comm.get_num_inputs());
-    let (rq, rx, ry) = self.r1cs_sat_proof.verify(
+    assert_eq!(inputMat[0][0].assignment.len(), comm.comm.get_num_inputs());
+    let (_rp, _rq, rx, ry) = self.r1cs_sat_proof.verify(
       comm.comm.get_num_vars(),
       comm.comm.get_num_cons(),
-      inputList.len(),
-      &inputList.into_iter().map(|v| v.assignment.clone()).collect_vec(),
+      inputMat.len(),
+      inputMat[0].len(),
+      &inputMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
       &self.inst_evals,
       transcript,
       &gens.gens_r1cs_sat,

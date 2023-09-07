@@ -26,6 +26,9 @@ fn produce_r1cs() -> (
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
 ) {
+  // bad test cases
+  let bad_instance = 1;
+  let bad_proof = 2;
   // parameters of the R1CS instance
   // maximum value among the R1CS instances
   let num_cons = 4;
@@ -91,7 +94,8 @@ fn produce_r1cs() -> (
       let z0 = Scalar::random(&mut csprng);
       let z1 = z0 * z0; // constraint 0
       let z2 = z1 * z0; // constraint 1
-      let z3 = z2 + z0; // constraint 2
+      // let z3 = z2 + z0; // constraint 2
+      let z3 = if instance == bad_instance && proof == bad_proof {z2 - z0} else {z2 + z0};
       let i0 = z3 + Scalar::from(5u32); // constraint 3
 
       // create a VarsAssignment
@@ -172,7 +176,7 @@ fn main() {
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
-    .verify(&comm, &assignment_inputs, &mut verifier_transcript, &gens)
+    .verify(&comm, &assignment_inputs_matrix, &mut verifier_transcript, &gens)
     .is_ok());
   println!("proof verification successful!");
 }

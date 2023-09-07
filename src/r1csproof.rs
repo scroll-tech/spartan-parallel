@@ -146,15 +146,24 @@ impl R1CSProof {
     gens: &R1CSGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
-  ) -> (R1CSProof, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
+  ) -> (R1CSProof, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
     let timer_prove = Timer::new("R1CSProof::prove");
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
-    // We require there are same amount of vars and input
-    assert!(inputMat.len() == varsMat.len());
+    let num_instances = varsMat.len();
+    assert_eq!(num_instances.next_power_of_two(), num_instances);
+      assert!(inputMat.len() == num_instances);
+
+    let num_proofs = varsMat[0].len();
+    assert_eq!(num_proofs.next_power_of_two(), num_proofs);
+    for i in 0..num_instances {
+      assert!(inputMat[i].len() == num_proofs);
+      assert!(varsMat[i].len() == num_proofs);
+    }
+
     // we currently require the number of |inputs| + 1 to be at most number of vars
-    for i in 0..inputMat.len() {
-      for j in 0..inputMat[i].len() {
+    for i in 0..num_instances {
+      for j in 0..num_proofs {
         assert!(inputMat[i][j].len() < varsMat[i][j].len());
       }
     }
@@ -192,10 +201,10 @@ impl R1CSProof {
     let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
 
     // append input to variables to create a single vector z
-    let mut z_list = Vec::new();
-    for i in 0..inputMat.len() {
-      z_list.push(Vec::new());
-      for j in 0..inputMat[i].len() {
+    let mut z_mat = Vec::new();
+    for i in 0..num_instances {
+      z_mat.push(Vec::new());
+      for j in 0..num_proofs {
         let z = {
           let input = inputMat[i][j].clone();
           let vars = varsMat[i][j].clone();
@@ -207,23 +216,23 @@ impl R1CSProof {
           z.extend(&vec![Scalar::zero(); num_vars - num_inputs - 1]); // we will pad with zeros
           z
         };
-        z_list[i].push(z);
+        z_mat[i].push(z);
       }
     }
 
     // derive the verifier's challenge \tau
     let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = 
-      (inst.get_num_cons().log_2(), z_list.len().log_2(), z_list[0].len().log_2(), z_list[0][0].len().log_2());
+      (inst.get_num_cons().log_2(), num_instances.log_2(), num_proofs.log_2(), z_mat[0][0].len().log_2());
     let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_p + num_rounds_q + num_rounds_x);
 
     // compute the initial evaluation table for R(\tau, x)
     let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
-      inst.multiply_vec_bunched(inst.get_num_cons(), z_list[0].len(), z_list.len(), &z_list);
-      // inst.multiply_vec(inst.get_num_cons(), z_list[0].len(), &z_list[0]);
+      inst.multiply_vec_bunched(inst.get_num_cons(), z_mat[0][0].len(), num_instances, num_proofs, &z_mat);
+      // inst.multiply_vec(inst.get_num_cons(), z_mat[0].len(), &z_mat[0]);
 
     let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::prove_phase_one(
-      num_rounds_x + num_rounds_q,
+      num_rounds_p + num_rounds_q + num_rounds_x,
       &mut poly_tau,
       &mut poly_Az,
       &mut poly_Bz,
@@ -291,8 +300,10 @@ impl R1CSProof {
       &blind_claim_postsc1,
     );
 
-    // Separate the result rx into rq and rx
+    // Separate the result rx into rp, rq, and rx
+    let (rp, rx) = rx.split_at(num_rounds_p);
     let (rq, rx) = rx.split_at(num_rounds_q);
+    let rp = rp.to_vec();
     let rq = rq.to_vec();
     let rx = rx.to_vec();
 
@@ -309,7 +320,7 @@ impl R1CSProof {
       // compute the initial evaluation table for R(\tau, x)
       let evals_rx = EqPolynomial::new(rx.clone()).evals();
       let (evals_A, evals_B, evals_C) =
-        inst.compute_eval_table_sparse(inst.get_num_cons(), z_list[0].len(), &evals_rx);
+        inst.compute_eval_table_sparse(inst.get_num_cons(), z_mat[0][0].len(), &evals_rx);
 
       assert_eq!(evals_A.len(), evals_B.len());
       assert_eq!(evals_A.len(), evals_C.len());
@@ -319,15 +330,18 @@ impl R1CSProof {
     };
 
     // Construct a q * len(z) matrix Z
-    let padding_len = z_list[0].len().next_power_of_two() - z_list[0].len();
     let mut Z = Vec::new();
-    for z in &z_list {
-      Z.append(&mut z.clone());
-      Z.append(&mut vec![Scalar::zero(); padding_len]);
-    };
+    for z_list in &z_mat {
+      for z in z_list {
+        Z.append(&mut z.clone());
+      }
+    }
     let mut Z_poly = DensePolynomial::new(Z);
     // Bound Z_poly to r_q
     // let mut Z_rq_poly = DensePolynomial::new(Z_poly.bound(&rq));
+    for r in &rp {
+      Z_poly.bound_poly_var_top(r);
+    }
     for r in &rq {
       Z_poly.bound_poly_var_top(r);
     }
@@ -347,12 +361,12 @@ impl R1CSProof {
     timer_sc_proof_phase2.stop();
 
     let timer_polyeval = Timer::new("polyeval");
-    let eval_vars_at_ry = poly_vars.evaluate(&[rq.clone(), ry[1..].to_vec()].concat());
+    let eval_vars_at_ry = poly_vars.evaluate(&[rp.clone(), rq.clone(), ry[1..].to_vec()].concat());
     let blind_eval = random_tape.random_scalar(b"blind_eval");
     let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
       &poly_vars,
       Some(&blinds_vars),
-      &[rq.clone(), ry[1..].to_vec()].concat(),
+      &[rp.clone(), rq.clone(), ry[1..].to_vec()].concat(),
       &eval_vars_at_ry,
       Some(&blind_eval),
       &gens.gens_pc,
@@ -394,6 +408,7 @@ impl R1CSProof {
         proof_eval_vars_at_ry,
         proof_eq_sc_phase2,
       },
+      rp,
       rq,
       rx,
       ry,
@@ -404,16 +419,19 @@ impl R1CSProof {
     &self,
     num_vars: usize,
     num_cons: usize,
+    num_instances: usize,
     num_proofs: usize,
-    inputList: &Vec<Vec<Scalar>>,
+    inputMat: &Vec<Vec<Vec<Scalar>>>,
     evals: &(Scalar, Scalar, Scalar),
     transcript: &mut Transcript,
     gens: &R1CSGens,
-  ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
+  ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
-    for input in inputList {
-      input.append_to_transcript(b"input", transcript);
+    for inputList in inputMat {
+      for input in inputList {
+        input.append_to_transcript(b"input", transcript);
+      }
     }
 
     let n = num_vars;
@@ -422,10 +440,10 @@ impl R1CSProof {
       .comm_vars
       .append_to_transcript(b"poly_commitment", transcript);
 
-    let (num_rounds_x, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_proofs.log_2(), (2 * num_vars).log_2());
+    let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), num_proofs.log_2(), (2 * num_vars).log_2());
 
     // derive the verifier's challenge tau
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q);
+    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_p + num_rounds_q + num_rounds_x);
 
     // verify the first sum-check instance
     let claim_phase1 = Scalar::zero()
@@ -433,7 +451,7 @@ impl R1CSProof {
       .compress();
     let (comm_claim_post_phase1, rx) = self.sc_proof_phase1.verify(
       &claim_phase1,
-      num_rounds_q + num_rounds_x,
+      num_rounds_p + num_rounds_q + num_rounds_x,
       3,
       &gens.gens_sc.gens_1,
       &gens.gens_sc.gens_4,
@@ -458,7 +476,7 @@ impl R1CSProof {
     comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
     comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
 
-    // taus_bound_rx is really taus_bound_rq_rx
+    // taus_bound_rx is really taus_bound_rp_rq_rx
     let taus_bound_rx: Scalar = (0..rx.len())
       .map(|i| rx[i] * tau[i] + (Scalar::one() - rx[i]) * (Scalar::one() - tau[i]))
       .product();
@@ -502,8 +520,10 @@ impl R1CSProof {
       transcript,
     )?;
 
-    // Separate the result rx into rq and rx
+    // Separate the result rx into rp, rq, and rx
+    let (rp, rx) = rx.split_at(num_rounds_p);
     let (rq, rx) = rx.split_at(num_rounds_q);
+    let rp = rp.to_vec();
     let rq = rq.to_vec();
     let rx = rx.to_vec();
 
@@ -511,30 +531,27 @@ impl R1CSProof {
     self.proof_eval_vars_at_ry.verify(
       &gens.gens_pc,
       transcript,
-      &[rq.clone(), ry[1..].to_vec()].concat(),
+      &[rp.clone(), rq.clone(), ry[1..].to_vec()].concat(),
       &self.comm_vars_at_ry,
       &self.comm_vars,
     )?;
 
     let poly_input_eval = {
       let mut input_as_sparse_poly_entries = Vec::new();
-      for i in 0..num_proofs {
-        // constant term
-        input_as_sparse_poly_entries.extend([SparsePolyEntry::new(i * n, Scalar::one())]);
-        // remaining inputs
-        input_as_sparse_poly_entries.extend(
-          (0..inputList[i].len())
-            .map(|j| SparsePolyEntry::new(i * n + j + 1, inputList[i][j]))
-            .collect::<Vec<SparsePolyEntry>>(),
-        );
-        // paddings
-        // input_as_sparse_poly_entries.extend(
-          // (0..n - inputList[i].len() - 1)
-            // .map(|j| SparsePolyEntry::new(i * n + j + 1 + inputList[i].len(), Scalar::zero()))
-            // .collect::<Vec<SparsePolyEntry>>(),
-        // );
+      for i in 0..num_instances {
+        for j in 0..num_proofs {
+          // constant term
+          input_as_sparse_poly_entries.extend([SparsePolyEntry::new((i * num_proofs + j) * n, Scalar::one())]);
+          // remaining inputs
+          input_as_sparse_poly_entries.extend(
+            (0..inputMat[i][j].len())
+              .map(|k| SparsePolyEntry::new((i * num_proofs + j) * n + k + 1, inputMat[i][j][k]))
+              .collect::<Vec<SparsePolyEntry>>(),
+          );
+          // paddings
+        }
       }
-      SparsePolynomial::new(num_proofs.next_power_of_two().log_2() + n.log_2(), input_as_sparse_poly_entries).evaluate(&[rq.clone(), ry[1..].to_vec()].concat())
+      SparsePolynomial::new(num_instances.log_2() + num_proofs.log_2() + n.log_2(), input_as_sparse_poly_entries).evaluate(&[rp.clone(), rq.clone(), ry[1..].to_vec()].concat())
     };
 
     // compute commitment to eval_Z_at_ry = (Scalar::one() - ry[0]) * self.eval_vars_at_ry + ry[0] * poly_input_eval
@@ -557,7 +574,7 @@ impl R1CSProof {
       &comm_claim_post_phase2,
     )?;
 
-    Ok((rq, rx, ry))
+    Ok((rp, rq, rx, ry))
   }
 }
 
