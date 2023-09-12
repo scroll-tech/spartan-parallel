@@ -22,7 +22,8 @@ fn produce_r1cs() -> (
   usize,
   usize,
   usize,
-  Vec<Instance>,
+  usize,
+  Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
 ) {
@@ -37,13 +38,18 @@ fn produce_r1cs() -> (
   let num_non_zero_entries = 8;
   // Number of R1CS instances
   let num_instances = 2;
-  // Number of copies of the proof, used by data-parallelism
-  let num_proofs = 4;
+  // Number of proofs of each R1CS instance
+  let max_num_proofs = 4;
+  let min_num_proofs = 1;
+  let num_proofs = vec![4, 4];
 
   let one = Scalar::one().to_bytes();
-  let mut inst_list = Vec::new();
   let mut assignment_vars_matrix = Vec::new();
   let mut assignment_inputs_matrix = Vec::new();
+
+  let mut A_list = Vec::new();
+  let mut B_list = Vec::new();
+  let mut C_list = Vec::new();
 
   for instance in 0..num_instances {
     // We will encode the above constraints into three matrices, where
@@ -83,19 +89,21 @@ fn produce_r1cs() -> (
     B.push((3, num_vars, one));
     C.push((3, num_vars + 1, one));
 
-    let inst = Instance::new(num_cons, num_vars, num_inputs, &A, &B, &C).unwrap();
+    A_list.push(A);
+    B_list.push(B);
+    C_list.push(C);
 
     let mut assignment_vars = Vec::new();
     let mut assignment_inputs = Vec::new();
 
-    for proof in 0..num_proofs {
+    for proof in 0..num_proofs[instance] {
       // compute a satisfying assignment
       let mut csprng: OsRng = OsRng;
       let z0 = Scalar::random(&mut csprng);
       let z1 = z0 * z0; // constraint 0
       let z2 = z1 * z0; // constraint 1
-      // let z3 = z2 + z0; // constraint 2
-      let z3 = if instance == bad_instance && proof == bad_proof {z2 - z0} else {z2 + z0};
+      let z3 = z2 + z0; // constraint 2
+      // let z3 = if instance == bad_instance && proof == bad_proof {z2 - z0} else {z2 + z0};
       let i0 = z3 + Scalar::from(5u32); // constraint 3
 
       // create a VarsAssignment
@@ -112,17 +120,17 @@ fn produce_r1cs() -> (
       let next_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
 
       // check if the instance we created is satisfiable
-      let res = inst.is_sat(&next_assignment_vars, &next_assignment_inputs);
-      assert!(res.unwrap(), "should be satisfied");
+      // let res = inst.is_sat(&next_assignment_vars, &next_assignment_inputs);
+      // assert!(res.unwrap(), "should be satisfied");
 
       assignment_vars.push(next_assignment_vars);
       assignment_inputs.push(next_assignment_inputs);
     }
 
-    inst_list.push(inst);
     assignment_vars_matrix.push(assignment_vars);
     assignment_inputs_matrix.push(assignment_inputs);
   }
+  let inst = Instance::new(num_instances, num_cons, num_vars, num_inputs, &A_list, &B_list, &C_list).unwrap();
 
   (
     num_cons,
@@ -130,8 +138,9 @@ fn produce_r1cs() -> (
     num_inputs,
     num_non_zero_entries,
     num_instances,
-    num_proofs,
-    inst_list,
+    max_num_proofs,
+    min_num_proofs,
+    inst,
     assignment_vars_matrix,
     assignment_inputs_matrix,
   )
@@ -145,8 +154,9 @@ fn main() {
     num_inputs,
     num_non_zero_entries,
     num_instances,
-    num_proofs,
-    inst_list,
+    max_num_proofs,
+    min_num_proofs,
+    inst,
     assignment_vars_matrix,
     assignment_inputs_matrix,
   ) = produce_r1cs();
@@ -155,16 +165,18 @@ fn main() {
   assert_eq!(num_instances, assignment_inputs_matrix.len());
 
   // produce public parameters
-  let gens = SNARKGens::new(num_cons, num_vars, num_inputs, num_instances, num_proofs, num_non_zero_entries);
+  let gens = SNARKGens::new(num_cons, num_vars, num_inputs, num_instances, max_num_proofs, num_non_zero_entries);
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
-  let (comm, decomm) = SNARK::encode(&inst_list[0], &gens);
+  let (comm, decomm) = SNARK::encode(&inst, &gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
   let proof = SNARK::prove(
-    &inst_list[0],
+    max_num_proofs,
+    min_num_proofs,
+    &inst,
     &comm,
     &decomm,
     assignment_vars_matrix,
@@ -176,7 +188,7 @@ fn main() {
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
-    .verify(&comm, &assignment_inputs_matrix, &mut verifier_transcript, &gens)
+    .verify(max_num_proofs, &comm, &assignment_inputs_matrix, &mut verifier_transcript, &gens)
     .is_ok());
   println!("proof verification successful!");
 }

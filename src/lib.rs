@@ -121,13 +121,15 @@ pub struct Instance {
 impl Instance {
   /// Constructs a new `Instance` and an associated satisfying assignment
   pub fn new(
+    num_instances: usize,
     num_cons: usize,
     num_vars: usize,
     num_inputs: usize,
-    A: &[(usize, usize, [u8; 32])],
-    B: &[(usize, usize, [u8; 32])],
-    C: &[(usize, usize, [u8; 32])],
+    A: &Vec<Vec<(usize, usize, [u8; 32])>>,
+    B: &Vec<Vec<(usize, usize, [u8; 32])>>,
+    C: &Vec<Vec<(usize, usize, [u8; 32])>>,
   ) -> Result<Instance, R1CSError> {
+    let num_instances_padded = num_instances.next_power_of_two();
     let (num_vars_padded, num_cons_padded) = {
       let num_vars_padded = {
         let mut num_vars_padded = num_vars;
@@ -199,28 +201,38 @@ impl Instance {
         Ok(mat)
       };
 
-    let A_scalar = bytes_to_scalar(A);
-    if A_scalar.is_err() {
-      return Err(A_scalar.err().unwrap());
-    }
+    let mut A_scalar_list = Vec::new();
+    let mut B_scalar_list = Vec::new();
+    let mut C_scalar_list = Vec::new();
 
-    let B_scalar = bytes_to_scalar(B);
-    if B_scalar.is_err() {
-      return Err(B_scalar.err().unwrap());
-    }
+    for i in 0..num_instances {
+      let A_scalar = bytes_to_scalar(&A[i]);
+      if A_scalar.is_err() {
+        return Err(A_scalar.err().unwrap());
+      }
+      A_scalar_list.push(A_scalar.unwrap());
 
-    let C_scalar = bytes_to_scalar(C);
-    if C_scalar.is_err() {
-      return Err(C_scalar.err().unwrap());
+      let B_scalar = bytes_to_scalar(&B[i]);
+      if B_scalar.is_err() {
+        return Err(B_scalar.err().unwrap());
+      }
+      B_scalar_list.push(B_scalar.unwrap());
+
+      let C_scalar = bytes_to_scalar(&C[i]);
+      if C_scalar.is_err() {
+        return Err(C_scalar.err().unwrap());
+      }
+      C_scalar_list.push(C_scalar.unwrap());
     }
 
     let inst = R1CSInstance::new(
+      num_instances_padded,
       num_cons_padded,
       num_vars_padded,
       num_inputs,
-      &A_scalar.unwrap(),
-      &B_scalar.unwrap(),
-      &C_scalar.unwrap(),
+      &A_scalar_list,
+      &B_scalar_list,
+      &C_scalar_list,
     );
 
     let digest = inst.get_digest();
@@ -260,6 +272,7 @@ impl Instance {
     )
   }
 
+  /*
   /// Constructs a new synthetic R1CS `Instance` and an associated satisfying assignment
   pub fn produce_synthetic_r1cs(
     num_cons: usize,
@@ -274,6 +287,7 @@ impl Instance {
       InputsAssignment { assignment: inputs },
     )
   }
+  */
 }
 
 /// `SNARKGens` holds public parameters for producing and verifying proofs with the Spartan SNARK
@@ -285,7 +299,7 @@ pub struct SNARKGens {
 impl SNARKGens {
   /// Constructs a new `SNARKGens` given the size of the R1CS statement
   /// `num_nz_entries` specifies the maximum number of non-zero entries in any of the three R1CS matrices
-  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_instances:usize, num_proofs: usize, num_nz_entries: usize) -> Self {
+  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_instances:usize, max_num_proofs: usize, num_nz_entries: usize) -> Self {
     let num_vars_padded = {
       let mut num_vars_padded = max(num_vars, num_inputs + 1);
       if num_vars_padded != num_vars_padded.next_power_of_two() {
@@ -295,12 +309,13 @@ impl SNARKGens {
     };
 
     let num_instances_padded: usize = num_instances.next_power_of_two();
-    let num_proofs_padded: usize = num_proofs.next_power_of_two();
+    let num_proofs_padded: usize = max_num_proofs.next_power_of_two();
     let num_total_vars = num_instances_padded * num_vars_padded * num_proofs_padded;
 
     let gens_r1cs_sat = R1CSGens::new(b"gens_r1cs_sat", num_cons, num_total_vars);
     let gens_r1cs_eval = R1CSCommitmentGens::new(
       b"gens_r1cs_eval",
+      num_instances_padded,
       num_cons,
       num_vars_padded,
       num_inputs,
@@ -342,11 +357,13 @@ impl SNARK {
 
   /// A method to produce a SNARK proof of the satisfiability of an R1CS instance
   pub fn prove(
+    max_num_proofs: usize,
+    min_num_proofs: usize,
     inst: &Instance,
     comm: &ComputationCommitment,
     decomm: &ComputationDecommitment,
-    varsMat: Vec<Vec<VarsAssignment>>,
-    inputMat: &Vec<Vec<InputsAssignment>>,
+    vars_mat: Vec<Vec<VarsAssignment>>,
+    input_mat: &Vec<Vec<InputsAssignment>>,
     gens: &SNARKGens,
     transcript: &mut Transcript,
   ) -> Self {
@@ -359,31 +376,32 @@ impl SNARK {
     transcript.append_protocol_name(SNARK::protocol_name());
     comm.comm.append_to_transcript(b"comm", transcript);
 
-    let (r1cs_sat_proof, _rp, _rq, rx, ry) = {
+    let (r1cs_sat_proof, rp, _rq, rx, ry) = {
       let (proof, rp, rq, rx, ry) = {
         // we might need to pad variables
-        // assume both varsMat.len() and varsMat[i].len() are power of 2
-        let mut padded_varsMat = Vec::new();
-        for i in 0..varsMat.len() {
-          padded_varsMat.push(Vec::new());
-          for j in 0..varsMat[i].len() {
+        // assume both vars_mat.len() and vars_mat[i].len() are power of 2
+        let mut padded_vars_mat = Vec::new();
+        for i in 0..vars_mat.len() {
+          padded_vars_mat.push(Vec::new());
+          for j in 0..vars_mat[i].len() {
             let padded_vars = {
               let num_padded_vars = inst.inst.get_num_vars();
-              let num_vars = varsMat[i][j].assignment.len();
+              let num_vars = vars_mat[i][j].assignment.len();
               if num_padded_vars > num_vars {
-                varsMat[i][j].pad(num_padded_vars)
+                vars_mat[i][j].pad(num_padded_vars)
               } else {
-                varsMat[i][j].clone()
+                vars_mat[i][j].clone()
               }
             };
-            padded_varsMat[i].push(padded_vars);
+            padded_vars_mat[i].push(padded_vars);
           }
         }
 
         R1CSProof::prove(
+          max_num_proofs,
           &inst.inst,
-          padded_varsMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
-          &inputMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
+          padded_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
+          &input_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
           &gens.gens_r1cs_sat,
           transcript,
           &mut random_tape,
@@ -400,7 +418,7 @@ impl SNARK {
     // to enable the verifier complete the first sum-check
     let timer_eval = Timer::new("eval_sparse_polys");
     let inst_evals = {
-      let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
+      let (Ar, Br, Cr) = inst.inst.evaluate(&[rp.clone(), rx.clone()].concat(), &ry);
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);
@@ -411,7 +429,7 @@ impl SNARK {
     let r1cs_eval_proof = {
       let proof = R1CSEvalProof::prove(
         &decomm.decomm,
-        &rx,
+        &[rp, rx].concat(),
         &ry,
         &inst_evals,
         &gens.gens_r1cs_eval,
@@ -435,8 +453,9 @@ impl SNARK {
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
   pub fn verify(
     &self,
+    max_num_proofs: usize,
     comm: &ComputationCommitment,
-    inputMat: &Vec<Vec<InputsAssignment>>,
+    input_mat: &Vec<Vec<InputsAssignment>>,
     transcript: &mut Transcript,
     gens: &SNARKGens,
   ) -> Result<(), ProofVerifyError> {
@@ -447,13 +466,13 @@ impl SNARK {
     comm.comm.append_to_transcript(b"comm", transcript);
 
     let timer_sat_proof = Timer::new("verify_sat_proof");
-    assert_eq!(inputMat[0][0].assignment.len(), comm.comm.get_num_inputs());
-    let (_rp, _rq, rx, ry) = self.r1cs_sat_proof.verify(
+    assert_eq!(input_mat[0][0].assignment.len(), comm.comm.get_num_inputs());
+    let (rp, _rq, rx, ry) = self.r1cs_sat_proof.verify(
       comm.comm.get_num_vars(),
       comm.comm.get_num_cons(),
-      inputMat.len(),
-      inputMat[0].len(),
-      &inputMat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
+      input_mat.len(),
+      max_num_proofs,
+      &input_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
       &self.inst_evals,
       transcript,
       &gens.gens_r1cs_sat,
@@ -467,7 +486,7 @@ impl SNARK {
     Cr.append_to_transcript(b"Cr_claim", transcript);
     self.r1cs_eval_proof.verify(
       &comm.comm,
-      &rx,
+      &[rp, rx].concat(),
       &ry,
       &self.inst_evals,
       &gens.gens_r1cs_eval,

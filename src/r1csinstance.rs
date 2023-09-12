@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct R1CSInstance {
+  num_instances: usize,
   num_cons: usize,
   num_vars: usize,
   num_inputs: usize,
@@ -32,16 +33,17 @@ pub struct R1CSCommitmentGens {
 impl R1CSCommitmentGens {
   pub fn new(
     label: &'static [u8],
+    num_instances: usize,
     num_cons: usize,
     num_vars: usize,
     num_inputs: usize,
     num_nz_entries: usize,
   ) -> R1CSCommitmentGens {
     assert!(num_inputs < num_vars);
-    let num_poly_vars_x = num_cons.log_2();
+    let num_poly_vars_x = num_instances.log_2() * num_cons.log_2();
     let num_poly_vars_y = (2 * num_vars).log_2();
     let gens =
-      SparseMatPolyCommitmentGens::new(label, num_poly_vars_x, num_poly_vars_y, num_nz_entries, 3);
+      SparseMatPolyCommitmentGens::new(label, num_poly_vars_x, num_poly_vars_y, num_instances * num_nz_entries, 3);
     R1CSCommitmentGens { gens }
   }
 }
@@ -83,19 +85,24 @@ impl R1CSCommitment {
 
 impl R1CSInstance {
   pub fn new(
+    num_instances: usize,
     num_cons: usize,
     num_vars: usize,
     num_inputs: usize,
-    A: &[(usize, usize, Scalar)],
-    B: &[(usize, usize, Scalar)],
-    C: &[(usize, usize, Scalar)],
+    A_list: &Vec<Vec<(usize, usize, Scalar)>>,
+    B_list: &Vec<Vec<(usize, usize, Scalar)>>,
+    C_list: &Vec<Vec<(usize, usize, Scalar)>>,
   ) -> R1CSInstance {
+    Timer::print(&format!("number_of_instances {num_instances}"));
     Timer::print(&format!("number_of_constraints {num_cons}"));
     Timer::print(&format!("number_of_variables {num_vars}"));
     Timer::print(&format!("number_of_inputs {num_inputs}"));
-    Timer::print(&format!("number_non-zero_entries_A {}", A.len()));
-    Timer::print(&format!("number_non-zero_entries_B {}", B.len()));
-    Timer::print(&format!("number_non-zero_entries_C {}", C.len()));
+    // Timer::print(&format!("number_non-zero_entries_A {}", A.len()));
+    // Timer::print(&format!("number_non-zero_entries_B {}", B.len()));
+    // Timer::print(&format!("number_non-zero_entries_C {}", C.len()));
+
+    // check that num_instances is a power of 2
+    assert_eq!(num_instances.next_power_of_two(), num_instances);
 
     // check that num_cons is a power of 2
     assert_eq!(num_cons.next_power_of_two(), num_cons);
@@ -106,25 +113,42 @@ impl R1CSInstance {
     // check that number_inputs + 1 <= num_vars
     assert!(num_inputs < num_vars);
 
+    // check that length of A_list, B_list, C_list are the same
+    assert_eq!(A_list.len(), B_list.len());
+    assert_eq!(B_list.len(), C_list.len());
+
     // no errors, so create polynomials
-    let num_poly_vars_x = num_cons.log_2();
+    let num_poly_vars_x = (num_instances * num_cons).log_2();
     let num_poly_vars_y = (2 * num_vars).log_2();
 
-    let mat_A = (0..A.len())
-      .map(|i| SparseMatEntry::new(A[i].0, A[i].1, A[i].2))
-      .collect::<Vec<SparseMatEntry>>();
-    let mat_B = (0..B.len())
-      .map(|i| SparseMatEntry::new(B[i].0, B[i].1, B[i].2))
-      .collect::<Vec<SparseMatEntry>>();
-    let mat_C = (0..C.len())
-      .map(|i| SparseMatEntry::new(C[i].0, C[i].1, C[i].2))
-      .collect::<Vec<SparseMatEntry>>();
+    let mut mat_A_list = Vec::new();
+    let mut mat_B_list = Vec::new();
+    let mut mat_C_list = Vec::new();
 
-    let poly_A = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_A);
-    let poly_B = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_B);
-    let poly_C = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_C);
+    for inst in 0..A_list.len() {
+      let A = &A_list[inst];
+      let B = &B_list[inst];
+      let C = &C_list[inst];
+      let mut mat_A = (0..A.len())
+        .map(|i| SparseMatEntry::new(num_cons * inst + A[i].0, A[i].1, A[i].2))
+        .collect::<Vec<SparseMatEntry>>();
+      let mut mat_B = (0..B.len())
+        .map(|i| SparseMatEntry::new(num_cons * inst + B[i].0, B[i].1, B[i].2))
+        .collect::<Vec<SparseMatEntry>>();
+      let mut mat_C = (0..C.len())
+        .map(|i| SparseMatEntry::new(num_cons * inst + C[i].0, C[i].1, C[i].2))
+        .collect::<Vec<SparseMatEntry>>();
+      mat_A_list.append(&mut mat_A);
+      mat_B_list.append(&mut mat_B);
+      mat_C_list.append(&mut mat_C);
+    }
+
+    let poly_A = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_A_list);
+    let poly_B = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_B_list);
+    let poly_C = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_C_list);
 
     R1CSInstance {
+      num_instances,
       num_cons,
       num_vars,
       num_inputs,
@@ -132,6 +156,10 @@ impl R1CSInstance {
       B: poly_B,
       C: poly_C,
     }
+  }
+
+  pub fn get_num_instances(&self) -> usize {
+    self.num_instances
   }
 
   pub fn get_num_vars(&self) -> usize {
@@ -152,6 +180,7 @@ impl R1CSInstance {
     encoder.finish().unwrap()
   }
 
+  /*
   pub fn produce_synthetic_r1cs(
     num_cons: usize,
     num_vars: usize,
@@ -231,6 +260,7 @@ impl R1CSInstance {
 
     (inst, Z[..num_vars].to_vec(), Z[num_vars + 1..].to_vec())
   }
+  */
 
   pub fn is_sat(&self, vars: &[Scalar], input: &[Scalar]) -> bool {
     assert_eq!(vars.len(), self.num_vars);
@@ -268,25 +298,37 @@ impl R1CSInstance {
   // So the result looks like [A * z[0], 0, ..., 0, A * z[1], 0, ..., 0, A * z[3], ...]
   pub fn multiply_vec_bunched(
     &self,
+    num_instances: usize,
+    max_num_proofs: usize,
     num_rows: usize,
     num_cols: usize,
-    num_instances: usize,
-    num_proofs: usize,
     z_mat: &Vec<Vec<Vec<Scalar>>>
   ) -> (DensePolynomial, DensePolynomial, DensePolynomial) {
     assert_eq!(num_rows, self.num_cons);
-    assert_eq!(z_mat.len(), num_instances);
     assert!(num_cols > self.num_vars);
-    let mut Az = Vec::new();
-    let mut Bz = Vec::new();
-    let mut Cz = Vec::new();
-    for z_list in z_mat {
-      assert_eq!(z_list.len(), num_proofs);
-      for z in z_list {
+    // XXX: VERY UGLY!
+    let mut Az = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
+    let mut Bz = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
+    let mut Cz = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
+
+    for p in 0..num_instances {
+      let z_list = &z_mat[p];
+      let num_proofs = z_list.len();
+      assert!(num_proofs <= max_num_proofs);
+      for q in 0..num_proofs {
+        let z = &z_list[q];
         assert_eq!(z.len(), num_cols);
-        Az.append(&mut self.A.multiply_vec(num_rows, num_cols, z));
-        Bz.append(&mut self.B.multiply_vec(num_rows, num_cols, z));
-        Cz.append(&mut self.C.multiply_vec(num_rows, num_cols, z));
+        let tmp_Az = self.A.multiply_vec(num_instances * num_rows, num_cols, z);
+        let tmp_Bz = self.B.multiply_vec(num_instances * num_rows, num_cols, z);
+        let tmp_Cz = self.C.multiply_vec(num_instances * num_rows, num_cols, z);
+
+        // Select the correct instance
+        for x in 0..num_rows {
+          let i = p * num_rows + x;
+          Az[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Az[i];
+          Bz[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Bz[i];
+          Cz[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Cz[i];
+        }
       }
     }
     (
@@ -318,7 +360,7 @@ impl R1CSInstance {
     num_cols: usize,
     evals: &[Scalar],
   ) -> (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
-    assert_eq!(num_rows, self.num_cons);
+    assert_eq!(num_rows, self.num_instances * self.num_cons);
     assert!(num_cols > self.num_vars);
 
     let evals_A = self.A.compute_eval_table_sparse(evals, num_rows, num_cols);
