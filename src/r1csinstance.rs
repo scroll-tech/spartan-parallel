@@ -1,3 +1,5 @@
+use core::num;
+
 use crate::transcript::AppendToTranscript;
 
 use super::dense_mlpoly::DensePolynomial;
@@ -182,19 +184,38 @@ impl R1CSInstance {
 
   /*
   pub fn produce_synthetic_r1cs(
+    num_instances: usize,
+    num_proofs_list: Vec<usize>,
     num_cons: usize,
     num_vars: usize,
     num_inputs: usize,
-  ) -> (R1CSInstance, Vec<Scalar>, Vec<Scalar>) {
+  ) -> (R1CSInstance, Vec<Vec<Vec<Scalar>>>, Vec<Vec<Vec<Scalar>>>) {
+    Timer::print(&format!("number_of_instances {num_instances}"));
     Timer::print(&format!("number_of_constraints {num_cons}"));
     Timer::print(&format!("number_of_variables {num_vars}"));
     Timer::print(&format!("number_of_inputs {num_inputs}"));
 
     let mut csprng: OsRng = OsRng;
 
-    // assert num_cons and num_vars are power of 2
+    // assert everything is power of 2
+    assert_eq!((num_instances.log_2()).pow2(), num_instances);
+    for num_proofs in num_proofs_list {
+      assert_eq!((num_proofs.log_2()).pow2(), num_proofs);
+    }
     assert_eq!((num_cons.log_2()).pow2(), num_cons);
     assert_eq!((num_vars.log_2()).pow2(), num_vars);
+
+    // find max_num_proofs and min_num_proofs
+    let mut max_num_proofs = num_proofs_list[0];
+    let mut min_num_proofs = num_proofs_list[0];
+    for num_proofs in num_proofs_list {
+      if num_proofs > max_num_proofs {
+        max_num_proofs = num_proofs;
+      }
+      if num_proofs < min_num_proofs {
+        min_num_proofs = num_proofs;
+      }
+    }
 
     // num_inputs + 1 <= num_vars
     assert!(num_inputs < num_vars);
@@ -202,39 +223,55 @@ impl R1CSInstance {
     // z is organized as [vars,1,io]
     let size_z = num_vars + num_inputs + 1;
 
-    // produce a random satisfying assignment
-    let Z = {
+    // produce a random satisfying assignment for each instance
+    let mut Z_mat = Vec::new();
+    let mut A_list = Vec::new();
+    let mut B_list = Vec::new();
+    let mut C_list = Vec::new();
+    for i in 0..num_instances {
+      Z_mat.push(Vec::new());
       let mut Z: Vec<Scalar> = (0..size_z)
         .map(|_i| Scalar::random(&mut csprng))
         .collect::<Vec<Scalar>>();
-      Z[num_vars] = Scalar::one(); // set the constant term to 1
-      Z
-    };
+      Z[num_vars] = Scalar::one();
+      Z_mat[i].push(Z);
 
-    // three sparse matrices
-    let mut A: Vec<SparseMatEntry> = Vec::new();
-    let mut B: Vec<SparseMatEntry> = Vec::new();
-    let mut C: Vec<SparseMatEntry> = Vec::new();
-    let one = Scalar::one();
-    for i in 0..num_cons {
-      let A_idx = i % size_z;
-      let B_idx = (i + 2) % size_z;
-      A.push(SparseMatEntry::new(i, A_idx, one));
-      B.push(SparseMatEntry::new(i, B_idx, one));
-      let AB_val = Z[A_idx] * Z[B_idx];
+      // three sparse matrices for each instance
+      let mut A: Vec<SparseMatEntry> = Vec::new();
+      let mut B: Vec<SparseMatEntry> = Vec::new();
+      let mut C: Vec<SparseMatEntry> = Vec::new();
+      let one = Scalar::one();
+      for i in 0..num_cons {
+        let A_idx = i % size_z;
+        let B_idx = (i + 2) % size_z;
+        A.push(SparseMatEntry::new(i, A_idx, one));
+        B.push(SparseMatEntry::new(i, B_idx, one));
+        let AB_val = Z[A_idx] * Z[B_idx];
 
-      let C_idx = (i + 3) % size_z;
-      let C_val = Z[C_idx];
+        let C_idx = (i + 3) % size_z;
+        let C_val = Z[C_idx];
 
-      if C_val == Scalar::zero() {
-        C.push(SparseMatEntry::new(i, num_vars, AB_val));
-      } else {
-        C.push(SparseMatEntry::new(
-          i,
-          C_idx,
-          AB_val * C_val.invert().unwrap(),
-        ));
+        if C_val == Scalar::zero() {
+          C.push(SparseMatEntry::new(i, num_vars, AB_val));
+        } else {
+          C.push(SparseMatEntry::new(
+            i,
+            C_idx,
+            AB_val * C_val.invert().unwrap(),
+          ));
+        }
       }
+
+      // from A, B, C produce more Z
+      for _ in 1..num_proofs_list[i] {
+
+      }
+
+      A_list.push(A);
+      B_list.push(B);
+      C_list.push(C);
+
+      
     }
 
     Timer::print(&format!("number_non-zero_entries_A {}", A.len()));
