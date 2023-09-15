@@ -34,8 +34,9 @@ fn produce_r1cs() -> (
   Vec<Vec<InputsAssignment>>,
 ) {
   // bad test cases
-  let bad_instance = 0;
-  let bad_proof = 2;
+  // set them to unreachable values to prevent bad tests
+  let bad_instance = 2;
+  let bad_proof = 3;
   // parameters of the R1CS instance
   // maximum value among the R1CS instances
   let num_cons = 4;
@@ -196,8 +197,8 @@ fn produce_r1cs() -> (
     let z0 = Scalar::random(&mut csprng);
     let z1 = z0 + z0; // constraint 0
     let z2 = z1 * z0; // constraint 1
-    let z3 = z2 + z1 + z0 + z2 + z1 + z0; // constraint 2
-    // let z3 = if instance == bad_instance && proof == bad_proof {z2} else {z2 + z1 + z0 + z2 + z1 + z0};
+    // let z3 = z2 + z1 + z0 + z2 + z1 + z0; // constraint 2
+    let z3 = if instance == bad_instance && proof == bad_proof {z2} else {z2 + z1 + z0 + z2 + z1 + z0};
     let i0 = z3 + z1 + Scalar::from(5u32) + z3 + z1 + Scalar::from(5u32); // constraint 3
 
     // create a VarsAssignment
