@@ -82,6 +82,30 @@ impl EqPolynomial {
     evals
   }
 
+  // Only bound Eq on the first self.r.len() of the total_len variables
+  pub fn evals_front(&self, total_len: usize) -> Vec<Scalar> {
+    let ell = self.r.len();
+
+    let mut evals: Vec<Scalar> = vec![Scalar::one(); total_len.pow2()];
+    let base_size = (total_len - ell).pow2();
+    let mut size = base_size;
+    for j in 0..ell {
+      // in each iteration, we double the size of chis
+      size *= 2;
+      for i in (0..size).rev().step_by(base_size * 2) {
+        // copy each element from the prior iteration twice
+        let scalar = evals[i / (base_size * 2)];
+        for k in 0..base_size {
+          evals[i - k] = scalar * self.r[j];
+        }
+        for k in 0..base_size {
+          evals[i - base_size - k] = scalar - evals[i - k];
+        }
+      }
+    }
+    evals
+  }
+
   pub fn compute_factored_lens(ell: usize) -> (usize, usize) {
     (ell / 2, ell - ell / 2)
   }

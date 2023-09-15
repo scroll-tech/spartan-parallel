@@ -1,5 +1,7 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
+use crate::math::Math;
+
 use super::commitments::{Commitments, MultiCommitGens};
 use super::dense_mlpoly::DensePolynomial;
 use super::errors::ProofVerifyError;
@@ -48,7 +50,7 @@ impl SumcheckInstanceProof {
       // append the prover's message to the transcript
       poly.append_to_transcript(b"poly", transcript);
 
-      //derive the verifier's challenge for the next round
+      // derive the verifier's challenge for the next round
       let r_i = transcript.challenge_scalar(b"challenge_nextround");
 
       r.push(r_i);
@@ -585,6 +587,193 @@ impl ZKSumcheckInstanceProof {
     )
   }
 
+  pub fn prove_cubic<F>(
+    claim: &Scalar,
+    blind_claim: &Scalar,
+    num_rounds: usize,
+    poly_A: &mut DensePolynomial,
+    poly_B: &mut DensePolynomial,
+    poly_C: &mut DensePolynomial,
+    comb_func: F,
+    gens_1: &MultiCommitGens,
+    gens_n: &MultiCommitGens,
+    transcript: &mut Transcript,
+    random_tape: &mut RandomTape,
+  ) -> (Self, Vec<Scalar>, Vec<Scalar>, Scalar)
+  where
+    F: Fn(&Scalar, &Scalar, &Scalar) -> Scalar,
+  {
+    let (blinds_poly, blinds_evals) = (
+      random_tape.random_vector(b"blinds_poly", num_rounds),
+      random_tape.random_vector(b"blinds_evals", num_rounds),
+    );
+
+    let mut claim_per_round = *claim;
+    let mut comm_claim_per_round = claim_per_round.commit(blind_claim, gens_1).compress();
+
+    let mut r: Vec<Scalar> = Vec::new();
+    let mut comm_polys: Vec<CompressedGroup> = Vec::new();
+    let mut comm_evals: Vec<CompressedGroup> = Vec::new();
+    let mut proofs: Vec<DotProductProof> = Vec::new();
+
+    for j in 0..num_rounds {
+
+      let (poly, comm_poly) = {
+        let mut eval_point_0 = Scalar::zero();
+        let mut eval_point_2 = Scalar::zero();
+        let mut eval_point_3 = Scalar::zero();
+
+        let len = poly_A.len() / 2; // 2 ^ (num of remaining rounds - 1)
+        for i in 0..len {
+
+          // eval 0: bound_func is A(low)
+          eval_point_0 += comb_func(&poly_A[i], &poly_B[i], &poly_C[i]);
+
+          // eval 2: bound_func is -A(low) + 2*A(high)
+          let poly_A_bound_point = poly_A[len + i] + poly_A[len + i] - poly_A[i];
+          let poly_B_bound_point = poly_B[len + i] + poly_B[len + i] - poly_B[i];
+          let poly_C_bound_point = poly_C[len + i] + poly_C[len + i] - poly_C[i];
+          eval_point_2 += comb_func(
+            &poly_A_bound_point,
+            &poly_B_bound_point,
+            &poly_C_bound_point,
+          );
+
+          // eval 3: bound_func is -2A(low) + 3A(high); computed incrementally with bound_func applied to eval(2)
+          let poly_A_bound_point = poly_A_bound_point + poly_A[len + i] - poly_A[i];
+          let poly_B_bound_point = poly_B_bound_point + poly_B[len + i] - poly_B[i];
+          let poly_C_bound_point = poly_C_bound_point + poly_C[len + i] - poly_C[i];
+          eval_point_3 += comb_func(
+            &poly_A_bound_point,
+            &poly_B_bound_point,
+            &poly_C_bound_point,
+          );
+        }
+
+        let evals = vec![
+          eval_point_0,
+          claim_per_round - eval_point_0,
+          eval_point_2,
+          eval_point_3,
+        ];
+        let poly = UniPoly::from_evals(&evals);
+        let comm_poly = poly.commit(gens_n, &blinds_poly[j]).compress();
+        (poly, comm_poly)
+      };
+
+      // append the prover's message to the transcript
+      comm_poly.append_to_transcript(b"comm_poly", transcript);
+      comm_polys.push(comm_poly);
+
+      //derive the verifier's challenge for the next round
+      let r_j = transcript.challenge_scalar(b"challenge_nextround");
+
+      // bound all tables to the verifier's challenege
+      poly_A.bound_poly_var_top(&r_j);
+      poly_B.bound_poly_var_top(&r_j);
+      poly_C.bound_poly_var_top(&r_j);
+
+      // produce a proof of sum-check and of evaluation
+      let (proof, claim_next_round, comm_claim_next_round) = {
+        let eval = poly.evaluate(&r_j);
+        let comm_eval = eval.commit(&blinds_evals[j], gens_1).compress();
+
+        // we need to prove the following under homomorphic commitments:
+        // (1) poly(0) + poly(1) = claim_per_round
+        // (2) poly(r_j) = eval
+
+        // Our technique is to leverage dot product proofs:
+        // (1) we can prove: <poly_in_coeffs_form, (2, 1, 1, 1)> = claim_per_round
+        // (2) we can prove: <poly_in_coeffs_form, (1, r_j, r^2_j, ..) = eval
+        // for efficiency we batch them using random weights
+
+        // add two claims to transcript
+        comm_claim_per_round.append_to_transcript(b"comm_claim_per_round", transcript);
+        comm_eval.append_to_transcript(b"comm_eval", transcript);
+
+        // produce two weights
+        let w = transcript.challenge_vector(b"combine_two_claims_to_one", 2);
+
+        // compute a weighted sum of the RHS
+        let target = w[0] * claim_per_round + w[1] * eval;
+        let comm_target = GroupElement::vartime_multiscalar_mul(
+          w.iter(),
+          iter::once(&comm_claim_per_round)
+            .chain(iter::once(&comm_eval))
+            .map(|pt| pt.decompress().unwrap())
+            .collect::<Vec<GroupElement>>(),
+        )
+        .compress();
+
+        let blind = {
+          let blind_sc = if j == 0 {
+            blind_claim
+          } else {
+            &blinds_evals[j - 1]
+          };
+
+          let blind_eval = &blinds_evals[j];
+
+          w[0] * blind_sc + w[1] * blind_eval
+        };
+        assert_eq!(target.commit(&blind, gens_1).compress(), comm_target);
+
+        let a = {
+          // the vector to use to decommit for sum-check test
+          let a_sc = {
+            let mut a = vec![Scalar::one(); poly.degree() + 1];
+            a[0] += Scalar::one();
+            a
+          };
+
+          // the vector to use to decommit for evaluation
+          let a_eval = {
+            let mut a = vec![Scalar::one(); poly.degree() + 1];
+            for j in 1..a.len() {
+              a[j] = a[j - 1] * r_j;
+            }
+            a
+          };
+
+          // take weighted sum of the two vectors using w
+          assert_eq!(a_sc.len(), a_eval.len());
+          (0..a_sc.len())
+            .map(|i| w[0] * a_sc[i] + w[1] * a_eval[i])
+            .collect::<Vec<Scalar>>()
+        };
+
+        let (proof, _comm_poly, _comm_sc_eval) = DotProductProof::prove(
+          gens_1,
+          gens_n,
+          transcript,
+          random_tape,
+          &poly.as_vec(),
+          &blinds_poly[j],
+          &a,
+          &target,
+          &blind,
+        );
+
+        (proof, eval, comm_eval)
+      };
+
+      claim_per_round = claim_next_round;
+      comm_claim_per_round = comm_claim_next_round;
+
+      proofs.push(proof);
+      r.push(r_j);
+      comm_evals.push(comm_claim_per_round);
+    }
+
+    (
+      ZKSumcheckInstanceProof::new(comm_polys, comm_evals, proofs),
+      r,
+      vec![poly_A[0], poly_B[0], poly_C[0]],
+      blinds_evals[num_rounds - 1],
+    )
+  }
+
+
   pub fn prove_cubic_with_additive_term<F>(
     claim: &Scalar,
     blind_claim: &Scalar,
@@ -774,202 +963,4 @@ impl ZKSumcheckInstanceProof {
       blinds_evals[num_rounds - 1],
     )
   }
-
-  /*
-  pub fn prove_cubic_with_additive_term_bunched<F>(
-    claim: &Scalar,
-    blind_claim: &Scalar,
-    num_rounds: usize,
-    evals_r: &Vec<Scalar>,
-    poly_A: &mut DensePolynomial,
-    poly_B: &mut DensePolynomial,
-    poly_C: &mut DensePolynomial,
-    poly_D: &mut DensePolynomial,
-    comb_func: F,
-    gens_1: &MultiCommitGens,
-    gens_n: &MultiCommitGens,
-    transcript: &mut Transcript,
-    random_tape: &mut RandomTape,
-  ) -> (Self, Vec<Scalar>, Vec<Scalar>, Scalar)
-  where
-    F: Fn(&Scalar, &Scalar, &Scalar, &Scalar) -> Scalar,
-  {
-    let (blinds_poly, blinds_evals) = (
-      random_tape.random_vector(b"blinds_poly", num_rounds),
-      random_tape.random_vector(b"blinds_evals", num_rounds),
-    );
-
-    let mut claim_per_round = *claim;
-    let mut comm_claim_per_round = claim_per_round.commit(blind_claim, gens_1).compress();
-
-    let mut r: Vec<Scalar> = Vec::new();
-    let mut comm_polys: Vec<CompressedGroup> = Vec::new();
-    let mut comm_evals: Vec<CompressedGroup> = Vec::new();
-    let mut proofs: Vec<DotProductProof> = Vec::new();
-
-    for j in 0..num_rounds {
-      let (poly, comm_poly) = {
-        let mut eval_point_0 = Scalar::zero();
-        let mut eval_point_2 = Scalar::zero();
-        let mut eval_point_3 = Scalar::zero();
-
-        let len = poly_A.len() / 2;
-        for inst in 0..r.len() {
-          for i in 0..len {
-            let poly_B = poly_B_list[inst];
-            let poly_C = poly_C_list[inst];
-            let poly_D = poly_D_list[inst];
-            // eval 0: bound_func is A(low)
-            eval_point_0 += evals_r[inst] * comb_func(&poly_A[i], &poly_B[i], &poly_C[i], &poly_D[i]);
-
-            // eval 2: bound_func is -A(low) + 2*A(high)
-            let poly_A_bound_point = poly_A[len + i] + poly_A[len + i] - poly_A[i];
-            let poly_B_bound_point = poly_B[len + i] + poly_B[len + i] - poly_B[i];
-            let poly_C_bound_point = poly_C[len + i] + poly_C[len + i] - poly_C[i];
-            let poly_D_bound_point = poly_D[len + i] + poly_D[len + i] - poly_D[i];
-            eval_point_2 += evals_r[inst] * comb_func(
-              &poly_A_bound_point,
-              &poly_B_bound_point,
-              &poly_C_bound_point,
-              &poly_D_bound_point,
-            );
-
-            // eval 3: bound_func is -2A(low) + 3A(high); computed incrementally with bound_func applied to eval(2)
-            let poly_A_bound_point = poly_A_bound_point + poly_A[len + i] - poly_A[i];
-            let poly_B_bound_point = poly_B_bound_point + poly_B[len + i] - poly_B[i];
-            let poly_C_bound_point = poly_C_bound_point + poly_C[len + i] - poly_C[i];
-            let poly_D_bound_point = poly_D_bound_point + poly_D[len + i] - poly_D[i];
-            eval_point_3 += evals_r[inst] * comb_func(
-              &poly_A_bound_point,
-              &poly_B_bound_point,
-              &poly_C_bound_point,
-              &poly_D_bound_point,
-            );
-          }
-        }
-
-        let evals = vec![
-          eval_point_0,
-          claim_per_round - eval_point_0,
-          eval_point_2,
-          eval_point_3,
-        ];
-        let poly = UniPoly::from_evals(&evals);
-        let comm_poly = poly.commit(gens_n, &blinds_poly[j]).compress();
-        (poly, comm_poly)
-      };
-
-      // append the prover's message to the transcript
-      comm_poly.append_to_transcript(b"comm_poly", transcript);
-      comm_polys.push(comm_poly);
-
-      //derive the verifier's challenge for the next round
-      let r_j = transcript.challenge_scalar(b"challenge_nextround");
-
-      // bound all tables to the verifier's challenege
-      poly_A.bound_poly_var_top(&r_j);
-      poly_B.bound_poly_var_top(&r_j);
-      poly_C.bound_poly_var_top(&r_j);
-      poly_D.bound_poly_var_top(&r_j);
-
-      // produce a proof of sum-check and of evaluation
-      let (proof, claim_next_round, comm_claim_next_round) = {
-        let eval = poly.evaluate(&r_j);
-        let comm_eval = eval.commit(&blinds_evals[j], gens_1).compress();
-
-        // we need to prove the following under homomorphic commitments:
-        // (1) poly(0) + poly(1) = claim_per_round
-        // (2) poly(r_j) = eval
-
-        // Our technique is to leverage dot product proofs:
-        // (1) we can prove: <poly_in_coeffs_form, (2, 1, 1, 1)> = claim_per_round
-        // (2) we can prove: <poly_in_coeffs_form, (1, r_j, r^2_j, ..) = eval
-        // for efficiency we batch them using random weights
-
-        // add two claims to transcript
-        comm_claim_per_round.append_to_transcript(b"comm_claim_per_round", transcript);
-        comm_eval.append_to_transcript(b"comm_eval", transcript);
-
-        // produce two weights
-        let w = transcript.challenge_vector(b"combine_two_claims_to_one", 2);
-
-        // compute a weighted sum of the RHS
-        let target = w[0] * claim_per_round + w[1] * eval;
-        let comm_target = GroupElement::vartime_multiscalar_mul(
-          w.iter(),
-          iter::once(&comm_claim_per_round)
-            .chain(iter::once(&comm_eval))
-            .map(|pt| pt.decompress().unwrap())
-            .collect::<Vec<GroupElement>>(),
-        )
-        .compress();
-
-        let blind = {
-          let blind_sc = if j == 0 {
-            blind_claim
-          } else {
-            &blinds_evals[j - 1]
-          };
-
-          let blind_eval = &blinds_evals[j];
-
-          w[0] * blind_sc + w[1] * blind_eval
-        };
-
-        assert_eq!(target.commit(&blind, gens_1).compress(), comm_target);
-
-        let a = {
-          // the vector to use to decommit for sum-check test
-          let a_sc = {
-            let mut a = vec![Scalar::one(); poly.degree() + 1];
-            a[0] += Scalar::one();
-            a
-          };
-
-          // the vector to use to decommit for evaluation
-          let a_eval = {
-            let mut a = vec![Scalar::one(); poly.degree() + 1];
-            for j in 1..a.len() {
-              a[j] = a[j - 1] * r_j;
-            }
-            a
-          };
-
-          // take weighted sum of the two vectors using w
-          assert_eq!(a_sc.len(), a_eval.len());
-          (0..a_sc.len())
-            .map(|i| w[0] * a_sc[i] + w[1] * a_eval[i])
-            .collect::<Vec<Scalar>>()
-        };
-
-        let (proof, _comm_poly, _comm_sc_eval) = DotProductProof::prove(
-          gens_1,
-          gens_n,
-          transcript,
-          random_tape,
-          &poly.as_vec(),
-          &blinds_poly[j],
-          &a,
-          &target,
-          &blind,
-        );
-
-        (proof, eval, comm_eval)
-      };
-
-      proofs.push(proof);
-      claim_per_round = claim_next_round;
-      comm_claim_per_round = comm_claim_next_round;
-      r.push(r_j);
-      comm_evals.push(comm_claim_per_round);
-    }
-
-    (
-      ZKSumcheckInstanceProof::new(comm_polys, comm_evals, proofs),
-      r,
-      vec![poly_A[0], poly_B[0], poly_C[0], poly_D[0]],
-      blinds_evals[num_rounds - 1],
-    )
-  }
-  */
 }

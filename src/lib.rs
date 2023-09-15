@@ -240,6 +240,7 @@ impl Instance {
     Ok(Instance { inst, digest })
   }
 
+  /*
   /// Checks if a given R1CSInstance is satisfiable with a given variables and inputs assignments
   pub fn is_sat(
     &self,
@@ -271,6 +272,7 @@ impl Instance {
         .is_sat(&padded_vars.assignment, &inputs.assignment),
     )
   }
+  */
 
   /*
   /// Constructs a new synthetic R1CS `Instance` and an associated satisfying assignment
@@ -418,7 +420,7 @@ impl SNARK {
     // to enable the verifier complete the first sum-check
     let timer_eval = Timer::new("eval_sparse_polys");
     let inst_evals = {
-      let (Ar, Br, Cr) = inst.inst.evaluate(&[rp.clone(), rx.clone()].concat(), &ry);
+      let (Ar, Br, Cr) = inst.inst.evaluate(&rp, &rx, &ry);
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);
@@ -454,6 +456,7 @@ impl SNARK {
   pub fn verify(
     &self,
     max_num_proofs: usize,
+    num_cons: usize,
     comm: &ComputationCommitment,
     input_mat: &Vec<Vec<InputsAssignment>>,
     transcript: &mut Transcript,
@@ -469,7 +472,7 @@ impl SNARK {
     assert_eq!(input_mat[0][0].assignment.len(), comm.comm.get_num_inputs());
     let (rp, _rq, rx, ry) = self.r1cs_sat_proof.verify(
       comm.comm.get_num_vars(),
-      comm.comm.get_num_cons(),
+      num_cons,
       input_mat.len(),
       max_num_proofs,
       &input_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),

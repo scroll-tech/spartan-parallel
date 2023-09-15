@@ -23,9 +23,14 @@ pub struct R1CSInstance {
   num_cons: usize,
   num_vars: usize,
   num_inputs: usize,
-  A: SparseMatPolynomial,
-  B: SparseMatPolynomial,
-  C: SparseMatPolynomial,
+  // List of individual A, B, C for matrix multiplication
+  A_list: Vec<SparseMatPolynomial>,
+  B_list: Vec<SparseMatPolynomial>,
+  C_list: Vec<SparseMatPolynomial>,
+  // Concat all A's into a (p * x) by q matrix for commitment and evaluation
+  A_poly: SparseMatPolynomial,
+  B_poly: SparseMatPolynomial,
+  C_poly: SparseMatPolynomial,
 }
 
 pub struct R1CSCommitmentGens {
@@ -120,43 +125,59 @@ impl R1CSInstance {
     assert_eq!(B_list.len(), C_list.len());
 
     // no errors, so create polynomials
-    let num_poly_vars_x = (num_instances * num_cons).log_2();
+    let num_poly_vars_px = (num_instances * num_cons).log_2();
+    let num_poly_vars_x = num_cons.log_2();
     let num_poly_vars_y = (2 * num_vars).log_2();
 
-    let mut mat_A_list = Vec::new();
-    let mut mat_B_list = Vec::new();
-    let mut mat_C_list = Vec::new();
+    let mut poly_A_list = Vec::new();
+    let mut poly_B_list = Vec::new();
+    let mut poly_C_list = Vec::new();
+
+    let mut mat_A = Vec::new();
+    let mut mat_B = Vec::new();
+    let mut mat_C = Vec::new();
 
     for inst in 0..A_list.len() {
       let A = &A_list[inst];
       let B = &B_list[inst];
       let C = &C_list[inst];
-      let mut mat_A = (0..A.len())
-        .map(|i| SparseMatEntry::new(num_cons * inst + A[i].0, A[i].1, A[i].2))
+      let list_A = (0..A.len())
+        .map(|i| SparseMatEntry::new(A[i].0, A[i].1, A[i].2))
         .collect::<Vec<SparseMatEntry>>();
-      let mut mat_B = (0..B.len())
-        .map(|i| SparseMatEntry::new(num_cons * inst + B[i].0, B[i].1, B[i].2))
+      let list_B = (0..B.len())
+        .map(|i| SparseMatEntry::new(B[i].0, B[i].1, B[i].2))
         .collect::<Vec<SparseMatEntry>>();
-      let mut mat_C = (0..C.len())
-        .map(|i| SparseMatEntry::new(num_cons * inst + C[i].0, C[i].1, C[i].2))
+      let list_C = (0..C.len())
+        .map(|i| SparseMatEntry::new(C[i].0, C[i].1, C[i].2))
         .collect::<Vec<SparseMatEntry>>();
-      mat_A_list.append(&mut mat_A);
-      mat_B_list.append(&mut mat_B);
-      mat_C_list.append(&mut mat_C);
+      poly_A_list.push(SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, list_A));
+      poly_B_list.push(SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, list_B));
+      poly_C_list.push(SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, list_C));
+      let mut list_A = (0..A.len())
+        .map(|i| SparseMatEntry::new(inst * num_cons + A[i].0, A[i].1, A[i].2))
+        .collect::<Vec<SparseMatEntry>>();
+      let mut list_B = (0..B.len())
+        .map(|i| SparseMatEntry::new(inst * num_cons + B[i].0, B[i].1, B[i].2))
+        .collect::<Vec<SparseMatEntry>>();
+      let mut list_C = (0..C.len())
+        .map(|i| SparseMatEntry::new(inst * num_cons + C[i].0, C[i].1, C[i].2))
+        .collect::<Vec<SparseMatEntry>>();
+      mat_A.append(&mut list_A);
+      mat_B.append(&mut list_B);
+      mat_C.append(&mut list_C);
     }
-
-    let poly_A = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_A_list);
-    let poly_B = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_B_list);
-    let poly_C = SparseMatPolynomial::new(num_poly_vars_x, num_poly_vars_y, mat_C_list);
 
     R1CSInstance {
       num_instances,
       num_cons,
       num_vars,
       num_inputs,
-      A: poly_A,
-      B: poly_B,
-      C: poly_C,
+      A_list: poly_A_list,
+      B_list: poly_B_list,
+      C_list: poly_C_list,
+      A_poly: SparseMatPolynomial::new(num_poly_vars_px, num_poly_vars_y, mat_A),
+      B_poly: SparseMatPolynomial::new(num_poly_vars_px, num_poly_vars_y, mat_B),
+      C_poly: SparseMatPolynomial::new(num_poly_vars_px, num_poly_vars_y, mat_C)
     }
   }
 
@@ -299,40 +320,51 @@ impl R1CSInstance {
   }
   */
 
-  pub fn is_sat(&self, vars: &[Scalar], input: &[Scalar]) -> bool {
-    assert_eq!(vars.len(), self.num_vars);
-    assert_eq!(input.len(), self.num_inputs);
+  pub fn is_sat(&self, vars: &Vec<Vec<Vec<Scalar>>>, input: &Vec<Vec<Vec<Scalar>>>) -> bool {
+    assert_eq!(vars.len(), self.num_instances);
+    assert_eq!(input.len(), self.num_instances);
 
-    let z = {
-      let mut z = vars.to_vec();
-      z.extend(&vec![Scalar::one()]);
-      z.extend(input);
-      z
-    };
+    for p in 0..self.num_instances {
+      assert_eq!(vars[p].len(), input[p].len());
+      for q in 0..vars[p].len() {
+        let vars = &vars[p][q];
+        let input = &input[p][q];
+        assert_eq!(vars.len(), self.num_vars);
+        assert_eq!(input.len(), self.num_inputs);
 
-    // verify if Az * Bz - Cz = [0...]
-    let Az = self
-      .A
-      .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
-    let Bz = self
-      .B
-      .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
-    let Cz = self
-      .C
-      .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
+        let z = {
+          let mut z = vars.to_vec();
+          z.extend(&vec![Scalar::one()]);
+          z.extend(input);
+          z
+        };
 
-    assert_eq!(Az.len(), self.num_cons);
-    assert_eq!(Bz.len(), self.num_cons);
-    assert_eq!(Cz.len(), self.num_cons);
-    let res: usize = (0..self.num_cons)
-      .map(|i| usize::from(Az[i] * Bz[i] != Cz[i]))
-      .sum();
+        // verify if Az * Bz - Cz = [0...]
+        let Az = self
+          .A_list[p]
+          .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
+        let Bz = self
+          .B_list[p]
+          .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
+        let Cz = self
+          .C_list[p]
+          .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
 
-    res == 0
+        assert_eq!(Az.len(), self.num_cons);
+        assert_eq!(Bz.len(), self.num_cons);
+        assert_eq!(Cz.len(), self.num_cons);
+        let res: usize = (0..self.num_cons)
+          .map(|i| usize::from(Az[i] * Bz[i] != Cz[i]))
+          .sum();
+
+        if res != 0 { return false };
+      }
+    }
+    return true;
   }
 
-  // Pad the result of each A * z[i] to a power of 2 and concatenate them together
-  // So the result looks like [A * z[0], 0, ..., 0, A * z[1], 0, ..., 0, A * z[3], ...]
+  // Az(p, q, x) <- A(p, x) * z(p, q, x), where we require p for A and z are the same
+  // Return Az, Bz, Cz as DensePolynomial
   pub fn multiply_vec_bunched(
     &self,
     num_instances: usize,
@@ -355,16 +387,15 @@ impl R1CSInstance {
       for q in 0..num_proofs {
         let z = &z_list[q];
         assert_eq!(z.len(), num_cols);
-        let tmp_Az = self.A.multiply_vec(num_instances * num_rows, num_cols, z);
-        let tmp_Bz = self.B.multiply_vec(num_instances * num_rows, num_cols, z);
-        let tmp_Cz = self.C.multiply_vec(num_instances * num_rows, num_cols, z);
+        let tmp_Az = self.A_list[p].multiply_vec(num_rows, num_cols, z);
+        let tmp_Bz = self.B_list[p].multiply_vec(num_rows, num_cols, z);
+        let tmp_Cz = self.C_list[p].multiply_vec(num_rows, num_cols, z);
 
         // Select the correct instance
         for x in 0..num_rows {
-          let i = p * num_rows + x;
-          Az[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Az[i];
-          Bz[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Bz[i];
-          Cz[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Cz[i];
+          Az[p * max_num_proofs * num_rows + q * num_rows + x] = tmp_Az[x];
+          Bz[p * max_num_proofs * num_rows + q * num_rows + x] = tmp_Bz[x];
+          Cz[p * max_num_proofs * num_rows + q * num_rows + x] = tmp_Cz[x];
         }
       }
     }
@@ -377,6 +408,7 @@ impl R1CSInstance {
 
   pub fn multiply_vec(
     &self,
+    p: usize,
     num_rows: usize,
     num_cols: usize,
     z: &[Scalar],
@@ -385,9 +417,9 @@ impl R1CSInstance {
     assert_eq!(z.len(), num_cols);
     assert!(num_cols > self.num_vars);
     (
-      DensePolynomial::new(self.A.multiply_vec(num_rows, num_cols, z)),
-      DensePolynomial::new(self.B.multiply_vec(num_rows, num_cols, z)),
-      DensePolynomial::new(self.C.multiply_vec(num_rows, num_cols, z)),
+      DensePolynomial::new(self.A_list[p].multiply_vec(num_rows, num_cols, z)),
+      DensePolynomial::new(self.B_list[p].multiply_vec(num_rows, num_cols, z)),
+      DensePolynomial::new(self.C_list[p].multiply_vec(num_rows, num_cols, z)),
     )
   }
 
@@ -397,25 +429,33 @@ impl R1CSInstance {
     num_cols: usize,
     evals: &[Scalar],
   ) -> (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
-    assert_eq!(num_rows, self.num_instances * self.num_cons);
+    assert_eq!(num_rows, self.num_cons);
     assert!(num_cols > self.num_vars);
 
-    let evals_A = self.A.compute_eval_table_sparse(evals, num_rows, num_cols);
-    let evals_B = self.B.compute_eval_table_sparse(evals, num_rows, num_cols);
-    let evals_C = self.C.compute_eval_table_sparse(evals, num_rows, num_cols);
+    let mut evals_A_list = Vec::new();
+    let mut evals_B_list = Vec::new();
+    let mut evals_C_list = Vec::new();
+    for p in 0..self.num_instances {
+      let evals_A = self.A_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
+      let evals_B = self.B_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
+      let evals_C = self.C_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
+      evals_A_list.extend(evals_A);
+      evals_B_list.extend(evals_B);
+      evals_C_list.extend(evals_C);
+    }
 
-    (evals_A, evals_B, evals_C)
+    (evals_A_list, evals_B_list, evals_C_list)
   }
 
-  pub fn evaluate(&self, rx: &[Scalar], ry: &[Scalar]) -> (Scalar, Scalar, Scalar) {
-    let evals = SparseMatPolynomial::multi_evaluate(&[&self.A, &self.B, &self.C], rx, ry);
+  pub fn evaluate(&self, rp: &[Scalar], rx: &[Scalar], ry: &[Scalar]) -> (Scalar, Scalar, Scalar) {
+    let evals = SparseMatPolynomial::multi_evaluate(&[&self.A_poly, &self.B_poly, &self.C_poly], &[rp, rx].concat(), ry);
     (evals[0], evals[1], evals[2])
   }
 
   pub fn commit(&self, gens: &R1CSCommitmentGens) -> (R1CSCommitment, R1CSDecommitment) {
-    let (comm, dense) = SparseMatPolynomial::multi_commit(&[&self.A, &self.B, &self.C], &gens.gens);
+    let (comm, dense) = SparseMatPolynomial::multi_commit(&[&self.A_poly, &self.B_poly, &self.C_poly], &gens.gens);
     let r1cs_comm = R1CSCommitment {
-      num_cons: self.num_cons,
+      num_cons: self.num_instances * self.num_cons,
       num_vars: self.num_vars,
       num_inputs: self.num_inputs,
       comm,

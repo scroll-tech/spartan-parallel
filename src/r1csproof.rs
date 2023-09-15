@@ -18,6 +18,8 @@ use core::iter;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
+// TODO: Need to verify correctness of eq_p_rp!!!
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct R1CSProof {
   comm_vars: PolyCommitment,
@@ -113,21 +115,23 @@ impl R1CSProof {
     blind_claim: &Scalar,
     evals_z: &mut DensePolynomial,
     evals_ABC: &mut DensePolynomial,
+    evals_eq: &mut DensePolynomial,
     gens: &R1CSSumcheckGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
   ) -> (ZKSumcheckInstanceProof, Vec<Scalar>, Vec<Scalar>, Scalar) {
     let comb_func =
-      |poly_A_comp: &Scalar, poly_B_comp: &Scalar| -> Scalar { poly_A_comp * poly_B_comp };
-    let (sc_proof_phase_two, r, claims, blind_claim_postsc) = ZKSumcheckInstanceProof::prove_quad(
+      |poly_A_comp: &Scalar, poly_B_comp: &Scalar, poly_C_comp: &Scalar| -> Scalar { poly_A_comp * poly_B_comp * poly_C_comp };
+    let (sc_proof_phase_two, r, claims, blind_claim_postsc) = ZKSumcheckInstanceProof::prove_cubic(
       claim,
       blind_claim,
       num_rounds,
       evals_z,
       evals_ABC,
+      evals_eq,
       comb_func,
       &gens.gens_1,
-      &gens.gens_3,
+      &gens.gens_4,
       transcript,
       random_tape,
     );
@@ -180,7 +184,7 @@ impl R1CSProof {
         }
       }
       if vars_list.len() != max_num_proofs {
-        padded_var_mat.extend(&vec![Scalar::zero(); max_num_proofs * inst.get_num_vars() - vars_list.len()]);
+        padded_var_mat.extend(&vec![Scalar::zero(); (max_num_proofs - vars_list.len()) * inst.get_num_vars()]);
       }
     }
 
@@ -225,20 +229,22 @@ impl R1CSProof {
         z_mat[i].push(z);
       }
     }
+    let z_len = z_mat[0][0].len();
 
     // derive the verifier's challenge \tau
     let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
-      (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_mat[0][0].len().log_2());
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
+      (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
+    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_p + num_rounds_q + num_rounds_x);
 
     // compute the initial evaluation table for R(\tau, x)
     let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
-    // XXX: These should be SparsePoly
+    // XXX: Should these be SparsePoly?
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
-      inst.multiply_vec_bunched(num_instances, max_num_proofs, num_cons, z_mat[0][0].len(), &z_mat);
+      inst.multiply_vec_bunched(num_instances, max_num_proofs, num_cons, z_len, &z_mat);
 
+    // Sumcheck 1: (Az * Bz - Cz) * eq(p, q, x) = 0
     let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::prove_phase_one(
-      num_rounds_x + num_rounds_q + num_rounds_p,
+      num_rounds_p + num_rounds_q + num_rounds_x,
       &mut poly_tau,
       &mut poly_Az,
       &mut poly_Bz,
@@ -307,11 +313,11 @@ impl R1CSProof {
     );
 
     // Separate the result rx into rp, rq, and rx
-    let (rx, rq) = rx.split_at(num_rounds_x);
-    let (rq, rp) = rq.split_at(num_rounds_q);
-    let rx = rx.to_vec();
-    let rq = rq.to_vec();
+    let (rp, rx) = rx.split_at(num_rounds_p);
+    let (rq, rx) = rx.split_at(num_rounds_q);
     let rp = rp.to_vec();
+    let rq = rq.to_vec();
+    let rx = rx.to_vec();
 
     let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
     // combine the three claims into a single claim
@@ -324,9 +330,9 @@ impl R1CSProof {
 
     let evals_ABC = {
       // compute the initial evaluation table for R(\tau, x)
-      let evals_rx = EqPolynomial::new([rp.clone(), rx.clone()].concat()).evals();
+      let evals_rx = EqPolynomial::new(rx.clone()).evals();
       let (evals_A, evals_B, evals_C) =
-        inst.compute_eval_table_sparse(num_instances * inst.get_num_cons(), z_mat[0][0].len(), &evals_rx);
+        inst.compute_eval_table_sparse(inst.get_num_cons(), z_len, &evals_rx);
 
       assert_eq!(evals_A.len(), evals_B.len());
       assert_eq!(evals_A.len(), evals_C.len());
@@ -334,40 +340,53 @@ impl R1CSProof {
         .map(|i| r_A * evals_A[i] + r_B * evals_B[i] + r_C * evals_C[i])
         .collect::<Vec<Scalar>>()
     };
+    let mut ABC_poly = DensePolynomial::new(evals_ABC);
 
-    // Construct a q * len(z) matrix Z
-    let mut Z = Vec::new();
-    for z_list in &z_mat {
-      for z in z_list {
-        Z.append(&mut z.clone());
+    // Construct a q * p * len(z) matrix Z and bound it to r_q
+    let mut Z = vec![Scalar::zero(); max_num_proofs * num_instances * z_len];
+    for q in 0..max_num_proofs {
+      for p in 0..num_instances {
+        let z = &z_mat[p][q];
+        for entry in 0..z_len {
+          Z[q * num_instances * z_len + p * z_len + entry] = z_mat[p][q][entry].clone();
+        }
       }
-      Z.append(&mut vec![Scalar::zero(); (max_num_proofs - z_list.len()) * z_mat[0][0].len()]);
     }
     let mut Z_poly = DensePolynomial::new(Z);
-    // Bound Z_poly to r_p and r_q
-    for r in &rp {
-      Z_poly.bound_poly_var_top(r);
-    }
+    // Bound Z_poly to r_q
     for r in &rq {
       Z_poly.bound_poly_var_top(r);
     }
 
-    // another instance of the sum-check protocol
+    // An Eq function to match p with rp
+    let mut eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_y));
+
+    // Sumcheck 2: (rA + rB + rC) * Z * eq(p) = e
     let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::prove_phase_two(
-      num_rounds_y,
+      num_rounds_p + num_rounds_y,
       &claim_phase2,
       &blind_claim_phase2,
       // &mut DensePolynomial::new(z),
       &mut Z_poly,
-      &mut DensePolynomial::new(evals_ABC),
+      &mut ABC_poly,
+      &mut eq_p_rp_poly,
       &gens.gens_sc,
       transcript,
       random_tape,
     );
     timer_sc_proof_phase2.stop();
 
+    // Separate ry into rp and ry
+    let (rp, ry) = ry.split_at(num_rounds_p);
+    let rp = rp.to_vec();
+    let ry = ry.to_vec();
+
+    assert_eq!(Z_poly.len(), 1);
+    assert_eq!(ABC_poly.len(), 1);
+
     let timer_polyeval = Timer::new("polyeval");
     let eval_vars_at_ry = poly_vars.evaluate(&[rp.clone(), rq.clone(), ry[1..].to_vec()].concat());
+
     let blind_eval = random_tape.random_scalar(b"blind_eval");
     let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
       &poly_vars,
@@ -383,8 +402,8 @@ impl R1CSProof {
 
     // prove the final step of sum-check #2
     let blind_eval_Z_at_ry = (Scalar::one() - ry[0]) * blind_eval;
-    let blind_expected_claim_postsc2 = claims_phase2[1] * blind_eval_Z_at_ry;
-    let claim_post_phase2 = claims_phase2[0] * claims_phase2[1];
+    let blind_expected_claim_postsc2 = claims_phase2[1] * blind_eval_Z_at_ry * claims_phase2[2];
+    let claim_post_phase2 = claims_phase2[0] * claims_phase2[1] * claims_phase2[2];
     let (proof_eq_sc_phase2, _C1, _C2) = EqualityProof::prove(
       &gens.gens_pc.gens.gens_1,
       transcript,
@@ -449,7 +468,7 @@ impl R1CSProof {
     let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), max_num_proofs.log_2(), (2 * num_vars).log_2());
 
     // derive the verifier's challenge tau
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
+    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_p + num_rounds_q + num_rounds_x);
 
     // verify the first sum-check instance
     let claim_phase1 = Scalar::zero()
@@ -457,7 +476,7 @@ impl R1CSProof {
       .compress();
     let (comm_claim_post_phase1, rx) = self.sc_proof_phase1.verify(
       &claim_phase1,
-      num_rounds_x + num_rounds_q + num_rounds_p,
+      num_rounds_p + num_rounds_q + num_rounds_x,
       3,
       &gens.gens_sc.gens_1,
       &gens.gens_sc.gens_4,
@@ -519,21 +538,30 @@ impl R1CSProof {
     // verify the joint claim with a sum-check protocol
     let (comm_claim_post_phase2, ry) = self.sc_proof_phase2.verify(
       &comm_claim_phase2,
-      num_rounds_y,
-      2,
+      num_rounds_p + num_rounds_y,
+      3,
       &gens.gens_sc.gens_1,
-      &gens.gens_sc.gens_3,
+      &gens.gens_sc.gens_4,
       transcript,
     )?;
 
     // Separate the result rx into rp, rq, and rx
-    let (rx, rq) = rx.split_at(num_rounds_x);
-    let (rq, rp) = rq.split_at(num_rounds_q);
-    let rx = rx.to_vec();
-    let rq = rq.to_vec();
+    let (rp, rx) = rx.split_at(num_rounds_p);
+    let (rq, rx) = rx.split_at(num_rounds_q);
     let rp = rp.to_vec();
+    let rq = rq.to_vec();
+    let rx = rx.to_vec();
 
-    // verify Z(rq, ry) proof against the initial commitment
+    // An Eq function to match p with rp
+    let eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_y));
+    let p_rp_poly_bound_ry = eq_p_rp_poly.evaluate(&ry);
+
+    // Separate ry into rp and ry
+    let (rp, ry) = ry.split_at(num_rounds_p);
+    let rp = rp.to_vec();
+    let ry = ry.to_vec();
+
+    // verify Z(rp, rq, ry) proof against the initial commitment
     self.proof_eval_vars_at_ry.verify(
       &gens.gens_pc,
       transcript,
@@ -554,7 +582,6 @@ impl R1CSProof {
               .map(|k| SparsePolyEntry::new((i * max_num_proofs + j) * n + k + 1, input_mat[i][j][k]))
               .collect::<Vec<SparsePolyEntry>>(),
           );
-          // paddings
         }
       }
       SparsePolynomial::new(num_instances.log_2() + max_num_proofs.log_2() + n.log_2(), input_as_sparse_poly_entries).evaluate(&[rp.clone(), rq.clone(), ry[1..].to_vec()].concat())
@@ -571,8 +598,8 @@ impl R1CSProof {
     // perform the final check in the second sum-check protocol
     let (eval_A_r, eval_B_r, eval_C_r) = evals;
     let expected_claim_post_phase2 =
-      ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry).compress();
-    // verify proof that expected_claim_post_phase1 == claim_post_phase1
+      ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry * p_rp_poly_bound_ry).compress();
+    // verify proof that expected_claim_post_phase2 == claim_post_phase2
     self.proof_eq_sc_phase2.verify(
       &gens.gens_sc.gens_1,
       transcript,
