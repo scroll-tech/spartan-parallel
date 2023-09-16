@@ -344,9 +344,8 @@ impl R1CSProof {
 
     // Construct a q * p * len(z) matrix Z and bound it to r_q
     let mut Z = vec![Scalar::zero(); max_num_proofs * num_instances * z_len];
-    for q in 0..max_num_proofs {
-      for p in 0..num_instances {
-        let z = &z_mat[p][q];
+    for p in 0..num_instances {
+      for q in 0..z_mat[p].len() {
         for entry in 0..z_len {
           Z[q * num_instances * z_len + p * z_len + entry] = z_mat[p][q][entry].clone();
         }

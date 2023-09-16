@@ -35,8 +35,8 @@ fn produce_r1cs() -> (
 ) {
   // bad test cases
   // set them to unreachable values to prevent bad tests
-  let bad_instance = 2;
-  let bad_proof = 3;
+  let bad_instance = 3;
+  let bad_proof = 1;
   // parameters of the R1CS instance
   // maximum value among the R1CS instances
   let num_cons = 4;
@@ -48,7 +48,7 @@ fn produce_r1cs() -> (
   // Number of proofs of each R1CS instance
   let max_num_proofs = 4;
   let min_num_proofs = 1;
-  let num_proofs = vec![4, 4];
+  let num_proofs = vec![4, 2];
 
   let one = Scalar::one().to_bytes();
   let two = Scalar::from(2u32).to_bytes();
