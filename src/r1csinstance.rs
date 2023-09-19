@@ -375,7 +375,7 @@ impl R1CSInstance {
   ) -> (DensePolynomial, DensePolynomial, DensePolynomial) {
     assert_eq!(num_rows, self.num_cons);
     assert!(num_cols > self.num_vars);
-    // XXX: VERY UGLY!
+    // XXX: Az, Bz, Cz should be sparse poly
     let mut Az = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
     let mut Bz = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
     let mut Cz = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
