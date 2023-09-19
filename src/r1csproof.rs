@@ -76,6 +76,11 @@ impl R1CSGens {
 impl R1CSProof {
   fn prove_phase_one(
     num_rounds: usize,
+    num_rounds_x: usize,
+    num_rounds_q_max: usize,
+    num_rounds_q_min: usize,
+    num_rounds_p: usize,
+    num_proofs: Vec<usize>,
     evals_tau: &mut DensePolynomial,
     evals_Az: &mut DensePolynomial,
     evals_Bz: &mut DensePolynomial,
@@ -91,10 +96,15 @@ impl R1CSProof {
      -> Scalar { poly_A_comp * (poly_B_comp * poly_C_comp - poly_D_comp) };
 
     let (sc_proof_phase_one, r, claims, blind_claim_postsc) =
-      ZKSumcheckInstanceProof::prove_cubic_with_additive_term(
+      ZKSumcheckInstanceProof::prove_cubic_with_additive_term_disjoint_rounds(
         &Scalar::zero(), // claim is zero
         &Scalar::zero(), // blind for claim is also zero
         num_rounds,
+        num_rounds_x,
+        num_rounds_q_max,
+        num_rounds_q_min,
+        num_rounds_p,
+        num_proofs,
         evals_tau,
         evals_Az,
         evals_Bz,
@@ -145,6 +155,8 @@ impl R1CSProof {
 
   pub fn prove(
     max_num_proofs: usize,
+    min_num_proofs: usize,
+    num_proofs: Vec<usize>,
     inst: &R1CSInstance,
     vars_mat: Vec<Vec<Vec<Scalar>>>,
     input_mat: &Vec<Vec<Vec<Scalar>>>,
@@ -160,6 +172,7 @@ impl R1CSProof {
     assert!(input_mat.len() == num_instances);
 
     assert_eq!(max_num_proofs.next_power_of_two(), max_num_proofs);
+    assert_eq!(min_num_proofs.next_power_of_two(), min_num_proofs);
     for i in 0..num_instances {
       assert!(input_mat[i].len() <= max_num_proofs);
       assert!(input_mat[i].len() == input_mat[i].len().next_power_of_two());
@@ -232,9 +245,9 @@ impl R1CSProof {
     let z_len = z_mat[0][0].len();
 
     // derive the verifier's challenge \tau
-    let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
-      (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_p + num_rounds_q + num_rounds_x);
+    let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y, num_rounds_q_min) = 
+      (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2(), min_num_proofs.log_2());
+    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
 
     // compute the initial evaluation table for R(\tau, x)
     let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
@@ -242,9 +255,14 @@ impl R1CSProof {
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
       inst.multiply_vec_bunched(num_instances, max_num_proofs, num_cons, z_len, &z_mat);
 
-    // Sumcheck 1: (Az * Bz - Cz) * eq(p, q, x) = 0
+    // Sumcheck 1: (Az * Bz - Cz) * eq(x, q, p) = 0
     let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::prove_phase_one(
-      num_rounds_p + num_rounds_q + num_rounds_x,
+      num_rounds_x + num_rounds_q + num_rounds_p,
+      num_rounds_x,
+      num_rounds_q,
+      num_rounds_q_min,
+      num_rounds_p,
+      num_proofs,
       &mut poly_tau,
       &mut poly_Az,
       &mut poly_Bz,
@@ -313,11 +331,11 @@ impl R1CSProof {
     );
 
     // Separate the result rx into rp, rq, and rx
-    let (rp, rx) = rx.split_at(num_rounds_p);
-    let (rq, rx) = rx.split_at(num_rounds_q);
-    let rp = rp.to_vec();
-    let rq = rq.to_vec();
+    let (rx, rq) = rx.split_at(num_rounds_x);
+    let (rq, rp) = rq.split_at(num_rounds_q);
     let rx = rx.to_vec();
+    let rq = rq.to_vec();
+    let rp = rp.to_vec();
 
     let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
     // combine the three claims into a single claim
@@ -467,7 +485,7 @@ impl R1CSProof {
     let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), max_num_proofs.log_2(), (2 * num_vars).log_2());
 
     // derive the verifier's challenge tau
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_p + num_rounds_q + num_rounds_x);
+    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
 
     // verify the first sum-check instance
     let claim_phase1 = Scalar::zero()
@@ -475,7 +493,7 @@ impl R1CSProof {
       .compress();
     let (comm_claim_post_phase1, rx) = self.sc_proof_phase1.verify(
       &claim_phase1,
-      num_rounds_p + num_rounds_q + num_rounds_x,
+      num_rounds_x + num_rounds_q + num_rounds_p,
       3,
       &gens.gens_sc.gens_1,
       &gens.gens_sc.gens_4,
@@ -545,11 +563,11 @@ impl R1CSProof {
     )?;
 
     // Separate the result rx into rp, rq, and rx
-    let (rp, rx) = rx.split_at(num_rounds_p);
-    let (rq, rx) = rx.split_at(num_rounds_q);
-    let rp = rp.to_vec();
-    let rq = rq.to_vec();
+    let (rx, rq) = rx.split_at(num_rounds_x);
+    let (rq, rp) = rq.split_at(num_rounds_q);
     let rx = rx.to_vec();
+    let rq = rq.to_vec();
+    let rp = rp.to_vec();
 
     // An Eq function to match p with rp
     let eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_y));

@@ -393,9 +393,9 @@ impl R1CSInstance {
 
         // Select the correct instance
         for x in 0..num_rows {
-          Az[p * max_num_proofs * num_rows + q * num_rows + x] = tmp_Az[x];
-          Bz[p * max_num_proofs * num_rows + q * num_rows + x] = tmp_Bz[x];
-          Cz[p * max_num_proofs * num_rows + q * num_rows + x] = tmp_Cz[x];
+          Az[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Az[x];
+          Bz[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Bz[x];
+          Cz[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Cz[x];
         }
       }
     }
