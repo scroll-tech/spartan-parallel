@@ -244,6 +244,32 @@ impl DensePolynomial {
     self.len = n;
   }
 
+  pub fn bound_poly_var_top_disjoint_rounds(&mut self, 
+    r: &Scalar,
+    proof_space: usize, 
+    instance_space: usize,
+    cons_len: usize, 
+    proof_len: usize, 
+    instance_len: usize,
+    num_proofs: &Vec<usize>
+  ) {
+    let n = self.len() / 2;
+    assert_eq!(n, cons_len * proof_len * instance_len);
+
+    for p in 0..instance_len {
+      // Certain p, q combinations within the boolean hypercube always evaluate to 0
+      let max_q = if proof_len != proof_space { proof_len } else { num_proofs[p] };
+      for q in 0..max_q {
+        for x in 0..cons_len {
+          let i = x * proof_space * instance_space + q * instance_space + p;
+          self.Z[i] = self.Z[i] + r * (self.Z[i + n] - self.Z[i]);
+        }
+      }
+    }
+    self.num_vars -= 1;
+    self.len = n;
+  }
+
   pub fn bound_poly_var_bot(&mut self, r: &Scalar) {
     let n = self.len() / 2;
     for i in 0..n {

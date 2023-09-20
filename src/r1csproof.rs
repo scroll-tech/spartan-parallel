@@ -18,7 +18,7 @@ use core::iter;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
-// TODO: Need to verify correctness of eq_p_rp!!!
+// TODO: Need to reduce the complexity of TAU!
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct R1CSProof {

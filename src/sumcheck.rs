@@ -1022,14 +1022,11 @@ impl ZKSumcheckInstanceProof {
         let mut eval_point_2 = Scalar::zero();
         let mut eval_point_3 = Scalar::zero();
 
-        for x in 0..cons_len {
-          for q in 0..proof_len {
-            for p in 0..instance_len {
-              // Certain p, q combinations within the boolean hypercube always evaluate to 0
-              if proof_len == proof_space && q >= num_proofs[p] {
-                continue;
-              }
-
+        for p in 0..instance_len {
+          // Certain p, q combinations within the boolean hypercube always evaluate to 0
+          let max_q = if proof_len != proof_space { proof_len } else { num_proofs[p] };
+          for q in 0..max_q {
+            for x in 0..cons_len {
               let i = x * proof_space * instance_space + q * instance_space + p;
               // eval 0: bound_func is A(low)
               eval_point_0 += comb_func(&poly_A[i], &poly_B[i], &poly_C[i], &poly_D[i]); // Az[0, x, x, x, ...]
@@ -1079,11 +1076,12 @@ impl ZKSumcheckInstanceProof {
       //derive the verifier's challenge for the next round
       let r_j = transcript.challenge_scalar(b"challenge_nextround");
 
+      // TODO: Need to "skip the line" here as well
       // bound all tables to the verifier's challenege
       poly_A.bound_poly_var_top(&r_j);
-      poly_B.bound_poly_var_top(&r_j);
-      poly_C.bound_poly_var_top(&r_j);
-      poly_D.bound_poly_var_top(&r_j);
+      poly_B.bound_poly_var_top_disjoint_rounds(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
+      poly_C.bound_poly_var_top_disjoint_rounds(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
+      poly_D.bound_poly_var_top_disjoint_rounds(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
 
       // produce a proof of sum-check and of evaluation
       let (proof, claim_next_round, comm_claim_next_round) = {
