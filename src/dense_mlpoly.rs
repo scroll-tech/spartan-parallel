@@ -106,6 +106,33 @@ impl EqPolynomial {
     evals
   }
 
+  // Separate the EqPoly into x + q + p variables, evaluate to 0 if (p, q) is not a valid pair
+  pub fn evals_disjoint_rounds(&self,
+    num_rounds_x: usize,
+    num_rounds_q: usize,
+    num_rounds_p: usize,
+    num_proofs: &Vec<usize>
+  ) -> Vec<Scalar> {
+    let ell = self.r.len();
+    assert_eq!(ell, num_rounds_x + num_rounds_q + num_rounds_p);
+
+    let cons_space = num_rounds_x.pow2();
+    let proof_space = num_rounds_q.pow2();
+    let instance_space: usize = num_rounds_p.pow2();
+
+    let mut preliminary_evals = self.evals();
+    // Set specific values to 0
+    for p in 0..instance_space {
+      for q in num_proofs[p]..proof_space {
+        for x in 0..cons_space {
+          let i = x * proof_space * instance_space + q * instance_space + p;
+          preliminary_evals[i] = Scalar::zero();
+        }
+      }
+    }
+    return preliminary_evals;
+  }
+
   pub fn compute_factored_lens(ell: usize) -> (usize, usize) {
     (ell / 2, ell - ell / 2)
   }

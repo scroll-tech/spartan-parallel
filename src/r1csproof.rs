@@ -250,6 +250,7 @@ impl R1CSProof {
     let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
 
     // compute the initial evaluation table for R(\tau, x)
+    // let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals_disjoint_rounds(num_rounds_x, num_rounds_q, num_rounds_p, &num_proofs));
     let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
     // XXX: Should these be SparsePoly?
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
@@ -518,7 +519,7 @@ impl R1CSProof {
     comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
     comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
 
-    // taus_bound_rx is really taus_bound_rq_rp_rx
+    // taus_bound_rx is really taus_bound_rx_rq_rp
     let taus_bound_rx: Scalar = (0..rx.len())
       .map(|i| rx[i] * tau[i] + (Scalar::one() - rx[i]) * (Scalar::one() - tau[i]))
       .product();
@@ -562,21 +563,22 @@ impl R1CSProof {
       transcript,
     )?;
 
-    // Separate the result rx into rp, rq, and rx
+    // Separate the result rx into rp_round1, rq, and rx
     let (rx, rq) = rx.split_at(num_rounds_x);
-    let (rq, rp) = rq.split_at(num_rounds_q);
+    let (rq, rp_round1) = rq.split_at(num_rounds_q);
     let rx = rx.to_vec();
     let rq = rq.to_vec();
-    let rp = rp.to_vec();
-
-    // An Eq function to match p with rp
-    let eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_y));
-    let p_rp_poly_bound_ry = eq_p_rp_poly.evaluate(&ry);
+    let rp_round1 = rp_round1.to_vec();
 
     // Separate ry into rp and ry
     let (rp, ry) = ry.split_at(num_rounds_p);
     let rp = rp.to_vec();
     let ry = ry.to_vec();
+
+    // An Eq function to match p with rp
+    let p_rp_poly_bound_ry: Scalar = (0..rp.len())
+      .map(|i| rp[i] * rp_round1[i] + (Scalar::one() - rp[i]) * (Scalar::one() - rp_round1[i]))
+      .product();
 
     // verify Z(rp, rq, ry) proof against the initial commitment
     self.proof_eval_vars_at_ry.verify(
