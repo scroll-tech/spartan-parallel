@@ -1079,9 +1079,9 @@ impl ZKSumcheckInstanceProof {
       // TODO: Need to "skip the line" here as well
       // bound all tables to the verifier's challenege
       poly_A.bound_poly_var_top(&r_j);
-      poly_B.bound_poly_var_top_disjoint_rounds(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
-      poly_C.bound_poly_var_top_disjoint_rounds(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
-      poly_D.bound_poly_var_top_disjoint_rounds(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
+      poly_B.bound_poly_var_top_disjoint_rounds_1(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
+      poly_C.bound_poly_var_top_disjoint_rounds_1(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
+      poly_D.bound_poly_var_top_disjoint_rounds_1(&r_j, proof_space, instance_space, cons_len, proof_len, instance_len, &num_proofs);
 
       // produce a proof of sum-check and of evaluation
       let (proof, claim_next_round, comm_claim_next_round) = {

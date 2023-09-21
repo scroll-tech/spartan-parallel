@@ -1,0 +1,95 @@
+\documentclass{article}
+\usepackage[letterpaper, total={6in, 8in}]{geometry}
+\usepackage{xcolor}
+\usepackage{amsfonts}
+
+\newcommand{\red}[1] {\color{red}#1\color{black}}
+\newcommand{\code}{\texttt}
+\newcommand{\Qsum}{Q_{\mathtt{sum}}}
+\newcommand{\Qmax}{Q_{\mathtt{max}}}
+\newcommand{\qmax}{q_{\mathtt{max}}}
+\renewcommand{\P}{\mathcal{P}}
+\newcommand{\V}{\mathcal{V}}
+\newcommand{\F}{\mathbb{F}}
+\newcommand{\eq}{\widetilde{\mbox{eq}}}
+
+\title{Spartan Parallel}
+\author{Kunming Jiang}
+\date{Sep 21, 2023}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}\label{intro}
+
+The problem is consisted of $P$ R1CS instances of the form $\{A_i, B_i, C_i\}$, where each $A_i, B_i, C_i$ are $X \times Y$ matrices, $X$ represents the number of constraints and $Y$ represents the number of (inputs + witnesses). For each instance $\{A_i, B_i, C_i\}$, there are $Q_i$ (input, witnesses) vectors of length $Y$ that claim to be a correct execution of the instance. We name these (input, witnesses) vectors $z_{i, 0},\dots z_{i, Q_i}$. The goal is to prove the claim for all such $z_{i, j}$ using SNARK.
+
+For simplicity, assume all $P, Q_i, X, Y$ are powers of two. Define $\Qmax \leftarrow \max_i Q_i$ and $\Qsum \leftarrow \sum_i Q_i$. Let $p = \log P$, $q_i = \log Q_i$, $\qmax = \log \Qmax$, $x = \log X$, and $y = \log Y$. We want the total runtime of the Prover ($\P$) to be $O(\Qsum \cdot X\cdot\log(\Qsum \cdot X))$, and that of the Verifier ($\V$) to be $O(\log(P \cdot \Qmax \cdot Y))$.
+
+\section{Starting from Spartan}\label{spartan}
+We begin by modifying Spartan to support data-parallelism. In section \ref{identify} we perform a complexity analysis and in \ref{reduce} we resolve the complexity blow-up.
+
+The modified protocol is shown below:
+\begin{enumerate}
+    \item $\P$ commits witnesses and sends the commit $\mathcal{C}$ to $\V$.
+        \label{step:witness-commit}
+    \item $\V$ samples $\tau\in_R\F^{p + \qmax + x}$ and sends $\tau$ to $\P$.
+        \label{step:sample-tau}
+    \item $\P$ computes $Az, Bz, Cz, \eq_\tau: \F^{p + \qmax + x} \to \F$, defined as:
+        $$Az(t_p, t_q, t_x) = A(t_p, t_x) \cdot z(t_p, t_q, t_x)$$
+        $$\eq_\tau(t) = 1\mbox{ if }t = \tau,\ 0\mbox{ otherwise }$$
+        \label{step:mat-product}
+    \item $\V$ and $\P$ perform sum-check \#1 to prove
+        $$\displaystyle\sum_{t\in \F^{p + \qmax + x}}(Az(t)\cdot Bz(t) - Cz(t))\cdot \eq_\tau(t) = 0$$
+        \label{step:sumcheck-1}
+    \item By the end of the sum-check, $\V$ samples $r = (r_p, r_q, r_x)\in_R\F^{p + \qmax + x}$ and $\P$ obtains $v_A = Az(r)$, $v_B = Bz(r)$, $v_C = Cz(r)$. $\P$ sends $v_A, v_B, v_C$ to $\V$.
+    \item $\V$ checks $(v_A\cdot v_B - v_C)\cdot \eq_\tau(r) = e_1$, where $e_1$ is the final claim of the sum-check.
+        \label{step:sumcheck-1-verify}
+    \item $\V$ samples $r_A, r_B, r_C\in_R\F$ and sends to $\P$. $\P$ computes $T = r_A\cdot v_A + r_B\cdot v_B + r_c\cdot v_C$.
+    \item $\P$ computes 
+        $$ABC: \F^{p + y} \to \F = r_A \cdot A(\cdot) + r_B \cdot B(\cdot) + r_C \cdot C(\cdot)$$
+        $$Z_{r_q}: \F^{p + y}\to\F \mbox{ where } Z_{r_q}(t_p, t_x) = z(t_p, r_q, t_x)$$
+        $$\eq_{r_p}(t_p) = 1 \mbox{ if } t_p = r_p\mbox{, 0 otherwise }$$
+        \label{step:compute-z-poly}
+    \item $\V$ and $\P$ perform sum-check \#2 to prove
+        $$\displaystyle\sum_{t\in \F^{p + y}}ABC(t)\cdot Z_{r_q}(t)\cdot \eq_{r_p}(t_p) = T$$
+        By the end of the sum-check, $\V$ samples $r^* = (r_p^*, r_x)\in_R\F^{p + y}$ and obtains the claim $e_2$.
+        \label{step:sumcheck-2}
+    \item $\P$ opens the commitment $\mathcal{C}$ and evaluates the witness polynomial on $r_p^*, r_q, r_y[1..]$ as $w$, sends $w$ to $\V$.
+        \label{step:evaluate-witness}
+    \item $\V$ evaluates the input polynomial on $r_p^*, r_q, r_y[1..]$ as $v$, computes $v_Z = (1 - r_y[0])\cdot w + r_y[0]\cdot v$. $\V$ also evaluates $v_{r_p} = \eq_{r_p}(r_p^*)$
+        \label{step:evaluate-input}
+    \item $\V$ checks $e_2 = (r_A\cdot v_A + r_B\cdot v_B + r_c\cdot v_C)\cdot v_Z \cdot v_{r_p}$.
+\end{enumerate}
+
+\section{Identifying Runtime Overhead}\label{identify}
+\subsection{Verifier Cost}
+Since we only require the Verifier cost to be $O(\log(P \cdot \Qmax \cdot Y))$, there isn't any improvement we need to do. Here's the cost breakdown:
+\begin{itemize}
+    \item In step \ref{step:sample-tau}: $O(\log(P \cdot \Qmax \cdot Y))$ for sampling $\tau$.
+    \item In step \ref{step:sumcheck-1}: $O(\log(P \cdot \Qmax \cdot Y))$ due to the sum-check having $p + \qmax + x$ rounds. Assume $X$ and $Y$ are of similar size.
+    \item In step \ref{step:sumcheck-1-verify}: $O(\log(P \cdot \Qmax \cdot Y))$ for evaluating $\eq_\tau(r)$.
+    \item In step \ref{step:sumcheck-2}: $O(\log(P \cdot Y))$ due to the sum-check having $p + y$ rounds.
+    \item In step \ref{step:evaluate-input}: $O(\log(P \cdot \Qmax \cdot Y))$ for evaluating the input, and $O(\log(P))$ for evaluating $\eq_{r_p}(r_p^*)$.
+\end{itemize}
+
+\subsection{Prover Cost}
+The prover's cost is currently $O(P\cdot\Qmax\cdot Y\cdot\log(P \cdot \Qmax \cdot Y))$, and we need to reduce it to $O(\Qsum \cdot X\cdot\log(\Qsum \cdot X))$. Here's all the steps that exceeds that complexity:
+\begin{itemize}
+    \item Step \ref{step:witness-commit}: witness commit
+    \item Step \ref{step:mat-product}: producing $Az$, $Bz$, $Cz$, and $\eq_\tau$
+    \item Step \ref{step:sumcheck-1}: sum-check 1
+    \item Step \ref{step:compute-z-poly}: compute $Z_{r_q}$
+\end{itemize}
+We now discuss how to improve Prover's cost in these steps.
+
+\section{Reducing Complexity}\label{reduce}
+We can first deal with the easier ones:
+\begin{itemize}
+    \item We assume that filling an array / matrix with 0s does not take time. Thus
+\end{itemize}
+
+Idea: express $Z$ as a polynomial over $p$ times a polynomial over $q$ voer a polynomial over $x$
+
+\end{document}

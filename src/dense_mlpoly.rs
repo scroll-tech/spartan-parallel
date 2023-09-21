@@ -271,7 +271,8 @@ impl DensePolynomial {
     self.len = n;
   }
 
-  pub fn bound_poly_var_top_disjoint_rounds(&mut self, 
+  // Bound_var_top but the polynomial is in (x, q, p) form and certain (p, q) pair is invalid
+  pub fn bound_poly_var_top_disjoint_rounds_1(&mut self, 
     r: &Scalar,
     proof_space: usize, 
     instance_space: usize,
@@ -296,6 +297,33 @@ impl DensePolynomial {
     self.num_vars -= 1;
     self.len = n;
   }
+
+  // Bound_var_top but the polynomial is in (q, p, x) form and certain (p, q) pair is invalid
+  // And we are only binding the "q" section
+  pub fn bound_poly_var_top_disjoint_rounds_2(&mut self, 
+    r: &Scalar,
+    cons_space: usize,
+    proof_space: usize, 
+    instance_space: usize,
+    proof_len: usize, 
+    num_proofs: &Vec<usize>
+  ) {
+    let n = self.len() / 2;
+    assert_eq!(n, cons_space * proof_len * instance_space);
+
+    for p in 0..instance_space {
+      for q in 0..proof_len {
+        // 
+        for x in 0..cons_space {
+          let i = x * proof_space * instance_space + q * instance_space + p;
+          self.Z[i] = self.Z[i] + r * (self.Z[i + n] - self.Z[i]);
+        }
+      }
+    }
+    self.num_vars -= 1;
+    self.len = n;
+  }
+
 
   pub fn bound_poly_var_bot(&mut self, r: &Scalar) {
     let n = self.len() / 2;

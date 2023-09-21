@@ -15,10 +15,12 @@ use super::sumcheck::ZKSumcheckInstanceProof;
 use super::timer::Timer;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use core::iter;
+use std::env::var;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
 // TODO: Need to reduce the complexity of TAU!
+// TODO: Need to reduce the complexity of Z_poly!
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct R1CSProof {
@@ -188,16 +190,12 @@ impl R1CSProof {
       }
     }
 
-    let mut padded_var_mat = Vec::new();
-    for vars_list in &vars_mat {
-      for vars in vars_list {
-        padded_var_mat.extend(vars.clone());
-        if vars.len() != inst.get_num_vars() {
-          padded_var_mat.extend(&vec![Scalar::zero(); inst.get_num_vars() - vars.len()]);
+    let mut padded_var_mat = vec![Scalar::zero(); vars_mat.len() * max_num_proofs * inst.get_num_vars()];
+    for p in 0..vars_mat.len() {
+      for q in 0..vars_mat[p].len() {
+        for x in 0..vars_mat[p][q].len() {
+          padded_var_mat[p * max_num_proofs * inst.get_num_vars() + q * inst.get_num_vars() + x] = vars_mat[p][q][x].clone();
         }
-      }
-      if vars_list.len() != max_num_proofs {
-        padded_var_mat.extend(&vec![Scalar::zero(); (max_num_proofs - vars_list.len()) * inst.get_num_vars()]);
       }
     }
 
@@ -210,7 +208,7 @@ impl R1CSProof {
     let timer_commit = Timer::new("polycommit");
     let (poly_vars, comm_vars, blinds_vars) = {
       // create a multilinear polynomial using the supplied assignment for variables
-      let poly_vars = DensePolynomial::new(padded_var_mat.clone());
+      let poly_vars = DensePolynomial::new(padded_var_mat);
 
       // produce a commitment to the satisfying assignment
       let (comm_vars, blinds_vars) = poly_vars.commit(&gens.gens_pc, Some(random_tape));
