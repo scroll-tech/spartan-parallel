@@ -12,6 +12,7 @@
 \newcommand{\V}{\mathcal{V}}
 \newcommand{\F}{\mathbb{F}}
 \newcommand{\eq}{\widetilde{\mbox{eq}}}
+\newcommand{\valid}{\tilde{\mbox{valid}}}
 
 \title{Spartan Parallel}
 \author{Kunming Jiang}
@@ -25,10 +26,10 @@
 
 The problem is consisted of $P$ R1CS instances of the form $\{A_i, B_i, C_i\}$, where each $A_i, B_i, C_i$ are $X \times Y$ matrices, $X$ represents the number of constraints and $Y$ represents the number of (inputs + witnesses). For each instance $\{A_i, B_i, C_i\}$, there are $Q_i$ (input, witnesses) vectors of length $Y$ that claim to be a correct execution of the instance. We name these (input, witnesses) vectors $z_{i, 0},\dots z_{i, Q_i}$. The goal is to prove the claim for all such $z_{i, j}$ using SNARK.
 
-For simplicity, assume all $P, Q_i, X, Y$ are powers of two. Define $\Qmax \leftarrow \max_i Q_i$ and $\Qsum \leftarrow \sum_i Q_i$. Let $p = \log P$, $q_i = \log Q_i$, $\qmax = \log \Qmax$, $x = \log X$, and $y = \log Y$. We want the total runtime of the Prover ($\P$) to be $O(\Qsum \cdot X\cdot\log(\Qsum \cdot X))$, and that of the Verifier ($\V$) to be $O(\log(P \cdot \Qmax \cdot Y))$.
+For simplicity, assume all $P, Q_i, X, Y$ are powers of two. Define $\Qmax \leftarrow \max_i Q_i$ and $\Qsum \leftarrow \sum_i Q_i$. Let $p = \log P$, $q_i = \log Q_i$, $\qmax = \log \Qmax$, $x = \log X$, and $y = \log Y$. We want the total runtime of the Prover ($\P$) to be $O(\Qsum \cdot X)$, and that of the Verifier ($\V$) to be $O(\log(P \cdot \Qmax \cdot Y))$.
 
 \section{Starting from Spartan}\label{spartan}
-We begin by modifying Spartan to support data-parallelism. In section \ref{identify} we perform a complexity analysis and in \ref{reduce} we resolve the complexity blow-up.
+We begin by modifying Spartan to support data-parallelism. In section \ref{identify} we perform a complexity analysis and in \ref{reduce-time} we resolve the complexity blow-up.
 
 The modified protocol is shown below:
 \begin{enumerate}
@@ -65,7 +66,7 @@ The modified protocol is shown below:
 
 \section{Identifying Runtime Overhead}\label{identify}
 \subsection{Verifier Cost}
-Since we only require the Verifier cost to be $O(\log(P \cdot \Qmax \cdot Y))$, there isn't any improvement we need to do. Here's the cost breakdown:
+Since we only require the Verifier cost to be $O(\log(P \cdot \Qmax \cdot Y))$. This has already been achieved by the above protocol, so there isn't any improvement we need to do. Here's the cost breakdown:
 \begin{itemize}
     \item In step \ref{step:sample-tau}: $O(\log(P \cdot \Qmax \cdot Y))$ for sampling $\tau$.
     \item In step \ref{step:sumcheck-1}: $O(\log(P \cdot \Qmax \cdot Y))$ due to the sum-check having $p + \qmax + x$ rounds. Assume $X$ and $Y$ are of similar size.
@@ -75,7 +76,7 @@ Since we only require the Verifier cost to be $O(\log(P \cdot \Qmax \cdot Y))$, 
 \end{itemize}
 
 \subsection{Prover Cost}
-The prover's cost is currently $O(P\cdot\Qmax\cdot Y\cdot\log(P \cdot \Qmax \cdot Y))$, and we need to reduce it to $O(\Qsum \cdot X\cdot\log(\Qsum \cdot X))$. Here's all the steps that exceeds that complexity:
+The prover's cost is currently $O(P\cdot\Qmax\cdot Y\cdot)$, and we need to reduce it to $O(\Qsum \cdot X)$. Here's all the steps that exceeds that complexity:
 \begin{itemize}
     \item Step \ref{step:witness-commit}: witness commit
     \item Step \ref{step:mat-product}: producing $Az$, $Bz$, $Cz$, and $\eq_\tau$
@@ -84,12 +85,26 @@ The prover's cost is currently $O(P\cdot\Qmax\cdot Y\cdot\log(P \cdot \Qmax \cdo
 \end{itemize}
 We now discuss how to improve Prover's cost in these steps.
 
-\section{Reducing Complexity}\label{reduce}
-We can first deal with the easier ones:
+\section{Reducing Time Complexity}\label{reduce-time}
+Here are the general ideas on how to improve time complexity:
 \begin{itemize}
-    \item We assume that filling an array / matrix with 0s does not take time. Thus
+    \item We assume that filling an array / matrix with 0s does not take time. This assumption helps us reduce the time complexity of the following steps:
+    \begin{itemize}
+        \item Step \ref{step:witness-commit}: to perform witness commit, we need to express witnesses as a $\F^{p + \qmax + x}\to\F$ dense polynomial. By the assumption, we can initialize this matrix to 0, and then fill-in the non-zero elements. This reduces the polynomial construction cost to $O(\Qsum \cdot X)$, which satisfies the time complexity.
+        \item Step \ref{step:mat-product}: Using the similar idea, we can also initialize $Az$, $Bz$, $Cz$ as zero-polynomials and then fill in their non-zero entries. This reduces their cost to $O(\Qsum \cdot X)$.
+    \end{itemize}
+    \item Next, sum-check protocols can be easily modified to "skip" the zero parts, if these zero parts are clustered together in the polynomial. As a result, assume that the polynomials has $O(\Qsum \cdot X)$ non-zero entries and the zeros are clustered (in our case, cluster means that for certain $p$ and $q$, the polynomial always evaluates to 0 regardless of the choices of $y$), we can reduce the time complexity of sumchecks. We already show that this is the case for $Az$, $Bz$, and $Cz$, so what remaining is to reason about $\eq$.
+    \item While at the first glance it seems like one can treat $\eq$ just like every other polynomial: initialize with 0 and fill in non-zero parts. We call this modified version $\eq^*$. However, such modification would result in $\V$ unable to compute the binding in logarithmic time. Instead, we do the following:
+    \begin{itemize}
+        \item Let $\valid:\F^{p + \qmax}\to \{0, 1\}$ be multilinear extension of the indicator function that evaluates to 1 if $(p, q)$ is a valid instance-(input, witness) index pair, 0 otherwise.
+        \item The verifier, however, still cannot evaluate $\valid$ in logarithmic time. This is because since we make no assumption on $Q_i$'s and how they relate to $P$, expressing $\valid$ would take at least $O(P)$ time.
+        \item Thus, $\P$ needs to commit to $\valid$ at the beginning of the protocol. $\P$ can then use $\eq^*$ during sumcheck, and $\V$ use $\eq \cdot \valid$ to bind $\eq^*$ to $r_p$ and $r_q$.
+    \end{itemize}
+    \item Work is still undergoing on how to compute $Z_{r_q}$ faster.
 \end{itemize}
 
-Idea: express $Z$ as a polynomial over $p$ times a polynomial over $q$ voer a polynomial over $x$
+\section{Reducing Space Complexity}\label{reduce-space}
+
+Idea: express $Z$ as a polynomial over $p$ times a polynomial over $q$ over a polynomial over $x$
 
 \end{document}
