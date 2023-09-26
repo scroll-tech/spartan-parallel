@@ -311,10 +311,7 @@ impl DensePolynomial {
     let mut n = self.len();
     assert_eq!(n, max_proof_space * instance_space * cons_space);
 
-    let mut round = 0;
     for r in r_q {
-      println!("round: {}, max_proof_space: {}", round, max_proof_space);
-      println!("num_proofs: {:?}", num_proofs);
 
       n /= 2;
       max_proof_space /= 2;
@@ -324,17 +321,15 @@ impl DensePolynomial {
           // q = 0
           for x in 0..cons_space {
             let i = p * cons_space + x;
-            self.Z[i] = self.Z[i] + r * (self.Z[i + n] - self.Z[i]);
+            self.Z[i] = (Scalar::one() - r) * self.Z[i];
           }
         } else {
           num_proofs[p] /= 2;
-          if num_proofs[p] != 0 {
-            let step = max_proof_space / num_proofs[p];
-            for q in (0..max_proof_space).step_by(step) {
-              for x in 0..cons_space {
-                let i = q * instance_space * cons_space + p * cons_space + x;
-                self.Z[i] = self.Z[i] + r * (self.Z[i + n] - self.Z[i]);
-              }
+          let step = max_proof_space / num_proofs[p];
+          for q in (0..max_proof_space).step_by(step) {
+            for x in 0..cons_space {
+              let i = q * instance_space * cons_space + p * cons_space + x;
+              self.Z[i] = self.Z[i] + r * (self.Z[i + n] - self.Z[i]);
             }
           }
         }
@@ -342,7 +337,6 @@ impl DensePolynomial {
       self.num_vars -= 1;
       self.len = n;
 
-      round += 1;
     }
   }
 

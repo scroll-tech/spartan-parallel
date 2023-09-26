@@ -3,6 +3,7 @@ use super::commitments::{Commitments, MultiCommitGens};
 use super::dense_mlpoly::{
   DensePolynomial, EqPolynomial, PolyCommitment, PolyCommitmentGens, PolyEvalProof,
 };
+use super::custom_dense_mlpoly::DensePolynomial_PQX;
 use super::errors::ProofVerifyError;
 use super::group::{CompressedGroup, GroupElement, VartimeMultiscalarMul};
 use super::math::Math;
@@ -14,7 +15,7 @@ use super::sparse_mlpoly::{SparsePolyEntry, SparsePolynomial};
 use super::sumcheck::ZKSumcheckInstanceProof;
 use super::timer::Timer;
 use super::transcript::{AppendToTranscript, ProofTranscript};
-use core::iter;
+use core::{iter, num};
 use std::env::var;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
@@ -80,7 +81,6 @@ impl R1CSProof {
     num_rounds: usize,
     num_rounds_x: usize,
     num_rounds_q_max: usize,
-    num_rounds_q_min: usize,
     num_rounds_p: usize,
     num_proofs: &Vec<usize>,
     evals_tau: &mut DensePolynomial,
@@ -104,7 +104,6 @@ impl R1CSProof {
         num_rounds,
         num_rounds_x,
         num_rounds_q_max,
-        num_rounds_q_min,
         num_rounds_p,
         num_proofs,
         evals_tau,
@@ -157,8 +156,7 @@ impl R1CSProof {
 
   pub fn prove(
     max_num_proofs: usize,
-    min_num_proofs: usize,
-    num_proofs: Vec<usize>,
+    num_proofs: &Vec<usize>,
     inst: &R1CSInstance,
     vars_mat: Vec<Vec<Vec<Scalar>>>,
     input_mat: &Vec<Vec<Vec<Scalar>>>,
@@ -174,7 +172,6 @@ impl R1CSProof {
     assert!(input_mat.len() == num_instances);
 
     assert_eq!(max_num_proofs.next_power_of_two(), max_num_proofs);
-    assert_eq!(min_num_proofs.next_power_of_two(), min_num_proofs);
     for i in 0..num_instances {
       assert!(input_mat[i].len() <= max_num_proofs);
       assert!(input_mat[i].len() == input_mat[i].len().next_power_of_two());
@@ -243,14 +240,13 @@ impl R1CSProof {
     let z_len = z_mat[0][0].len();
 
     // derive the verifier's challenge \tau
-    let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y, num_rounds_q_min) = 
-      (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2(), min_num_proofs.log_2());
+    let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
+      (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
     let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
 
     // compute the initial evaluation table for R(\tau, x)
     // let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals_disjoint_rounds(num_rounds_x, num_rounds_q, num_rounds_p, &num_proofs));
     let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
-    // XXX: Should these be SparsePoly?
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
       inst.multiply_vec_bunched(num_instances, max_num_proofs, num_cons, z_len, &z_mat);
 
@@ -259,7 +255,6 @@ impl R1CSProof {
       num_rounds_x + num_rounds_q + num_rounds_p,
       num_rounds_x,
       num_rounds_q,
-      num_rounds_q_min,
       num_rounds_p,
       &num_proofs,
       &mut poly_tau,
@@ -359,20 +354,10 @@ impl R1CSProof {
     };
     let mut ABC_poly = DensePolynomial::new(evals_ABC);
 
-    // Construct a q * p * len(z) matrix Z and bound it to r_q
-    let mut Z = vec![Scalar::zero(); max_num_proofs * num_instances * z_len];
-    for p in 0..num_instances {
-      let q_ceil = max_num_proofs;
-      for q in 0..z_mat[p].len() {
-        let q_rev = (0..q_ceil.log_2()).rev().map(|i| q / (i.pow2()) % 2 * (q_ceil / i.pow2() / 2)).fold(0, |a, b| a + b);
-        for entry in 0..z_len {
-          Z[q_rev * num_instances * z_len + p * z_len + entry] = z_mat[p][q][entry].clone();
-        }
-      }
-    }
-
-    let mut Z_poly = DensePolynomial::new(Z);
-    Z_poly.bound_poly_var_front_rq(&rq.clone().into_iter().rev().collect(), max_num_proofs, num_instances, z_len, num_proofs.clone());
+    // Construct a p * q * len(z) matrix Z and bound it to r_q
+    let mut Z = DensePolynomial_PQX::new(&z_mat, &num_proofs, max_num_proofs);
+    Z.bound_poly_rq(&rq.clone().into_iter().rev().collect());
+    let mut Z_poly = Z.to_dense_poly();
 
     // An Eq function to match p with rp
     let mut eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_y));
@@ -382,7 +367,6 @@ impl R1CSProof {
       num_rounds_p + num_rounds_y,
       &claim_phase2,
       &blind_claim_phase2,
-      // &mut DensePolynomial::new(z),
       &mut Z_poly,
       &mut ABC_poly,
       &mut eq_p_rp_poly,

@@ -16,6 +16,7 @@ extern crate rayon;
 
 mod commitments;
 mod dense_mlpoly;
+mod custom_dense_mlpoly;
 mod errors;
 mod group;
 mod math;
@@ -360,8 +361,7 @@ impl SNARK {
   /// A method to produce a SNARK proof of the satisfiability of an R1CS instance
   pub fn prove(
     max_num_proofs: usize,
-    min_num_proofs: usize,
-    num_proofs: Vec<usize>,
+    num_proofs: &Vec<usize>,
     inst: &Instance,
     comm: &ComputationCommitment,
     decomm: &ComputationDecommitment,
@@ -402,7 +402,6 @@ impl SNARK {
 
         R1CSProof::prove(
           max_num_proofs,
-          min_num_proofs,
           num_proofs,
           &inst.inst,
           padded_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),

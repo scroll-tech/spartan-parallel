@@ -28,7 +28,6 @@ fn produce_r1cs() -> (
   usize,
   usize,
   usize,
-  usize,
   Vec<usize>,
   Instance,
   Vec<Vec<VarsAssignment>>,
@@ -48,8 +47,7 @@ fn produce_r1cs() -> (
   let num_instances = 2;
   // Number of proofs of each R1CS instance
   let max_num_proofs = 4;
-  let min_num_proofs = 1;
-  let num_proofs = vec![4, 1];
+  let num_proofs = vec![4, 2];
 
   let one = Scalar::one().to_bytes();
   let two = Scalar::from(2u32).to_bytes();
@@ -238,7 +236,6 @@ fn produce_r1cs() -> (
     num_non_zero_entries,
     num_instances,
     max_num_proofs,
-    min_num_proofs,
     num_proofs,
     inst,
     assignment_vars_matrix,
@@ -255,7 +252,6 @@ fn main() {
     num_non_zero_entries,
     num_instances,
     max_num_proofs,
-    min_num_proofs,
     num_proofs,
     inst,
     assignment_vars_matrix,
@@ -276,8 +272,7 @@ fn main() {
   let mut prover_transcript = Transcript::new(b"snark_example");
   let proof = SNARK::prove(
     max_num_proofs,
-    min_num_proofs,
-    num_proofs,
+    &num_proofs,
     &inst,
     &comm,
     &decomm,

@@ -970,7 +970,6 @@ impl ZKSumcheckInstanceProof {
     num_rounds: usize,
     num_rounds_x: usize,
     num_rounds_q_max: usize,
-    num_rounds_q_min: usize,
     num_rounds_p: usize,
     num_proofs: &Vec<usize>,
     poly_A: &mut DensePolynomial,
@@ -987,7 +986,6 @@ impl ZKSumcheckInstanceProof {
     F: Fn(&Scalar, &Scalar, &Scalar, &Scalar) -> Scalar,
   {
     assert_eq!(num_rounds, num_rounds_x + num_rounds_q_max + num_rounds_p);
-    assert!(num_rounds_q_min <= num_rounds_q_max);
 
     let (blinds_poly, blinds_evals) = (
       random_tape.random_vector(b"blinds_poly", num_rounds),
