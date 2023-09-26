@@ -82,7 +82,7 @@ impl R1CSProof {
     num_rounds_q_max: usize,
     num_rounds_q_min: usize,
     num_rounds_p: usize,
-    num_proofs: Vec<usize>,
+    num_proofs: &Vec<usize>,
     evals_tau: &mut DensePolynomial,
     evals_Az: &mut DensePolynomial,
     evals_Bz: &mut DensePolynomial,
@@ -261,7 +261,7 @@ impl R1CSProof {
       num_rounds_q,
       num_rounds_q_min,
       num_rounds_p,
-      num_proofs,
+      &num_proofs,
       &mut poly_tau,
       &mut poly_Az,
       &mut poly_Bz,
@@ -362,17 +362,17 @@ impl R1CSProof {
     // Construct a q * p * len(z) matrix Z and bound it to r_q
     let mut Z = vec![Scalar::zero(); max_num_proofs * num_instances * z_len];
     for p in 0..num_instances {
+      let q_ceil = max_num_proofs;
       for q in 0..z_mat[p].len() {
+        let q_rev = (0..q_ceil.log_2()).rev().map(|i| q / (i.pow2()) % 2 * (q_ceil / i.pow2() / 2)).fold(0, |a, b| a + b);
         for entry in 0..z_len {
-          Z[q * num_instances * z_len + p * z_len + entry] = z_mat[p][q][entry].clone();
+          Z[q_rev * num_instances * z_len + p * z_len + entry] = z_mat[p][q][entry].clone();
         }
       }
     }
+
     let mut Z_poly = DensePolynomial::new(Z);
-    // Bound Z_poly to r_q
-    for r in &rq {
-      Z_poly.bound_poly_var_top(r);
-    }
+    Z_poly.bound_poly_var_front_rq(&rq.clone().into_iter().rev().collect(), max_num_proofs, num_instances, z_len, num_proofs.clone());
 
     // An Eq function to match p with rp
     let mut eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_y));

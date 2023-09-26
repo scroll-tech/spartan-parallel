@@ -100,7 +100,7 @@ Here are the general ideas on how to improve time complexity:
         \item The verifier, however, still cannot evaluate $\valid$ in logarithmic time. This is because since we make no assumption on $Q_i$'s and how they relate to $P$, expressing $\valid$ would take at least $O(P)$ time.
         \item Thus, $\P$ needs to commit to $\valid$ at the beginning of the protocol. $\P$ can then use $\eq^*$ during sumcheck, and $\V$ use $\eq \cdot \valid$ to bind $\eq^*$ to $r_p$ and $r_q$.
     \end{itemize}
-    \item Work is still undergoing on how to compute $Z_{r_q}$ faster.
+    \item Improving the time complexity of computation on $Z_{r_q}$ is more tricky. Since $r_q$ is completely random and $Z_{r_q}$ needs to be evaluated on $P \times X$ points on the boolean hypercube, this does not give us much room to wiggle. The best solution (currently) is to evaluate $Q$ in reverse order, i.e. start from the least siginificant bit. This allows us to keep skipping invalid $p, q$ pairs since the most significant bits of $q$ are still within the boolean hypercube. The only problem is that once $q$ is reduced to 1, we can no longer cut the evaluation size by half. Overall, this reduces the time complexity of computing $Z_{r_q}$ to $O(\Qsum\cdot \log(P\cdot\Qmax) \cdot X)$.
 \end{itemize}
 
 \section{Reducing Space Complexity}\label{reduce-space}
