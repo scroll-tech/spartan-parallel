@@ -83,7 +83,7 @@ impl R1CSProof {
     num_rounds_q_max: usize,
     num_rounds_p: usize,
     num_proofs: &Vec<usize>,
-    evals_tau: &mut DensePolynomial,
+    evals_tau: &mut DensePolynomial_PQX,
     evals_Az: &mut DensePolynomial_PQX,
     evals_Bz: &mut DensePolynomial_PQX,
     evals_Cz: &mut DensePolynomial_PQX,
@@ -163,7 +163,7 @@ impl R1CSProof {
     gens: &R1CSGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
-  ) -> (R1CSProof, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
+  ) -> (R1CSProof, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) { 
     let timer_prove = Timer::new("R1CSProof::prove");
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
@@ -243,10 +243,20 @@ impl R1CSProof {
     let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
       (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
     let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
+    
+    // Revert the middle q section of tau so the verifier doesn't need to do this
+    // let (tau_x, tau_2) = tau.split_at(num_rounds_x);
+    // let (tau_q, tau_p) = tau_2.split_at(num_rounds_q);
+    // let tau_q: Vec<Scalar> = tau_q.to_vec().into_iter().rev().collect();
+    // let tau_2 = [tau_x, &tau_q, tau_p].concat();
+    let mut poly_tau_2 = DensePolynomial::new(EqPolynomial::new(tau.clone()).evals());
 
     // compute the initial evaluation table for R(\tau, x)
     // let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals_disjoint_rounds(num_rounds_x, num_rounds_q, num_rounds_p, &num_proofs));
-    let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
+    let mut poly_tau = DensePolynomial_PQX::new(
+      &EqPolynomial::new(tau).evals_PQX(num_rounds_p, num_rounds_q, num_rounds_x), 
+      &vec![max_num_proofs; num_instances], 
+      max_num_proofs);
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
       inst.multiply_vec_bunched(num_instances, num_proofs, max_num_proofs, num_cons, z_len, &z_mat);
 
@@ -272,7 +282,7 @@ impl R1CSProof {
     timer_sc_proof_phase1.stop();
 
     let (tau_claim, Az_claim, Bz_claim, Cz_claim) =
-      (&poly_tau[0], &poly_Az.index(0, 0, 0), &poly_Bz.index(0, 0, 0), &poly_Cz.index(0, 0, 0));
+      (&poly_tau.index(0, 0, 0), &poly_Az.index(0, 0, 0), &poly_Bz.index(0, 0, 0), &poly_Cz.index(0, 0, 0));
 
     let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
       random_tape.random_scalar(b"Az_blind"),
@@ -333,8 +343,6 @@ impl R1CSProof {
     let rq: Vec<Scalar> = rq.to_vec().into_iter().rev().collect();
     let rp = rp.to_vec();
 
-    println!("Az_claim: {:?}", Az_claim);
-
     let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
     // combine the three claims into a single claim
     let r_A = transcript.challenge_scalar(b"challenge_Az");
@@ -359,7 +367,7 @@ impl R1CSProof {
     let mut ABC_poly = DensePolynomial::new(evals_ABC);
 
     // Construct a p * q * len(z) matrix Z and bound it to r_q
-    let mut Z = DensePolynomial_PQX::new(&z_mat, &num_proofs, max_num_proofs);
+    let mut Z = DensePolynomial_PQX::new_rev(&z_mat, &num_proofs, max_num_proofs);
     Z.bound_poly_vars_rq(&rq.clone().into_iter().rev().collect());
     let mut Z_poly = Z.to_dense_poly();
 
@@ -474,8 +482,6 @@ impl R1CSProof {
     // derive the verifier's challenge tau
     let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
 
-    println!("AAA");
-
     // verify the first sum-check instance
     let claim_phase1 = Scalar::zero()
       .commit(&Scalar::zero(), &gens.gens_sc.gens_1)
@@ -489,8 +495,6 @@ impl R1CSProof {
       transcript,
     )?;
 
-    println!("BBB");
-
     // perform the intermediate sum-check test with claimed Az, Bz, and Cz
     let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &self.claims_phase2;
     let (pok_Cz_claim, proof_prod) = &self.pok_claims_phase2;
@@ -503,8 +507,6 @@ impl R1CSProof {
       comm_Bz_claim,
       comm_prod_Az_Bz_claims,
     )?;
-
-    println!("CCC");
 
     comm_Az_claim.append_to_transcript(b"comm_Az_claim", transcript);
     comm_Bz_claim.append_to_transcript(b"comm_Bz_claim", transcript);
@@ -527,8 +529,6 @@ impl R1CSProof {
       &expected_claim_post_phase1,
       &comm_claim_post_phase1,
     )?;
-
-    println!("DDD");
 
     // derive three public challenges and then derive a joint claim
     let r_A = transcript.challenge_scalar(b"challenge_Az");
@@ -608,8 +608,6 @@ impl R1CSProof {
         &poly_input_eval.commit(&Scalar::zero(), &gens.gens_pc.gens.gens_1),
       )),
     );
-
-    println!("ZZZ");
 
     // perform the final check in the second sum-check protocol
     let (eval_A_r, eval_B_r, eval_C_r) = evals;

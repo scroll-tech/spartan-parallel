@@ -82,6 +82,47 @@ impl EqPolynomial {
     evals
   }
 
+  // Evals to P * Q * X matrix
+  pub fn evals_PQX(&self,
+    num_rounds_p: usize,
+    num_rounds_q: usize,
+    num_rounds_x: usize,
+  ) -> Vec<Vec<Vec<Scalar>>> {
+    let ell = self.r.len();
+
+    let mut evals: Vec<Scalar> = vec![Scalar::one(); ell.pow2()];
+    let mut size = 1;
+    for j in 0..ell {
+      // in each iteration, we double the size of chis
+      size *= 2;
+      for i in (0..size).rev().step_by(2) {
+        // copy each element from the prior iteration twice
+        let scalar = evals[i / 2];
+        evals[i] = scalar * self.r[j];
+        evals[i - 1] = scalar - evals[i];
+      }
+    }
+
+    // Convert evals into P * Q * X matrix
+    let instance_space: usize = num_rounds_p.pow2();
+    let proof_space = num_rounds_q.pow2();
+    let cons_space = num_rounds_x.pow2();
+
+    let mut eval_mat = Vec::new();
+    for p in 0..instance_space {
+      eval_mat.push(Vec::new());
+      for q in 0..proof_space {
+        eval_mat[p].push(Vec::new());
+        for x in 0..cons_space {
+          let i = x * proof_space * instance_space + q * instance_space + p;
+          eval_mat[p][q].push(evals[i]);
+        }
+      }
+    }
+    eval_mat
+  }
+
+
   // Only bound Eq on the first self.r.len() of the total_len variables
   pub fn evals_front(&self, total_len: usize) -> Vec<Scalar> {
     let ell = self.r.len();

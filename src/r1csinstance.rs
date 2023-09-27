@@ -397,9 +397,9 @@ impl R1CSInstance {
       }
     }
     (
-      DensePolynomial_PQX::new(&Az, num_proofs, max_num_proofs),
-      DensePolynomial_PQX::new(&Bz, num_proofs, max_num_proofs),
-      DensePolynomial_PQX::new(&Cz, num_proofs, max_num_proofs)
+      DensePolynomial_PQX::new_rev(&Az, num_proofs, max_num_proofs),
+      DensePolynomial_PQX::new_rev(&Bz, num_proofs, max_num_proofs),
+      DensePolynomial_PQX::new_rev(&Cz, num_proofs, max_num_proofs)
     )
   }
 
