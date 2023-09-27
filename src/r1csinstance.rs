@@ -3,6 +3,7 @@ use core::num;
 use crate::transcript::AppendToTranscript;
 
 use super::dense_mlpoly::DensePolynomial;
+use super::custom_dense_mlpoly::DensePolynomial_PQX;
 use super::errors::ProofVerifyError;
 use super::math::Math;
 use super::random::RandomTape;
@@ -364,45 +365,41 @@ impl R1CSInstance {
   }
 
   // Az(p, q, x) <- A(p, x) * z(p, q, x), where we require p for A and z are the same
-  // Return Az, Bz, Cz as DensePolynomial
+  // Return Az, Bz, Cz as DensePolynomial_PQX
   pub fn multiply_vec_bunched(
     &self,
     num_instances: usize,
+    num_proofs: &Vec<usize>,
     max_num_proofs: usize,
     num_rows: usize,
     num_cols: usize,
     z_mat: &Vec<Vec<Vec<Scalar>>>
-  ) -> (DensePolynomial, DensePolynomial, DensePolynomial) {
+  ) -> (DensePolynomial_PQX, DensePolynomial_PQX, DensePolynomial_PQX) {
     assert_eq!(num_rows, self.num_cons);
     assert!(num_cols > self.num_vars);
-    // XXX: Az, Bz, Cz should be sparse poly
-    let mut Az = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
-    let mut Bz = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
-    let mut Cz = vec![Scalar::zero(); num_instances * max_num_proofs * num_rows];
+    let mut Az = Vec::new();
+    let mut Bz = Vec::new();
+    let mut Cz = Vec::new();
 
     for p in 0..num_instances {
       let z_list = &z_mat[p];
-      let num_proofs = z_list.len();
-      assert!(num_proofs <= max_num_proofs);
-      for q in 0..num_proofs {
+      assert!(num_proofs[p] <= max_num_proofs);
+      Az.push(Vec::new());
+      Bz.push(Vec::new());
+      Cz.push(Vec::new());
+      for q in 0..num_proofs[p] {
         let z = &z_list[q];
         assert_eq!(z.len(), num_cols);
-        let tmp_Az = self.A_list[p].multiply_vec(num_rows, num_cols, z);
-        let tmp_Bz = self.B_list[p].multiply_vec(num_rows, num_cols, z);
-        let tmp_Cz = self.C_list[p].multiply_vec(num_rows, num_cols, z);
 
-        // Select the correct instance
-        for x in 0..num_rows {
-          Az[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Az[x];
-          Bz[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Bz[x];
-          Cz[x * max_num_proofs * num_instances + q * num_instances + p] = tmp_Cz[x];
-        }
+        Az[p].push(self.A_list[p].multiply_vec(num_rows, num_cols, z));
+        Bz[p].push(self.B_list[p].multiply_vec(num_rows, num_cols, z));
+        Cz[p].push(self.C_list[p].multiply_vec(num_rows, num_cols, z));
       }
     }
     (
-      DensePolynomial::new(Az),
-      DensePolynomial::new(Bz),
-      DensePolynomial::new(Cz),
+      DensePolynomial_PQX::new(&Az, num_proofs, max_num_proofs),
+      DensePolynomial_PQX::new(&Bz, num_proofs, max_num_proofs),
+      DensePolynomial_PQX::new(&Cz, num_proofs, max_num_proofs)
     )
   }
 
