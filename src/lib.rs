@@ -302,20 +302,16 @@ pub struct SNARKGens {
 impl SNARKGens {
   /// Constructs a new `SNARKGens` given the size of the R1CS statement
   /// `num_nz_entries` specifies the maximum number of non-zero entries in any of the three R1CS matrices
-  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_instances:usize, max_num_proofs: usize, num_nz_entries: usize) -> Self {
+  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_instances: usize, max_num_proofs: usize, num_nz_entries: usize) -> Self {
     let num_vars_padded = {
       let mut num_vars_padded = max(num_vars, num_inputs + 1);
-      if num_vars_padded != num_vars_padded.next_power_of_two() {
-        num_vars_padded = num_vars_padded.next_power_of_two();
-      }
+      num_vars_padded = num_vars_padded.next_power_of_two();
       num_vars_padded
     };
 
     let num_instances_padded: usize = num_instances.next_power_of_two();
-    let num_proofs_padded: usize = max_num_proofs.next_power_of_two();
-    let num_total_vars = num_instances_padded * num_vars_padded * num_proofs_padded;
 
-    let gens_r1cs_sat = R1CSGens::new(b"gens_r1cs_sat", num_cons, num_total_vars);
+    let gens_r1cs_sat = R1CSGens::new(b"gens_r1cs_sat", num_cons, num_vars_padded);
     let gens_r1cs_eval = R1CSCommitmentGens::new(
       b"gens_r1cs_eval",
       num_instances_padded,

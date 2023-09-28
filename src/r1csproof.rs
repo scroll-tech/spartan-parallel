@@ -1,4 +1,6 @@
 #![allow(clippy::too_many_arguments)]
+use crate::custom_dense_mlpoly::{PolyEvalProof_PQX, PolyCommitment_PQX};
+
 use super::commitments::{Commitments, MultiCommitGens};
 use super::dense_mlpoly::{
   DensePolynomial, EqPolynomial, PolyCommitment, PolyCommitmentGens, PolyEvalProof,
@@ -25,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct R1CSProof {
-  comm_vars: PolyCommitment,
+  comm_vars: PolyCommitment_PQX,
   sc_proof_phase1: ZKSumcheckInstanceProof,
   claims_phase2: (
     CompressedGroup,
@@ -37,7 +39,7 @@ pub struct R1CSProof {
   proof_eq_sc_phase1: EqualityProof,
   sc_proof_phase2: ZKSumcheckInstanceProof,
   comm_vars_at_ry: CompressedGroup,
-  proof_eval_vars_at_ry: PolyEvalProof,
+  proof_eval_vars_at_ry: PolyEvalProof_PQX,
   proof_eq_sc_phase2: EqualityProof,
 }
 
@@ -70,7 +72,7 @@ pub struct R1CSGens {
 impl R1CSGens {
   pub fn new(label: &'static [u8], _num_cons: usize, num_vars: usize) -> Self {
     let num_poly_vars = num_vars.log_2();
-    let gens_pc = PolyCommitmentGens::new(num_poly_vars, label);
+    let gens_pc = PolyCommitmentGens::new(num_poly_vars, label, false);
     let gens_sc = R1CSSumcheckGens::new(label, &gens_pc.gens.gens_1);
     R1CSGens { gens_sc, gens_pc }
   }
@@ -187,15 +189,6 @@ impl R1CSProof {
       }
     }
 
-    let mut padded_var_mat = vec![Scalar::zero(); vars_mat.len() * max_num_proofs * inst.get_num_vars()];
-    for p in 0..vars_mat.len() {
-      for q in 0..vars_mat[p].len() {
-        for x in 0..vars_mat[p][q].len() {
-          padded_var_mat[p * max_num_proofs * inst.get_num_vars() + q * inst.get_num_vars() + x] = vars_mat[p][q][x].clone();
-        }
-      }
-    }
-
     for input_list in input_mat {
       for input in input_list {
         input.append_to_transcript(b"input", transcript);
@@ -203,9 +196,9 @@ impl R1CSProof {
     }
 
     let timer_commit = Timer::new("polycommit");
-    let (poly_vars, comm_vars, blinds_vars) = {
+    let (mut poly_vars, comm_vars, blinds_vars) = {
       // create a multilinear polynomial using the supplied assignment for variables
-      let poly_vars = DensePolynomial::new(padded_var_mat);
+      let poly_vars = DensePolynomial_PQX::new(&vars_mat, num_proofs, max_num_proofs);
 
       // produce a commitment to the satisfying assignment
       let (comm_vars, blinds_vars) = poly_vars.commit(&gens.gens_pc, Some(random_tape));
@@ -330,10 +323,10 @@ impl R1CSProof {
     );
 
     // Separate the result rx into rp, rq, and rx
-    let (rx, rq) = rx.split_at(num_rounds_x);
-    let (rq, rp) = rq.split_at(num_rounds_q);
+    let (rx, rq_rev) = rx.split_at(num_rounds_x);
+    let (rq_rev, rp) = rq_rev.split_at(num_rounds_q);
     let rx = rx.to_vec();
-    let rq: Vec<Scalar> = rq.to_vec().into_iter().rev().collect();
+    let rq: Vec<Scalar> = rq_rev.to_vec().into_iter().rev().collect();
     let rp = rp.to_vec();
 
     let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
@@ -361,7 +354,7 @@ impl R1CSProof {
 
     // Construct a p * q * len(z) matrix Z and bound it to r_q
     let mut Z = DensePolynomial_PQX::new_rev(&z_mat, &num_proofs, max_num_proofs);
-    Z.bound_poly_vars_rq(&rq.clone().into_iter().rev().collect());
+    Z.bound_poly_vars_rq(&rq_rev.to_vec());
     let mut Z_poly = Z.to_dense_poly();
 
     // An Eq function to match p with rp
@@ -390,13 +383,17 @@ impl R1CSProof {
     assert_eq!(ABC_poly.len(), 1);
 
     let timer_polyeval = Timer::new("polyeval");
-    let eval_vars_at_ry = poly_vars.evaluate(&[rp.clone(), rq.clone(), ry[1..].to_vec()].concat());
+    let eval_vars_at_ry = poly_vars.evaluate(&rp, &rq_rev.to_vec(), &ry[1..].to_vec());
 
     let blind_eval = random_tape.random_scalar(b"blind_eval");
-    let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
-      &poly_vars,
+
+    let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof_PQX::prove(
+      poly_vars,
+      num_proofs.clone(),
       Some(&blinds_vars),
-      &[rp.clone(), rq.clone(), ry[1..].to_vec()].concat(),
+      &rp,
+      rq_rev,
+      &ry[1..],
       &eval_vars_at_ry,
       Some(&blind_eval),
       &gens.gens_pc,
@@ -552,10 +549,10 @@ impl R1CSProof {
     )?;
 
     // Separate the result rx into rp_round1, rq, and rx
-    let (rx, rq) = rx.split_at(num_rounds_x);
-    let (rq, rp_round1) = rq.split_at(num_rounds_q);
+    let (rx, rq_rev) = rx.split_at(num_rounds_x);
+    let (rq_rev, rp_round1) = rq_rev.split_at(num_rounds_q);
     let rx = rx.to_vec();
-    let rq: Vec<Scalar> = rq.to_vec().into_iter().rev().collect();
+    let rq: Vec<Scalar> = rq_rev.to_vec().into_iter().rev().collect();
     let rp_round1 = rp_round1.to_vec();
 
     // Separate ry into rp and ry
@@ -572,7 +569,9 @@ impl R1CSProof {
     self.proof_eval_vars_at_ry.verify(
       &gens.gens_pc,
       transcript,
-      &[rp.clone(), rq.clone(), ry[1..].to_vec()].concat(),
+      &rp,
+      rq_rev,
+      &ry[1..],
       &self.comm_vars_at_ry,
       &self.comm_vars,
     )?;
