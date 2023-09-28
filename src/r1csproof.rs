@@ -243,13 +243,6 @@ impl R1CSProof {
     let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
       (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
     let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
-    
-    // Revert the middle q section of tau so the verifier doesn't need to do this
-    // let (tau_x, tau_2) = tau.split_at(num_rounds_x);
-    // let (tau_q, tau_p) = tau_2.split_at(num_rounds_q);
-    // let tau_q: Vec<Scalar> = tau_q.to_vec().into_iter().rev().collect();
-    // let tau_2 = [tau_x, &tau_q, tau_p].concat();
-    let mut poly_tau_2 = DensePolynomial::new(EqPolynomial::new(tau.clone()).evals());
 
     // compute the initial evaluation table for R(\tau, x)
     // let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals_disjoint_rounds(num_rounds_x, num_rounds_q, num_rounds_p, &num_proofs));

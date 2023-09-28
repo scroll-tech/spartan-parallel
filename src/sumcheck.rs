@@ -986,9 +986,9 @@ impl ZKSumcheckInstanceProof {
   where
     F: Fn(&Scalar, &Scalar, &Scalar, &Scalar) -> Scalar,
   {
-    // Note: We perform sumcheck in x -> q_rev -> p order
-    // poly_A is the EQ polynomial, taking parameters (x, q_rev, p)
-    // poly_BCD are the PQX polynomials, taking parameters (p, q_rev, x)
+    // Note: We perform sumcheck in x -> q_rev -> p order, but all polynomials have parameters (p, q, x)
+    // poly_A is the EQ polynomial of size P * Q_max * X
+    // poly_BCD are the AzBzCz polynomials, with size Q_sum * X
     // Thus, we need to separate the rounds into rounds for X, Q_rev, and P
     assert_eq!(num_rounds, num_rounds_x + num_rounds_q_max + num_rounds_p);
 
