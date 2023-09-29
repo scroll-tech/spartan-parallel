@@ -550,6 +550,7 @@ impl DotProductProofLog {
       self
         .bullet_reduction_proof
         .verify(n, a, transcript, &Gamma, &gens.gens_n.G)?;
+
     self.delta.append_to_transcript(b"delta", transcript);
     self.beta.append_to_transcript(b"beta", transcript);
 

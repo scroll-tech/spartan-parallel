@@ -196,9 +196,9 @@ impl R1CSProof {
     }
 
     let timer_commit = Timer::new("polycommit");
-    let (mut poly_vars, comm_vars, blinds_vars) = {
+    let (poly_vars, comm_vars, blinds_vars) = {
       // create a multilinear polynomial using the supplied assignment for variables
-      let poly_vars = DensePolynomial_PQX::new(&vars_mat, num_proofs, max_num_proofs);
+      let poly_vars = DensePolynomial_PQX::new_rev(&vars_mat, num_proofs, max_num_proofs);
 
       // produce a commitment to the satisfying assignment
       let (comm_vars, blinds_vars) = poly_vars.commit(&gens.gens_pc, Some(random_tape));

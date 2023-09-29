@@ -9,6 +9,7 @@ use super::nizk::DotProductProofLog;
 use super::random::RandomTape;
 use super::scalar::Scalar;
 use super::transcript::{AppendToTranscript, ProofTranscript};
+use curve25519_dalek::ristretto::RistrettoPoint;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
@@ -128,7 +129,7 @@ impl DensePolynomial_PQX {
   // Bound the first variable of "p" section to r
   // We are only allowed to bound "p" if we have bounded the entire q section
   pub fn bound_poly_p(&mut self, r: &Scalar) {
-      assert_eq!(self.max_num_proofs, 1);
+      // assert_eq!(self.max_num_proofs, 1);
       self.num_instances /= 2;
       for p in 0..self.num_instances {
           for x in 0..self.num_inputs {
@@ -180,10 +181,9 @@ impl DensePolynomial_PQX {
       r_p: &Vec<Scalar>,
     ) {
       for r in r_p {
-        self.bound_poly_q(r);
+        self.bound_poly_p(r);
       }
     }
-
 
   // Bound the entire "q_rev" section to r_q
   pub fn bound_poly_vars_rq(&mut self, 
@@ -203,7 +203,7 @@ impl DensePolynomial_PQX {
     }
   }
 
-  pub fn evaluate(&mut self,
+  pub fn evaluate(&self,
     r_p: &Vec<Scalar>,
     r_q: &Vec<Scalar>,
     r_x: &Vec<Scalar>,
@@ -216,33 +216,33 @@ impl DensePolynomial_PQX {
   }
 
   pub fn commit(
-      &self,
-      gens: &PolyCommitmentGens,
-      random_tape: Option<&mut RandomTape>,
+    &self,
+    gens: &PolyCommitmentGens,
+    random_tape: Option<&mut RandomTape>,
   ) -> (PolyCommitment_PQX, PolyCommitmentBlinds_PQX) {
 
-      let mut blinds = Vec::new();
-      if let Some(t) = random_tape {
-          for p in 0..self.num_instances {
-              blinds.push(t.random_vector(b"poly_blinds", self.num_proofs[p]));
-          } 
-      } else {
-          for p in 0..self.num_instances {
-              blinds.push(vec![Scalar::zero(); self.num_proofs[p]]);
-          };
-      }
-
-      let blinds = PolyCommitmentBlinds_PQX { blinds };
-
-      let mut C = Vec::new();
+    let mut blinds = Vec::new();
+    if let Some(t) = random_tape {
       for p in 0..self.num_instances {
-          C.push(Vec::new());
-          for q in 0..self.num_proofs[p] {
-              C[p].push(self.Z[p][q].commit(&blinds.blinds[p][q], &gens.gens.gens_n).compress());
-          }
-      }
+        blinds.push(t.random_vector(b"poly_blinds", self.num_proofs[p]));
+      } 
+    } else {
+      for p in 0..self.num_instances {
+        blinds.push(vec![Scalar::zero(); self.num_proofs[p]]);
+      };
+    }
 
-      (PolyCommitment_PQX { C }, blinds)
+    let blinds = PolyCommitmentBlinds_PQX { blinds };
+
+    let mut C = Vec::new();
+    for p in 0..self.num_instances {
+      C.push(Vec::new());
+      for q in 0..self.num_proofs[p] {
+        C[p].push(self.Z[p][q].commit(&blinds.blinds[p][q], &gens.gens.gens_n).compress());
+      }
+    }
+
+    (PolyCommitment_PQX { C }, blinds)
   }    
 
   // Convert to a (p, q_rev, x) regular dense poly
@@ -311,6 +311,7 @@ impl PolyEvalProof_PQX {
     assert_eq!(poly.get_num_vars(), rp.len() + rq.len() + rx.len());
     let num_instances = rp.len().pow2();
     let max_num_proofs = rq.len().pow2();
+    let num_inputs = rx.len().pow2();
 
     let mut default_blinds = Vec::new();
     for p in 0..num_instances {
@@ -338,12 +339,20 @@ impl PolyEvalProof_PQX {
     poly.bound_poly_vars_rq(&rq.to_vec());
     poly.bound_poly_vars_rp(&rp.to_vec());
     let LZ = &poly.Z[0][0];
+    
     let mut LZ_blind = Scalar::zero();
     for p in 0..num_instances {
         for q in 0..num_proofs[p] {
             LZ_blind += blinds.blinds[p][q] * L[p * max_num_proofs + q];
         }
     }
+
+    let mut dot_prod = Scalar::zero();
+    for i in 0..LZ.len() {
+      dot_prod += LZ[i] * R[i];
+    }
+    println!("DOT_PROD: {:?}", dot_prod);
+    println!("Y: {:?}", Zr);
 
     // a dot product proof of size R_size
     let (proof, _C_LR, C_Zr_prime) = DotProductProofLog::prove(
@@ -383,10 +392,10 @@ impl PolyEvalProof_PQX {
     let mut L_compact = Vec::new();
     let mut C_decompressed = Vec::new();
     for p in 0..comm.C.len() {
-        for q in 0..comm.C[p].len() {
-            L_compact.push(L[p * max_num_proofs + q]);
-            C_decompressed.push(comm.C[p][q].decompress().unwrap());
-        }
+      for q in 0..comm.C[p].len() {
+        L_compact.push(L[p * max_num_proofs + q]);
+        C_decompressed.push(comm.C[p][q].decompress().unwrap());
+      }
     }
 
     let C_LZ = GroupElement::vartime_multiscalar_mul(&L_compact, C_decompressed).compress();
