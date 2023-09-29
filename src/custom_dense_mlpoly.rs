@@ -336,37 +336,17 @@ impl PolyEvalProof_PQX {
 
     // compute the vector underneath L*Z and the L*blinds
     // compute vector-matrix product between L and Z viewed as a matrix
-    let poly_clone = poly.to_dense_poly();
-
-    let mut LZ = vec![Scalar::zero(); rx.len().pow2()];
-    for p in 0..num_instances {
-      let step = max_num_proofs / num_proofs[p];
-      for q in 0..num_proofs[p] {
-        for x in 0..num_inputs {
-          LZ[x] += poly_clone[p * max_num_proofs * num_inputs + q * num_inputs * step + x] * L[p * max_num_proofs + q * step];
-        }
-      }
-    }
-    println!("LZ_1: 0: {:?}, 1: {:?}", LZ[0], LZ[1]);
-
     poly.bound_poly_vars_rq(&rq.to_vec());
     poly.bound_poly_vars_rp(&rp.to_vec());
     let LZ = &poly.Z[0][0];
-    println!("LZ_4: 0: {:?}, 1: {:?}", LZ[0], LZ[1]);
     
     let mut LZ_blind = Scalar::zero();
     for p in 0..num_instances {
-        for q in 0..num_proofs[p] {
-            LZ_blind += blinds.blinds[p][q] * L[p * max_num_proofs + q];
-        }
+      let step = max_num_proofs / num_proofs[p];
+      for q in 0..num_proofs[p] {
+        LZ_blind += blinds.blinds[p][q] * L[p * max_num_proofs + q * step];
+      }
     }
-
-    let mut dot_prod = Scalar::zero();
-    for i in 0..LZ.len() {
-      dot_prod += LZ[i] * R[i];
-    }
-    println!("DOT_PROD: {:?}", dot_prod);
-    println!("Y: {:?}", Zr);
 
     // a dot product proof of size R_size
     let (proof, _C_LR, C_Zr_prime) = DotProductProofLog::prove(
