@@ -285,7 +285,7 @@ fn main() {
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
-    .verify(max_num_proofs, num_cons, &comm, &assignment_inputs_matrix, &mut verifier_transcript, &gens)
+    .verify(max_num_proofs, &num_proofs, num_cons, &comm, &assignment_inputs_matrix, &mut verifier_transcript, &gens)
     .is_ok());
   println!("proof verification successful!");
 }

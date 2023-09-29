@@ -454,6 +454,7 @@ impl SNARK {
   pub fn verify(
     &self,
     max_num_proofs: usize,
+    num_proofs: &Vec<usize>,
     num_cons: usize,
     comm: &ComputationCommitment,
     input_mat: &Vec<Vec<InputsAssignment>>,
@@ -473,6 +474,7 @@ impl SNARK {
       num_cons,
       input_mat.len(),
       max_num_proofs,
+      num_proofs,
       &input_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
       &self.inst_evals,
       transcript,

@@ -448,6 +448,7 @@ impl R1CSProof {
     num_cons: usize,
     num_instances: usize,
     max_num_proofs: usize,
+    num_proofs: &Vec<usize>,
     input_mat: &Vec<Vec<Vec<Scalar>>>,
     evals: &(Scalar, Scalar, Scalar),
     transcript: &mut Transcript,
@@ -569,6 +570,7 @@ impl R1CSProof {
     self.proof_eval_vars_at_ry.verify(
       &gens.gens_pc,
       transcript,
+      num_proofs,
       &rp,
       rq_rev,
       &ry[1..],
