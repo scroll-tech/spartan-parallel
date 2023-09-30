@@ -326,7 +326,7 @@ impl R1CSProof {
     let (rx, rq_rev) = rx.split_at(num_rounds_x);
     let (rq_rev, rp) = rq_rev.split_at(num_rounds_q);
     let rx = rx.to_vec();
-    let rq: Vec<Scalar> = rq_rev.to_vec().into_iter().rev().collect();
+    let rq_rev = rq_rev.to_vec();
     let rp = rp.to_vec();
 
     let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
@@ -392,7 +392,7 @@ impl R1CSProof {
       &num_proofs,
       Some(&blinds_vars),
       &rp,
-      rq_rev,
+      &rq_rev,
       &ry[1..],
       &eval_vars_at_ry,
       Some(&blind_eval),
@@ -436,7 +436,7 @@ impl R1CSProof {
         proof_eq_sc_phase2,
       },
       rp,
-      rq,
+      rq_rev,
       rx,
       ry,
     )
@@ -553,7 +553,8 @@ impl R1CSProof {
     let (rx, rq_rev) = rx.split_at(num_rounds_x);
     let (rq_rev, rp_round1) = rq_rev.split_at(num_rounds_q);
     let rx = rx.to_vec();
-    let rq: Vec<Scalar> = rq_rev.to_vec().into_iter().rev().collect();
+    let rq_rev = rq_rev.to_vec();
+    let rq: Vec<Scalar> = rq_rev.clone().into_iter().rev().collect();
     let rp_round1 = rp_round1.to_vec();
 
     // Separate ry into rp and ry
@@ -572,7 +573,7 @@ impl R1CSProof {
       transcript,
       num_proofs,
       &rp,
-      rq_rev,
+      &rq_rev,
       &ry[1..],
       &self.comm_vars_at_ry,
       &self.comm_vars,
@@ -615,7 +616,7 @@ impl R1CSProof {
       &comm_claim_post_phase2,
     )?;
 
-    Ok((rp, rq, rx, ry))
+    Ok((rp, rq_rev, rx, ry))
   }
 }
 
