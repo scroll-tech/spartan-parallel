@@ -294,7 +294,7 @@ impl PolyEvalProof_PQX {
 
   pub fn prove(
     mut poly: DensePolynomial_PQX,
-    num_proofs: Vec<usize>,
+    num_proofs: &Vec<usize>,
     blinds_opt: Option<&PolyCommitmentBlinds_PQX>,
     rp: &[Scalar],                 // point at which the polynomial is evaluated
     rq: &[Scalar],                 // rq is in reversed order, i.e. the same order as the polynomial
@@ -310,8 +310,6 @@ impl PolyEvalProof_PQX {
     // assert vectors are of the right size
     assert_eq!(poly.get_num_vars(), rp.len() + rq.len() + rx.len());
     let num_instances = rp.len().pow2();
-    let max_num_proofs = rq.len().pow2();
-    let num_inputs = rx.len().pow2();
 
     let mut default_blinds = Vec::new();
     for p in 0..num_instances {
@@ -323,7 +321,7 @@ impl PolyEvalProof_PQX {
 
     assert_eq!(blinds.blinds.len(), num_instances);
     for p in 0..num_instances {
-        assert_eq!(blinds.blinds[p].len(), num_proofs[p]);
+      assert_eq!(blinds.blinds[p].len(), num_proofs[p]);
     }
 
     let zero = Scalar::zero();
@@ -331,7 +329,7 @@ impl PolyEvalProof_PQX {
 
     // compute the L and R vectors
     // TODO: Reduce complexity of this
-    let L = EqPolynomial::new([rp, rq].concat()).evals();
+    let L = EqPolynomial::new([rp, rq].concat()).evals_PQ(rp.len(), rq.len(), num_proofs);
     let R = EqPolynomial::new(rx.to_vec()).evals();
 
     // compute the vector underneath L*Z and the L*blinds
@@ -342,9 +340,8 @@ impl PolyEvalProof_PQX {
     
     let mut LZ_blind = Scalar::zero();
     for p in 0..num_instances {
-      let step = max_num_proofs / num_proofs[p];
       for q in 0..num_proofs[p] {
-        LZ_blind += blinds.blinds[p][q] * L[p * max_num_proofs + q * step];
+        LZ_blind += blinds.blinds[p][q] * L[p][q];
       }
     }
 
@@ -376,20 +373,17 @@ impl PolyEvalProof_PQX {
   ) -> Result<(), ProofVerifyError> {
     transcript.append_protocol_name(PolyEvalProof_PQX::protocol_name());
 
-    let max_num_proofs = rq.len().pow2();
-
     // compute L and R
     // TODO: Reduce complexity of this
-    let L = EqPolynomial::new([rp, rq].concat()).evals();
+    let L = EqPolynomial::new([rp, rq].concat()).evals_PQ(rp.len(), rq.len(), num_proofs);
     let R = EqPolynomial::new(rx.to_vec()).evals();
 
     // compute a weighted sum of commitments and L
     let mut L_compact = Vec::new();
     let mut C_decompressed = Vec::new();
     for p in 0..comm.C.len() {
-      let step = max_num_proofs / num_proofs[p];
       for q in 0..comm.C[p].len() {
-        L_compact.push(L[p * max_num_proofs + q * step]);
+        L_compact.push(L[p][q]);
         C_decompressed.push(comm.C[p][q].decompress().unwrap());
       }
     }

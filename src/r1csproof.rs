@@ -389,7 +389,7 @@ impl R1CSProof {
 
     let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof_PQX::prove(
       poly_vars,
-      num_proofs.clone(),
+      &num_proofs,
       Some(&blinds_vars),
       &rp,
       rq_rev,
