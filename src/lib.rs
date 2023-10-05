@@ -125,7 +125,6 @@ impl Instance {
     num_instances: usize,
     num_cons: usize,
     num_vars: usize,
-    num_inputs: usize,
     A: &Vec<Vec<(usize, usize, [u8; 32])>>,
     B: &Vec<Vec<(usize, usize, [u8; 32])>>,
     C: &Vec<Vec<(usize, usize, [u8; 32])>>,
@@ -134,9 +133,6 @@ impl Instance {
     let (num_vars_padded, num_cons_padded) = {
       let num_vars_padded = {
         let mut num_vars_padded = num_vars;
-
-        // ensure that num_inputs + 1 <= num_vars
-        num_vars_padded = max(num_vars_padded, num_inputs + 1);
 
         // ensure that num_vars_padded a power of two
         if num_vars_padded.next_power_of_two() != num_vars_padded {
@@ -172,8 +168,8 @@ impl Instance {
             return Err(R1CSError::InvalidIndex);
           }
 
-          // col must be smaller than num_vars + 1 + num_inputs
-          if col >= num_vars + 1 + num_inputs {
+          // col must be smaller than num_vars
+          if col >= num_vars {
             return Err(R1CSError::InvalidIndex);
           }
 
@@ -230,7 +226,6 @@ impl Instance {
       num_instances_padded,
       num_cons_padded,
       num_vars_padded,
-      num_inputs,
       &A_scalar_list,
       &B_scalar_list,
       &C_scalar_list,
@@ -302,12 +297,8 @@ pub struct SNARKGens {
 impl SNARKGens {
   /// Constructs a new `SNARKGens` given the size of the R1CS statement
   /// `num_nz_entries` specifies the maximum number of non-zero entries in any of the three R1CS matrices
-  pub fn new(num_cons: usize, num_vars: usize, num_inputs: usize, num_instances: usize, max_num_proofs: usize, num_nz_entries: usize) -> Self {
-    let num_vars_padded = {
-      let mut num_vars_padded = max(num_vars, num_inputs + 1);
-      num_vars_padded = num_vars_padded.next_power_of_two();
-      num_vars_padded
-    };
+  pub fn new(num_cons: usize, num_vars: usize, num_instances: usize, num_nz_entries: usize) -> Self {
+    let num_vars_padded = num_vars.next_power_of_two();
 
     let num_instances_padded: usize = num_instances.next_power_of_two();
 
@@ -317,7 +308,6 @@ impl SNARKGens {
       num_instances_padded,
       num_cons,
       num_vars_padded,
-      num_inputs,
       num_nz_entries,
     );
     SNARKGens {
@@ -362,7 +352,6 @@ impl SNARK {
     comm: &ComputationCommitment,
     decomm: &ComputationDecommitment,
     vars_mat: Vec<Vec<VarsAssignment>>,
-    input_mat: &Vec<Vec<InputsAssignment>>,
     gens: &SNARKGens,
     transcript: &mut Transcript,
   ) -> Self {
@@ -401,7 +390,6 @@ impl SNARK {
           num_proofs,
           &inst.inst,
           padded_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
-          &input_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
           &gens.gens_r1cs_sat,
           transcript,
           &mut random_tape,
@@ -453,11 +441,11 @@ impl SNARK {
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
   pub fn verify(
     &self,
+    num_instances: usize,
     max_num_proofs: usize,
     num_proofs: &Vec<usize>,
     num_cons: usize,
     comm: &ComputationCommitment,
-    input_mat: &Vec<Vec<InputsAssignment>>,
     transcript: &mut Transcript,
     gens: &SNARKGens,
   ) -> Result<(), ProofVerifyError> {
@@ -468,14 +456,12 @@ impl SNARK {
     comm.comm.append_to_transcript(b"comm", transcript);
 
     let timer_sat_proof = Timer::new("verify_sat_proof");
-    assert_eq!(input_mat[0][0].assignment.len(), comm.comm.get_num_inputs());
     let (rp, _rq, rx, ry) = self.r1cs_sat_proof.verify(
       comm.comm.get_num_vars(),
       num_cons,
-      input_mat.len(),
+      num_instances,
       max_num_proofs,
       num_proofs,
-      &input_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment.clone()).collect_vec()).collect_vec(),
       &self.inst_evals,
       transcript,
       &gens.gens_r1cs_sat,

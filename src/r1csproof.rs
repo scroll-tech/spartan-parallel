@@ -161,7 +161,6 @@ impl R1CSProof {
     num_proofs: &Vec<usize>,
     inst: &R1CSInstance,
     vars_mat: Vec<Vec<Vec<Scalar>>>,
-    input_mat: &Vec<Vec<Vec<Scalar>>>,
     gens: &R1CSGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -171,29 +170,14 @@ impl R1CSProof {
 
     let num_instances = vars_mat.len();
     assert_eq!(num_instances.next_power_of_two(), num_instances);
-    assert!(input_mat.len() == num_instances);
 
     assert_eq!(max_num_proofs.next_power_of_two(), max_num_proofs);
     for i in 0..num_instances {
-      assert!(input_mat[i].len() <= max_num_proofs);
-      assert!(input_mat[i].len() == input_mat[i].len().next_power_of_two());
-      assert!(vars_mat[i].len() == input_mat[i].len());
+      assert!(vars_mat[i].len() <= max_num_proofs);
+      assert!(vars_mat[i].len() == vars_mat[i].len().next_power_of_two());
     }
 
     let num_cons = inst.get_num_cons();
-
-    // we currently require the number of |inputs| + 1 to be at most number of vars
-    for i in 0..num_instances {
-      for j in 0..input_mat[i].len() {
-        assert!(input_mat[i][j].len() < vars_mat[i][j].len());
-      }
-    }
-
-    for input_list in input_mat {
-      for input in input_list {
-        input.append_to_transcript(b"input", transcript);
-      }
-    }
 
     let timer_commit = Timer::new("polycommit");
     let (poly_vars, comm_vars, blinds_vars) = {
@@ -215,19 +199,8 @@ impl R1CSProof {
     let mut z_mat = Vec::new();
     for i in 0..num_instances {
       z_mat.push(Vec::new());
-      for j in 0..input_mat[i].len() {
-        let z = {
-          let input = input_mat[i][j].clone();
-          let vars = vars_mat[i][j].clone();
-          let num_inputs = input.len();
-          let num_vars = vars.len();
-          let mut z = vars;
-          z.extend(&vec![Scalar::one()]); // add constant term in z
-          z.extend(input);
-          z.extend(&vec![Scalar::zero(); num_vars - num_inputs - 1]); // we will pad with zeros
-          z
-        };
-        z_mat[i].push(z);
+      for j in 0..vars_mat[i].len() {
+        z_mat[i].push(vars_mat[i][j].clone());
       }
     }
     let z_len = z_mat[0][0].len();
@@ -383,7 +356,7 @@ impl R1CSProof {
     assert_eq!(ABC_poly.len(), 1);
 
     let timer_polyeval = Timer::new("polyeval");
-    let eval_vars_at_ry = poly_vars.evaluate(&rp, &rq_rev.to_vec(), &ry[1..].to_vec());
+    let eval_vars_at_ry = poly_vars.evaluate(&rp, &rq_rev.to_vec(), &ry);
 
     let blind_eval = random_tape.random_scalar(b"blind_eval");
 
@@ -393,7 +366,7 @@ impl R1CSProof {
       Some(&blinds_vars),
       &rp,
       &rq_rev,
-      &ry[1..],
+      &ry,
       &eval_vars_at_ry,
       Some(&blind_eval),
       &gens.gens_pc,
@@ -403,7 +376,7 @@ impl R1CSProof {
     timer_polyeval.stop();
 
     // prove the final step of sum-check #2
-    let blind_eval_Z_at_ry = (Scalar::one() - ry[0]) * blind_eval;
+    let blind_eval_Z_at_ry = blind_eval;
     let blind_expected_claim_postsc2 = claims_phase2[1] * blind_eval_Z_at_ry * claims_phase2[2];
     let claim_post_phase2 = claims_phase2[0] * claims_phase2[1] * claims_phase2[2];
     let (proof_eq_sc_phase2, _C1, _C2) = EqualityProof::prove(
@@ -449,26 +422,18 @@ impl R1CSProof {
     num_instances: usize,
     max_num_proofs: usize,
     num_proofs: &Vec<usize>,
-    input_mat: &Vec<Vec<Vec<Scalar>>>,
     evals: &(Scalar, Scalar, Scalar),
     transcript: &mut Transcript,
     gens: &R1CSGens,
   ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
-    for input_list in input_mat {
-      for input in input_list {
-        input.append_to_transcript(b"input", transcript);
-      }
-    }
-
-    let n = num_vars;
     // add the commitment to the verifier's transcript
     self
       .comm_vars
       .append_to_transcript(b"poly_commitment", transcript);
 
-    let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), max_num_proofs.log_2(), (2 * num_vars).log_2());
+    let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), max_num_proofs.log_2(), num_vars.log_2());
 
     // derive the verifier's challenge tau
     let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
@@ -554,7 +519,6 @@ impl R1CSProof {
     let (rq_rev, rp_round1) = rq_rev.split_at(num_rounds_q);
     let rx = rx.to_vec();
     let rq_rev = rq_rev.to_vec();
-    let rq: Vec<Scalar> = rq_rev.clone().into_iter().rev().collect();
     let rp_round1 = rp_round1.to_vec();
 
     // Separate ry into rp and ry
@@ -574,35 +538,13 @@ impl R1CSProof {
       num_proofs,
       &rp,
       &rq_rev,
-      &ry[1..],
+      &ry,
       &self.comm_vars_at_ry,
       &self.comm_vars,
     )?;
 
-    let poly_input_eval = {
-      let mut input_as_sparse_poly_entries = Vec::new();
-      for i in 0..num_instances {
-        for j in 0..input_mat[i].len() {
-          // constant term
-          input_as_sparse_poly_entries.extend([SparsePolyEntry::new((i * max_num_proofs + j) * n, Scalar::one())]);
-          // remaining inputs
-          input_as_sparse_poly_entries.extend(
-            (0..input_mat[i][j].len())
-              .map(|k| SparsePolyEntry::new((i * max_num_proofs + j) * n + k + 1, input_mat[i][j][k]))
-              .collect::<Vec<SparsePolyEntry>>(),
-          );
-        }
-      }
-      SparsePolynomial::new(num_instances.log_2() + max_num_proofs.log_2() + n.log_2(), input_as_sparse_poly_entries).evaluate(&[rp.clone(), rq.clone(), ry[1..].to_vec()].concat())
-    };
-
     // compute commitment to eval_Z_at_ry = (Scalar::one() - ry[0]) * self.eval_vars_at_ry + ry[0] * poly_input_eval
-    let comm_eval_Z_at_ry = GroupElement::vartime_multiscalar_mul(
-      iter::once(Scalar::one() - ry[0]).chain(iter::once(ry[0])),
-      iter::once(&self.comm_vars_at_ry.decompress().unwrap()).chain(iter::once(
-        &poly_input_eval.commit(&Scalar::zero(), &gens.gens_pc.gens.gens_1),
-      )),
-    );
+    let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();
 
     // perform the final check in the second sum-check protocol
     let (eval_A_r, eval_B_r, eval_C_r) = evals;

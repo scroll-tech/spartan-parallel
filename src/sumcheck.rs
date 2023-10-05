@@ -12,7 +12,7 @@ use super::random::RandomTape;
 use super::scalar::Scalar;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use super::unipoly::{CompressedUniPoly, UniPoly};
-use core::iter;
+use core::{iter, num};
 use itertools::izip;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};

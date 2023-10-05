@@ -23,7 +23,6 @@ pub struct R1CSInstance {
   num_instances: usize,
   num_cons: usize,
   num_vars: usize,
-  num_inputs: usize,
   // List of individual A, B, C for matrix multiplication
   A_list: Vec<SparseMatPolynomial>,
   B_list: Vec<SparseMatPolynomial>,
@@ -44,12 +43,10 @@ impl R1CSCommitmentGens {
     num_instances: usize,
     num_cons: usize,
     num_vars: usize,
-    num_inputs: usize,
     num_nz_entries: usize,
   ) -> R1CSCommitmentGens {
-    assert!(num_inputs < num_vars);
     let num_poly_vars_x = num_instances.log_2() * num_cons.log_2();
-    let num_poly_vars_y = (2 * num_vars).log_2();
+    let num_poly_vars_y = num_vars.log_2();
     let gens =
       SparseMatPolyCommitmentGens::new(label, num_poly_vars_x, num_poly_vars_y, num_instances * num_nz_entries, 3);
     R1CSCommitmentGens { gens }
@@ -60,7 +57,6 @@ impl R1CSCommitmentGens {
 pub struct R1CSCommitment {
   num_cons: usize,
   num_vars: usize,
-  num_inputs: usize,
   comm: SparseMatPolyCommitment,
 }
 
@@ -68,7 +64,6 @@ impl AppendToTranscript for R1CSCommitment {
   fn append_to_transcript(&self, _label: &'static [u8], transcript: &mut Transcript) {
     transcript.append_u64(b"num_cons", self.num_cons as u64);
     transcript.append_u64(b"num_vars", self.num_vars as u64);
-    transcript.append_u64(b"num_inputs", self.num_inputs as u64);
     self.comm.append_to_transcript(b"comm", transcript);
   }
 }
@@ -85,10 +80,6 @@ impl R1CSCommitment {
   pub fn get_num_vars(&self) -> usize {
     self.num_vars
   }
-
-  pub fn get_num_inputs(&self) -> usize {
-    self.num_inputs
-  }
 }
 
 impl R1CSInstance {
@@ -96,7 +87,6 @@ impl R1CSInstance {
     num_instances: usize,
     num_cons: usize,
     num_vars: usize,
-    num_inputs: usize,
     A_list: &Vec<Vec<(usize, usize, Scalar)>>,
     B_list: &Vec<Vec<(usize, usize, Scalar)>>,
     C_list: &Vec<Vec<(usize, usize, Scalar)>>,
@@ -104,7 +94,6 @@ impl R1CSInstance {
     Timer::print(&format!("number_of_instances {num_instances}"));
     Timer::print(&format!("number_of_constraints {num_cons}"));
     Timer::print(&format!("number_of_variables {num_vars}"));
-    Timer::print(&format!("number_of_inputs {num_inputs}"));
     // Timer::print(&format!("number_non-zero_entries_A {}", A.len()));
     // Timer::print(&format!("number_non-zero_entries_B {}", B.len()));
     // Timer::print(&format!("number_non-zero_entries_C {}", C.len()));
@@ -118,9 +107,6 @@ impl R1CSInstance {
     // check that num_vars is a power of 2
     assert_eq!(num_vars.next_power_of_two(), num_vars);
 
-    // check that number_inputs + 1 <= num_vars
-    assert!(num_inputs < num_vars);
-
     // check that length of A_list, B_list, C_list are the same
     assert_eq!(A_list.len(), B_list.len());
     assert_eq!(B_list.len(), C_list.len());
@@ -128,7 +114,7 @@ impl R1CSInstance {
     // no errors, so create polynomials
     let num_poly_vars_px = (num_instances * num_cons).log_2();
     let num_poly_vars_x = num_cons.log_2();
-    let num_poly_vars_y = (2 * num_vars).log_2();
+    let num_poly_vars_y = num_vars.log_2();
 
     let mut poly_A_list = Vec::new();
     let mut poly_B_list = Vec::new();
@@ -172,7 +158,6 @@ impl R1CSInstance {
       num_instances,
       num_cons,
       num_vars,
-      num_inputs,
       A_list: poly_A_list,
       B_list: poly_B_list,
       C_list: poly_C_list,
@@ -192,10 +177,6 @@ impl R1CSInstance {
 
   pub fn get_num_cons(&self) -> usize {
     self.num_cons
-  }
-
-  pub fn get_num_inputs(&self) -> usize {
-    self.num_inputs
   }
 
   pub fn get_digest(&self) -> Vec<u8> {
@@ -331,7 +312,6 @@ impl R1CSInstance {
         let vars = &vars[p][q];
         let input = &input[p][q];
         assert_eq!(vars.len(), self.num_vars);
-        assert_eq!(input.len(), self.num_inputs);
 
         let z = {
           let mut z = vars.to_vec();
@@ -343,13 +323,13 @@ impl R1CSInstance {
         // verify if Az * Bz - Cz = [0...]
         let Az = self
           .A_list[p]
-          .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
+          .multiply_vec(self.num_cons, self.num_vars, &z);
         let Bz = self
           .B_list[p]
-          .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
+          .multiply_vec(self.num_cons, self.num_vars, &z);
         let Cz = self
           .C_list[p]
-          .multiply_vec(self.num_cons, self.num_vars + self.num_inputs + 1, &z);
+          .multiply_vec(self.num_cons, self.num_vars, &z);
 
         assert_eq!(Az.len(), self.num_cons);
         assert_eq!(Bz.len(), self.num_cons);
@@ -376,7 +356,7 @@ impl R1CSInstance {
     z_mat: &Vec<Vec<Vec<Scalar>>>
   ) -> (DensePolynomial_PQX, DensePolynomial_PQX, DensePolynomial_PQX) {
     assert_eq!(num_rows, self.num_cons);
-    assert!(num_cols > self.num_vars);
+    assert!(num_cols == self.num_vars);
     let mut Az = Vec::new();
     let mut Bz = Vec::new();
     let mut Cz = Vec::new();
@@ -427,7 +407,7 @@ impl R1CSInstance {
     evals: &[Scalar],
   ) -> (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
     assert_eq!(num_rows, self.num_cons);
-    assert!(num_cols > self.num_vars);
+    assert!(num_cols == self.num_vars);
 
     let mut evals_A_list = Vec::new();
     let mut evals_B_list = Vec::new();
@@ -454,7 +434,6 @@ impl R1CSInstance {
     let r1cs_comm = R1CSCommitment {
       num_cons: self.num_instances * self.num_cons,
       num_vars: self.num_vars,
-      num_inputs: self.num_inputs,
       comm,
     };
 

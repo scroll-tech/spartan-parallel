@@ -6,12 +6,12 @@
 //! `Z0 * Z0 - Z1 = 0`
 //! `Z1 * Z0 - Z2 = 0`
 //! `(Z2 + Z0) * 1 - Z3 = 0`
-//! `(Z3 + 5) * 1 - I0 = 0`
+//! `(Z3 + 5) * 1 - Z4 = 0`
 //! Instance 2:
 //! `Z0 * 2 - Z1 = 0`
 //! `Z1 * Z0 - 2 * Z2 = 0`
 //! `(Z2 + Z1 + Z0) * 4 - Z3 = 0`
-//! `(Z3 + Z1 + 5) * 2 - I0 = 0`
+//! `(Z3 + Z1 + 5) * 2 - Z4 = 0`
 //!
 //! [here]: https://medium.com/@VitalikButerin/quadratic-arithmetic-programs-from-zero-to-hero-f6d558cea649
 #![allow(clippy::assertions_on_result_states)]
@@ -27,11 +27,9 @@ fn produce_r1cs() -> (
   usize,
   usize,
   usize,
-  usize,
   Vec<usize>,
   Instance,
   Vec<Vec<VarsAssignment>>,
-  Vec<Vec<InputsAssignment>>,
 ) {
   // bad test cases
   // set them to unreachable values to prevent bad tests
@@ -40,8 +38,8 @@ fn produce_r1cs() -> (
   // parameters of the R1CS instance
   // maximum value among the R1CS instances
   let num_cons = 4;
-  let num_vars = 4;
-  let num_inputs = 1;
+  // Let num_vars be 2^x - 1 so we can put a constant at the end
+  let mut num_vars = 7;
   let num_non_zero_entries = 8;
   // Number of R1CS instances
   let num_instances = 2;
@@ -52,7 +50,6 @@ fn produce_r1cs() -> (
   let one = Scalar::one().to_bytes();
   let two = Scalar::from(2u32).to_bytes();
   let mut assignment_vars_matrix = Vec::new();
-  let mut assignment_inputs_matrix = Vec::new();
 
   let mut A_list = Vec::new();
   let mut B_list = Vec::new();
@@ -93,18 +90,17 @@ fn produce_r1cs() -> (
   C.push((2, 3, one));
 
   // constraint 3 entries in (A,B,C)
-  // constraint 3 is (Z3 + 5) * 1 - I0 = 0.
+  // constraint 3 is (Z3 + 5) * 1 - Z4 = 0.
   A.push((3, 3, one));
   A.push((3, num_vars, Scalar::from(5u32).to_bytes()));
   B.push((3, num_vars, one));
-  C.push((3, num_vars + 1, one));
+  C.push((3, 4, one));
 
   A_list.push(A);
   B_list.push(B);
   C_list.push(C);
 
   let mut assignment_vars = Vec::new();
-  let mut assignment_inputs = Vec::new();
 
   for proof in 0..num_proofs[instance] {
     // compute a satisfying assignment
@@ -114,31 +110,26 @@ fn produce_r1cs() -> (
     let z2 = z1 * z0; // constraint 1
     // let z3 = z2 + z0; // constraint 2
     let z3 = if instance == bad_instance && proof == bad_proof {z2 - z0} else {z2 + z0};
-    let i0 = z3 + Scalar::from(5u32); // constraint 3
+    let z4 = z3 + Scalar::from(5u32); // constraint 3
 
     // create a VarsAssignment
-    let mut vars = vec![Scalar::zero().to_bytes(); num_vars];
+    let mut vars = vec![Scalar::zero().to_bytes(); num_vars + 1];
     vars[0] = z0.to_bytes();
     vars[1] = z1.to_bytes();
     vars[2] = z2.to_bytes();
     vars[3] = z3.to_bytes();
+    vars[4] = z4.to_bytes();
+    vars[num_vars] = Scalar::one().to_bytes();
     let next_assignment_vars = VarsAssignment::new(&vars).unwrap();
-
-    // create an InputsAssignment
-    let mut inputs = vec![Scalar::zero().to_bytes(); num_inputs];
-    inputs[0] = i0.to_bytes();
-    let next_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
 
     // check if the instance we created is satisfiable
     // let res = inst.is_sat(&next_assignment_vars, &next_assignment_inputs);
     // assert!(res.unwrap(), "should be satisfied");
 
     assignment_vars.push(next_assignment_vars);
-    assignment_inputs.push(next_assignment_inputs);
   }
 
   assignment_vars_matrix.push(assignment_vars);
-  assignment_inputs_matrix.push(assignment_inputs);
   
   // --
   // Instance 1
@@ -176,19 +167,18 @@ fn produce_r1cs() -> (
   C.push((2, 3, one));
 
   // constraint 3 entries in (A,B,C)
-  // constraint 3 is (Z3 + Z1 + 5) * 2 - I0 = 0.
+  // constraint 3 is (Z3 + Z1 + 5) * 2 - Z4 = 0.
   A.push((3, 3, one));
   A.push((3, 1, one));
   A.push((3, num_vars, Scalar::from(5u32).to_bytes()));
   B.push((3, num_vars, two));
-  C.push((3, num_vars + 1, one));
+  C.push((3, 4, one));
 
   A_list.push(A);
   B_list.push(B);
   C_list.push(C);
 
   let mut assignment_vars = Vec::new();
-  let mut assignment_inputs = Vec::new();
 
   for proof in 0..num_proofs[instance] {
     // compute a satisfying assignment
@@ -198,48 +188,44 @@ fn produce_r1cs() -> (
     let z2 = z1 * z0; // constraint 1
     // let z3 = z2 + z1 + z0 + z2 + z1 + z0; // constraint 2
     let z3 = if instance == bad_instance && proof == bad_proof {z2} else {z2 + z1 + z0 + z2 + z1 + z0};
-    let i0 = z3 + z1 + Scalar::from(5u32) + z3 + z1 + Scalar::from(5u32); // constraint 3
+    let z4 = z3 + z1 + Scalar::from(5u32) + z3 + z1 + Scalar::from(5u32); // constraint 3
 
     // create a VarsAssignment
-    let mut vars = vec![Scalar::zero().to_bytes(); num_vars];
+    let mut vars = vec![Scalar::zero().to_bytes(); num_vars + 1];
     vars[0] = z0.to_bytes();
     vars[1] = z1.to_bytes();
     vars[2] = z2.to_bytes();
     vars[3] = z3.to_bytes();
+    vars[4] = z4.to_bytes();
+    vars[num_vars] = Scalar::one().to_bytes();
     let next_assignment_vars = VarsAssignment::new(&vars).unwrap();
-
-    // create an InputsAssignment
-    let mut inputs = vec![Scalar::zero().to_bytes(); num_inputs];
-    inputs[0] = i0.to_bytes();
-    let next_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
 
     // check if the instance we created is satisfiable
     // let res = inst.is_sat(&next_assignment_vars, &next_assignment_inputs);
     // assert!(res.unwrap(), "should be satisfied");
 
     assignment_vars.push(next_assignment_vars);
-    assignment_inputs.push(next_assignment_inputs);
   }
 
   assignment_vars_matrix.push(assignment_vars);
-  assignment_inputs_matrix.push(assignment_inputs);
 
   // --
   // End Instances
   // --
-  let inst = Instance::new(num_instances, num_cons, num_vars, num_inputs, &A_list, &B_list, &C_list).unwrap();
+
+  num_vars += 1;
+
+  let inst = Instance::new(num_instances, num_cons, num_vars, &A_list, &B_list, &C_list).unwrap();
 
   (
     num_cons,
     num_vars,
-    num_inputs,
     num_non_zero_entries,
     num_instances,
     max_num_proofs,
     num_proofs,
     inst,
     assignment_vars_matrix,
-    assignment_inputs_matrix,
   )
 }
 
@@ -248,21 +234,18 @@ fn main() {
   let (
     num_cons,
     num_vars,
-    num_inputs,
     num_non_zero_entries,
     num_instances,
     max_num_proofs,
     num_proofs,
     inst,
     assignment_vars_matrix,
-    assignment_inputs_matrix,
   ) = produce_r1cs();
 
   assert_eq!(num_instances, assignment_vars_matrix.len());
-  assert_eq!(num_instances, assignment_inputs_matrix.len());
 
   // produce public parameters
-  let gens = SNARKGens::new(num_cons, num_vars, num_inputs, num_instances, max_num_proofs, num_non_zero_entries);
+  let gens = SNARKGens::new(num_cons, num_vars, num_instances, num_non_zero_entries);
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
@@ -277,7 +260,6 @@ fn main() {
     &comm,
     &decomm,
     assignment_vars_matrix,
-    &assignment_inputs_matrix,
     &gens,
     &mut prover_transcript,
   );
@@ -285,7 +267,7 @@ fn main() {
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
-    .verify(max_num_proofs, &num_proofs, num_cons, &comm, &assignment_inputs_matrix, &mut verifier_transcript, &gens)
+    .verify(num_instances, max_num_proofs, &num_proofs, num_cons, &comm, &mut verifier_transcript, &gens)
     .is_ok());
   println!("proof verification successful!");
 }
