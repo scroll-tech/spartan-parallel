@@ -85,7 +85,9 @@ impl R1CSProof {
     num_rounds_q_max: usize,
     num_rounds_p: usize,
     num_proofs: &Vec<usize>,
-    evals_tau: &mut DensePolynomial_PQX,
+    evals_tau_p: &mut DensePolynomial,
+    evals_tau_q: &mut DensePolynomial,
+    evals_tau_x: &mut DensePolynomial,
     evals_Az: &mut DensePolynomial_PQX,
     evals_Bz: &mut DensePolynomial_PQX,
     evals_Cz: &mut DensePolynomial_PQX,
@@ -108,7 +110,9 @@ impl R1CSProof {
         num_rounds_q_max,
         num_rounds_p,
         num_proofs.clone(),
-        evals_tau,
+        evals_tau_p,
+        evals_tau_q,
+        evals_tau_x,
         evals_Az,
         evals_Bz,
         evals_Cz,
@@ -208,14 +212,19 @@ impl R1CSProof {
     // derive the verifier's challenge \tau
     let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
       (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
+    let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
+    let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
+    let tau_x = transcript.challenge_vector(b"challenge_tau_x", num_rounds_x);
 
     // compute the initial evaluation table for R(\tau, x)
     // let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals_disjoint_rounds(num_rounds_x, num_rounds_q, num_rounds_p, &num_proofs));
-    let mut poly_tau = DensePolynomial_PQX::new(
-      &EqPolynomial::new(tau).evals_PQX(num_rounds_p, num_rounds_q, num_rounds_x), 
-      &vec![max_num_proofs; num_instances], 
-      max_num_proofs);
+    // let mut poly_tau = DensePolynomial_PQX::new(
+      // &EqPolynomial::new(tau).evals_PQX(num_rounds_p, num_rounds_q, num_rounds_x), 
+      // &vec![max_num_proofs; num_instances], 
+      // max_num_proofs);
+    let mut poly_tau_p = DensePolynomial::new(EqPolynomial::new(tau_p).evals());
+    let mut poly_tau_q = DensePolynomial::new(EqPolynomial::new(tau_q).evals());
+    let mut poly_tau_x = DensePolynomial::new(EqPolynomial::new(tau_x).evals());
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
       inst.multiply_vec_bunched(num_instances, num_proofs, max_num_proofs, num_cons, z_len, &z_mat);
 
@@ -226,7 +235,9 @@ impl R1CSProof {
       num_rounds_q,
       num_rounds_p,
       &num_proofs,
-      &mut poly_tau,
+      &mut poly_tau_p,
+      &mut poly_tau_q,
+      &mut poly_tau_x,
       &mut poly_Az,
       &mut poly_Bz,
       &mut poly_Cz,
@@ -234,14 +245,16 @@ impl R1CSProof {
       transcript,
       random_tape,
     );
-    assert_eq!(poly_tau.len(), 1);
+    assert_eq!(poly_tau_p.len(), 1);
+    assert_eq!(poly_tau_q.len(), 1);
+    assert_eq!(poly_tau_x.len(), 1);
     assert_eq!(poly_Az.len(), 1);
     assert_eq!(poly_Bz.len(), 1);
     assert_eq!(poly_Cz.len(), 1);
     timer_sc_proof_phase1.stop();
 
     let (tau_claim, Az_claim, Bz_claim, Cz_claim) =
-      (&poly_tau.index(0, 0, 0), &poly_Az.index(0, 0, 0), &poly_Bz.index(0, 0, 0), &poly_Cz.index(0, 0, 0));
+      (&(poly_tau_p[0] * poly_tau_q[0] * poly_tau_x[0]), &poly_Az.index(0, 0, 0), &poly_Bz.index(0, 0, 0), &poly_Cz.index(0, 0, 0));
 
     let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
       random_tape.random_scalar(b"Az_blind"),
@@ -436,7 +449,9 @@ impl R1CSProof {
     let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), max_num_proofs.log_2(), num_vars.log_2());
 
     // derive the verifier's challenge tau
-    let tau = transcript.challenge_vector(b"challenge_tau", num_rounds_x + num_rounds_q + num_rounds_p);
+    let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
+    let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
+    let tau_x = transcript.challenge_vector(b"challenge_tau_x", num_rounds_x);
 
     // verify the first sum-check instance
     let claim_phase1 = Scalar::zero()
@@ -469,10 +484,24 @@ impl R1CSProof {
     comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
     comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
 
+    // Separate the result rx into rp_round1, rq, and rx
+    let (rx, rq_rev) = rx.split_at(num_rounds_x);
+    let (rq_rev, rp_round1) = rq_rev.split_at(num_rounds_q);
+    let rx = rx.to_vec();
+    let rq_rev = rq_rev.to_vec();
+    let rp_round1 = rp_round1.to_vec();
+
     // taus_bound_rx is really taus_bound_rx_rq_rp
-    let taus_bound_rx: Scalar = (0..rx.len())
-      .map(|i| rx[i] * tau[i] + (Scalar::one() - rx[i]) * (Scalar::one() - tau[i]))
+    let taus_bound_rp: Scalar = (0..rp_round1.len())
+      .map(|i| rp_round1[i] * tau_p[i] + (Scalar::one() - rp_round1[i]) * (Scalar::one() - tau_p[i]))
       .product();
+    let taus_bound_rq: Scalar = (0..rq_rev.len())
+      .map(|i| rq_rev[i] * tau_q[i] + (Scalar::one() - rq_rev[i]) * (Scalar::one() - tau_q[i]))
+      .product();
+    let taus_bound_rx: Scalar = (0..rx.len())
+      .map(|i| rx[i] * tau_x[i] + (Scalar::one() - rx[i]) * (Scalar::one() - tau_x[i]))
+      .product();
+    let taus_bound_rx = taus_bound_rp * taus_bound_rq * taus_bound_rx;
 
     let expected_claim_post_phase1 = (taus_bound_rx
       * (comm_prod_Az_Bz_claims.decompress().unwrap() - comm_Cz_claim.decompress().unwrap()))
@@ -513,13 +542,6 @@ impl R1CSProof {
       &gens.gens_sc.gens_4,
       transcript,
     )?;
-
-    // Separate the result rx into rp_round1, rq, and rx
-    let (rx, rq_rev) = rx.split_at(num_rounds_x);
-    let (rq_rev, rp_round1) = rq_rev.split_at(num_rounds_q);
-    let rx = rx.to_vec();
-    let rq_rev = rq_rev.to_vec();
-    let rp_round1 = rp_round1.to_vec();
 
     // Separate ry into rp and ry
     let (rp, ry) = ry.split_at(num_rounds_p);
