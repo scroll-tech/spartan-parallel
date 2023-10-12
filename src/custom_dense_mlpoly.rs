@@ -328,7 +328,6 @@ impl PolyEvalProof_PQX {
     let blind_Zr = blind_Zr_opt.map_or(&zero, |p| p);
 
     // compute the L and R vectors
-    // TODO: Reduce complexity of this
     let L = EqPolynomial::new([rp, rq].concat()).evals_PQ(rp.len(), rq.len(), num_proofs);
     let R = EqPolynomial::new(rx.to_vec()).evals();
 
@@ -375,20 +374,20 @@ impl PolyEvalProof_PQX {
 
     // compute L and R
     // TODO: Reduce complexity of this
-    let L = EqPolynomial::new([rp, rq].concat()).evals_PQ(rp.len(), rq.len(), num_proofs);
+    let P = EqPolynomial::new(rp.to_vec()).evals();
+    let L = EqPolynomial::new(rq.to_vec()).evals();
     let R = EqPolynomial::new(rx.to_vec()).evals();
+    let max_num_proofs = rq.len().pow2();
 
     // compute a weighted sum of commitments and L
-    let mut L_compact = Vec::new();
-    let mut C_decompressed = Vec::new();
+    let mut C_LZ = Vec::new();
     for p in 0..comm.C.len() {
-      for q in 0..comm.C[p].len() {
-        L_compact.push(L[p][q]);
-        C_decompressed.push(comm.C[p][q].decompress().unwrap());
-      }
+      let step = max_num_proofs / num_proofs[p];
+      let C_decompressed = comm.C[p].iter().map(|i| i.decompress().unwrap());
+      let L: Vec<Scalar> = (0..comm.C[p].len()).map(|i| L[i * step]).collect();
+      C_LZ.push(GroupElement::vartime_multiscalar_mul(&L, C_decompressed));
     }
-
-    let C_LZ = GroupElement::vartime_multiscalar_mul(&L_compact, C_decompressed).compress();
+    let C_LZ = GroupElement::vartime_multiscalar_mul(&P, C_LZ.iter()).compress();
 
     self
       .proof
