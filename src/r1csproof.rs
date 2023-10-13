@@ -31,7 +31,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct R1CSProof {
   comm_vars_list: Vec<PolyCommitment>,
-  comm_vars: PolyCommitment,
   sc_proof_phase1: ZKSumcheckInstanceProof,
   claims_phase2: (
     CompressedGroup,
@@ -45,7 +44,6 @@ pub struct R1CSProof {
   comm_vars_at_ry_list: Vec<CompressedGroup>,
   comm_vars_at_ry: CompressedGroup,
   proof_eval_vars_at_ry_list: Vec<PolyEvalProof>,
-  proof_eval_vars_at_ry: PolyEvalProof,
   proof_eq_sc_phase2: EqualityProof,
 }
 
@@ -193,24 +191,22 @@ impl R1CSProof {
     // commit the witnesses instance-by-instance
     let mut poly_vars_list = Vec::new();
     let mut comm_vars_list = Vec::new();
-    let mut blinds_vars_list = Vec::new();
     for p in 0..num_instances {
-      let (poly_vars, comm_vars, blinds_vars) = {
+      let (poly_vars, comm_vars) = {
         // Flatten the witnesses into a Q_i * X list
         let vars_list_p = vars_mat[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
         // create a multilinear polynomial using the supplied assignment for variables
         let poly_vars = DensePolynomial::new(vars_list_p);
 
         // produce a commitment to the satisfying assignment
-        let (comm_vars, blinds_vars) = poly_vars.commit(&gens.gens_pc, Some(random_tape));
+        let (comm_vars, _blinds_vars) = poly_vars.commit(&gens.gens_pc, None);
 
         // add the commitment to the prover's transcript
         comm_vars.append_to_transcript(b"poly_commitment", transcript);
-        (poly_vars, comm_vars, blinds_vars)
+        (poly_vars, comm_vars)
       };
       poly_vars_list.push(poly_vars);
       comm_vars_list.push(comm_vars);
-      blinds_vars_list.push(blinds_vars);
     }
     timer_commit.stop();
 
@@ -392,14 +388,12 @@ impl R1CSProof {
       let r = [rq_short, &ry].concat();
       let eval_vars_at_ry = poly_vars_list[p].evaluate(&r);
 
-      let blind_eval = random_tape.random_scalar(b"blind_eval");
-
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
         &poly_vars_list[p],
-        Some(&blinds_vars_list[p]),
+        None,
         &r,
         &eval_vars_at_ry,
-        Some(&blind_eval),
+        None,
         &gens.gens_pc,
         transcript,
         random_tape,
@@ -422,25 +416,10 @@ impl R1CSProof {
     }
     let poly_vars = DensePolynomial::new(eval_vars_at_ry_list);
     let eval_vars_at_ry = poly_vars.evaluate(&rp);
-    
-    // produce a commitment to the satisfying assignment
-    let (comm_vars, blinds_vars) = poly_vars.commit(&gens.gens_pc, Some(random_tape));
-    let blind_eval = random_tape.random_scalar(b"blind_eval");
-
-    let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
-      &poly_vars,
-      Some(&blinds_vars),
-      &rp,
-      &eval_vars_at_ry,
-      Some(&blind_eval),
-      &gens.gens_pc,
-      transcript,
-      random_tape,
-    );
+    let comm_vars_at_ry = eval_vars_at_ry.commit(&Scalar::zero(), &gens.gens_pc.gens.gens_1).compress();
 
     // prove the final step of sum-check #2
-    let blind_eval_Z_at_ry = blind_eval;
-    let blind_expected_claim_postsc2 = blind_eval_Z_at_ry * claims_phase2[1] * claims_phase2[2];
+    let blind_expected_claim_postsc2 = Scalar::zero();
     let claim_post_phase2 = claims_phase2[0] * claims_phase2[1] * claims_phase2[2];
     let (proof_eq_sc_phase2, _C1, _C2) = EqualityProof::prove(
       &gens.gens_pc.gens.gens_1,
@@ -457,7 +436,6 @@ impl R1CSProof {
     (
       R1CSProof {
         comm_vars_list,
-        comm_vars,
         sc_proof_phase1,
         claims_phase2: (
           comm_Az_claim,
@@ -471,7 +449,6 @@ impl R1CSProof {
         comm_vars_at_ry_list,
         comm_vars_at_ry,
         proof_eval_vars_at_ry_list,
-        proof_eval_vars_at_ry,
         proof_eq_sc_phase2,
       },
       rp,
@@ -623,25 +600,16 @@ impl R1CSProof {
       )?;
     }
 
-    // Verify that comm_vars is the result of bounding rp to comm_vars_list
-    let EQ_p = EqPolynomial::new(rp.clone()).evals();
-    let mut vars_at_ry_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
+    // Then on rp
+    let mut expected_comm_vars_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
     for p in 0..num_instances {
       for q in 0..(num_rounds_q - num_proofs[p].log_2()) {
-        vars_at_ry_list[p] *= Scalar::one() - rq[q];
+        expected_comm_vars_list[p] *= Scalar::one() - rq[q];
       }
     }
-    let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, vars_at_ry_list).compress();
+    let EQ_p = EqPolynomial::new(rp.clone()).evals();
+    let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_comm_vars_list).compress();
     assert_eq!(expected_comm_vars_at_ry, self.comm_vars_at_ry);
-
-    // Then on rp
-    self.proof_eval_vars_at_ry.verify(
-      &gens.gens_pc,
-      transcript,
-      &rp,
-      &self.comm_vars_at_ry,
-      &self.comm_vars,
-    )?;
 
     // compute commitment to eval_Z_at_ry = (Scalar::one() - ry[0]) * self.eval_vars_at_ry + ry[0] * poly_input_eval
     let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();

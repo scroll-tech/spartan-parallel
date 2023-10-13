@@ -41,12 +41,18 @@ impl PolyCommitmentGens {
 }
 
 pub struct PolyCommitmentBlinds {
-  pub (crate) blinds: Vec<Scalar>,
+  pub(crate) blinds: Vec<Scalar>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PolyCommitment {
   C: Vec<CompressedGroup>,
+}
+
+impl PolyCommitment {
+  pub fn equals(&self, other: Vec<CompressedGroup>) -> bool {
+    return self.C == other;
+  }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
