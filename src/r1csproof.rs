@@ -21,6 +21,7 @@ use super::timer::Timer;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use core::{iter, num};
 use std::env::var;
+use curve25519_dalek::ristretto::RistrettoPoint;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
@@ -624,7 +625,12 @@ impl R1CSProof {
 
     // Verify that comm_vars is the result of bounding rp to comm_vars_list
     let EQ_p = EqPolynomial::new(rp.clone()).evals();
-    let vars_at_ry_list = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap());
+    let mut vars_at_ry_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
+    for p in 0..num_instances {
+      for q in 0..(num_rounds_q - num_proofs[p].log_2()) {
+        vars_at_ry_list[p] *= Scalar::one() - rq[q];
+      }
+    }
     let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, vars_at_ry_list).compress();
     assert_eq!(expected_comm_vars_at_ry, self.comm_vars_at_ry);
 
