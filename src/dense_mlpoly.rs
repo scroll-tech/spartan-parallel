@@ -41,7 +41,7 @@ impl PolyCommitmentGens {
 }
 
 pub struct PolyCommitmentBlinds {
-  blinds: Vec<Scalar>,
+  pub (crate) blinds: Vec<Scalar>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -357,6 +357,23 @@ impl DensePolynomial {
     };
 
     (self.commit_inner(&blinds.blinds, &gens.gens.gens_n), blinds)
+  }
+
+  pub fn commit_with_blind(
+    &self,
+    gens: &PolyCommitmentGens,
+    blinds: &PolyCommitmentBlinds,
+  ) -> PolyCommitment {
+    let n = self.Z.len();
+    let ell = self.get_num_vars();
+    assert_eq!(n, ell.pow2());
+
+    let (left_num_vars, right_num_vars) = EqPolynomial::compute_factored_lens(ell);
+    let L_size = left_num_vars.pow2();
+    let R_size = right_num_vars.pow2();
+    assert_eq!(L_size * R_size, n);
+
+    self.commit_inner(&blinds.blinds, &gens.gens.gens_n)
   }
 
   pub fn bound(&self, L: &[Scalar]) -> Vec<Scalar> {
