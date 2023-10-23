@@ -352,6 +352,7 @@ impl SNARK {
     comm: &ComputationCommitment,
     decomm: &ComputationDecommitment,
     vars_mat: Vec<Vec<VarsAssignment>>,
+    inputs_mat: Vec<Vec<InputsAssignment>>,
     gens: &SNARKGens,
     transcript: &mut Transcript,
   ) -> Self {
@@ -366,30 +367,12 @@ impl SNARK {
 
     let (r1cs_sat_proof, rp, _rq, rx, ry) = {
       let (proof, rp, rq, rx, ry) = {
-        // we might need to pad variables
-        // assume both vars_mat.len() and vars_mat[i].len() are power of 2
-        let mut padded_vars_mat = Vec::new();
-        for i in 0..vars_mat.len() {
-          padded_vars_mat.push(Vec::new());
-          for j in 0..vars_mat[i].len() {
-            let padded_vars = {
-              let num_padded_vars = inst.inst.get_num_vars();
-              let num_vars = vars_mat[i][j].assignment.len();
-              if num_padded_vars > num_vars {
-                vars_mat[i][j].pad(num_padded_vars)
-              } else {
-                vars_mat[i][j].clone()
-              }
-            };
-            padded_vars_mat[i].push(padded_vars);
-          }
-        }
-
         R1CSProof::prove(
           max_num_proofs,
           num_proofs,
           &inst.inst,
-          padded_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
+          vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
+          inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
           &gens.gens_r1cs_sat,
           transcript,
           &mut random_tape,
