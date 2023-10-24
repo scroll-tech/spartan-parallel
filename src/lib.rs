@@ -378,9 +378,13 @@ impl SNARK {
           block_max_num_proofs,
           block_num_proofs,
           &block_inst.inst,
+          &block_gens.gens_r1cs_sat,
+          consis_num_proofs,
+          &consis_inst.inst,
+          &consis_gens.gens_r1cs_sat,
           block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
           block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
-          &block_gens.gens_r1cs_sat,
+          exec_inputs.into_iter().map(|v| v.assignment).collect_vec(),
           transcript,
           &mut random_tape,
         )
@@ -457,9 +461,12 @@ impl SNARK {
       block_num_instances,
       block_max_num_proofs,
       block_num_proofs,
-      &self.inst_evals,
-      transcript,
       &block_gens.gens_r1cs_sat,
+      &self.inst_evals,
+      consis_num_cons,
+      consis_num_proofs,
+      &consis_gens.gens_r1cs_sat,
+      transcript,
     )?;
     timer_sat_proof.stop();
 
