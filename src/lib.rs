@@ -346,14 +346,20 @@ impl SNARK {
 
   /// A method to produce a SNARK proof of the satisfiability of an R1CS instance
   pub fn prove(
-    max_num_proofs: usize,
-    num_proofs: &Vec<usize>,
-    inst: &Instance,
-    comm: &ComputationCommitment,
-    decomm: &ComputationDecommitment,
-    vars_mat: Vec<Vec<VarsAssignment>>,
-    inputs_mat: Vec<Vec<InputsAssignment>>,
-    gens: &SNARKGens,
+    block_max_num_proofs: usize,
+    block_num_proofs: &Vec<usize>,
+    block_inst: &Instance,
+    block_comm: &ComputationCommitment,
+    block_decomm: &ComputationDecommitment,
+    block_gens: &SNARKGens,
+    consis_num_proofs: usize,
+    consis_inst: &Instance,
+    consis_comm: &ComputationCommitment,
+    consis_decomm: &ComputationDecommitment,
+    consis_gens: &SNARKGens,
+    block_vars_mat: Vec<Vec<VarsAssignment>>,
+    block_inputs_mat: Vec<Vec<InputsAssignment>>,
+    exec_inputs: Vec<InputsAssignment>,
     transcript: &mut Transcript,
   ) -> Self {
     let timer_prove = Timer::new("SNARK::prove");
@@ -363,17 +369,18 @@ impl SNARK {
     let mut random_tape = RandomTape::new(b"proof");
 
     transcript.append_protocol_name(SNARK::protocol_name());
-    comm.comm.append_to_transcript(b"comm", transcript);
+    block_comm.comm.append_to_transcript(b"block_comm", transcript);
+    consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
     let (r1cs_sat_proof, rp, _rq, rx, ry) = {
       let (proof, rp, rq, rx, ry) = {
         R1CSProof::prove(
-          max_num_proofs,
-          num_proofs,
-          &inst.inst,
-          vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
-          inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
-          &gens.gens_r1cs_sat,
+          block_max_num_proofs,
+          block_num_proofs,
+          &block_inst.inst,
+          block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
+          block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
+          &block_gens.gens_r1cs_sat,
           transcript,
           &mut random_tape,
         )
@@ -389,7 +396,7 @@ impl SNARK {
     // to enable the verifier complete the first sum-check
     let timer_eval = Timer::new("eval_sparse_polys");
     let inst_evals = {
-      let (Ar, Br, Cr) = inst.inst.evaluate(&rp, &rx, &ry);
+      let (Ar, Br, Cr) = block_inst.inst.evaluate(&rp, &rx, &ry);
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);
@@ -399,11 +406,11 @@ impl SNARK {
 
     let r1cs_eval_proof = {
       let proof = R1CSEvalProof::prove(
-        &decomm.decomm,
+        &block_decomm.decomm,
         &[rp, rx].concat(),
         &ry,
         &inst_evals,
-        &gens.gens_r1cs_eval,
+        &block_gens.gens_r1cs_eval,
         transcript,
         &mut random_tape,
       );
@@ -424,30 +431,35 @@ impl SNARK {
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
   pub fn verify(
     &self,
-    num_instances: usize,
-    max_num_proofs: usize,
-    num_proofs: &Vec<usize>,
-    num_cons: usize,
-    comm: &ComputationCommitment,
+    block_num_instances: usize,
+    block_max_num_proofs: usize,
+    block_num_proofs: &Vec<usize>,
+    block_num_cons: usize,
+    block_comm: &ComputationCommitment,
+    block_gens: &SNARKGens,
+    consis_num_proofs: usize,
+    consis_num_cons: usize,
+    consis_comm: &ComputationCommitment,
+    consis_gens: &SNARKGens,
     transcript: &mut Transcript,
-    gens: &SNARKGens,
   ) -> Result<(), ProofVerifyError> {
     let timer_verify = Timer::new("SNARK::verify");
     transcript.append_protocol_name(SNARK::protocol_name());
 
     // append a commitment to the computation to the transcript
-    comm.comm.append_to_transcript(b"comm", transcript);
+    block_comm.comm.append_to_transcript(b"block_comm", transcript);
+    consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
     let timer_sat_proof = Timer::new("verify_sat_proof");
     let (rp, _rq, rx, ry) = self.r1cs_sat_proof.verify(
-      comm.comm.get_num_vars(),
-      num_cons,
-      num_instances,
-      max_num_proofs,
-      num_proofs,
+      block_comm.comm.get_num_vars(),
+      block_num_cons,
+      block_num_instances,
+      block_max_num_proofs,
+      block_num_proofs,
       &self.inst_evals,
       transcript,
-      &gens.gens_r1cs_sat,
+      &block_gens.gens_r1cs_sat,
     )?;
     timer_sat_proof.stop();
 
@@ -457,11 +469,11 @@ impl SNARK {
     Br.append_to_transcript(b"Br_claim", transcript);
     Cr.append_to_transcript(b"Cr_claim", transcript);
     self.r1cs_eval_proof.verify(
-      &comm.comm,
+      &block_comm.comm,
       &[rp, rx].concat(),
       &ry,
       &self.inst_evals,
-      &gens.gens_r1cs_eval,
+      &block_gens.gens_r1cs_eval,
       transcript,
     )?;
     timer_eval_proof.stop();

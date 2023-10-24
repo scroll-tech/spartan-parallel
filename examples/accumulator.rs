@@ -478,11 +478,13 @@ fn main() {
   }
 
   // produce public parameters
-  let gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
+  let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
+  let consis_gens = SNARKGens::new(consis_num_cons, num_vars, consis_num_instances, consis_num_non_zero_entries);
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
-  let (block_comm, block_decomm) = SNARK::encode(&block_inst, &gens);
+  let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
+  let (consis_comm, consis_decomm) = SNARK::encode(&consis_inst, &consis_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
@@ -492,16 +494,33 @@ fn main() {
     &block_inst,
     &block_comm,
     &block_decomm,
+    &block_gens,
+    consis_num_proofs,
+    &consis_inst,
+    &consis_comm,
+    &consis_decomm,
+    &consis_gens,
     block_vars_matrix,
     block_inputs_matrix,
-    &gens,
+    exec_inputs,
     &mut prover_transcript,
   );
 
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
-    .verify(block_num_instances, block_max_num_proofs, &block_num_proofs, block_num_cons, &block_comm, &mut verifier_transcript, &gens)
+    .verify(
+      block_num_instances, 
+      block_max_num_proofs, 
+      &block_num_proofs, 
+      block_num_cons, 
+      &block_comm,
+      &block_gens,
+      consis_num_proofs, 
+      consis_num_cons, 
+      &consis_comm,
+      &consis_gens,
+      &mut verifier_transcript)
     .is_ok());
   println!("proof verification successful!");
 }
