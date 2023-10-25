@@ -305,7 +305,7 @@ fn produce_r1cs() -> (
   // Number of R1CS instances
   let consis_num_instances = 1;
   // Number of proofs of each R1CS instance
-  let consis_num_proofs: usize = 4;
+  let consis_num_proofs: usize = 8;
 
   let consis_inst = {
 
@@ -425,7 +425,7 @@ fn produce_r1cs() -> (
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
 
-    exec_inputs.extend(vec![VarsAssignment::new(&vec![zero; num_vars]).unwrap(); exec_inputs.len().next_power_of_two() - exec_inputs.len()]);
+    exec_inputs.extend(vec![exec_inputs[exec_inputs.len() - 1].clone(); exec_inputs.len().next_power_of_two() - exec_inputs.len()]);
 
     (block_vars_matrix, block_inputs_matrix, exec_inputs)
   };

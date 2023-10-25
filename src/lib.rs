@@ -321,8 +321,10 @@ impl SNARKGens {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SNARK {
   r1cs_sat_proof: R1CSProof,
-  inst_evals: (Scalar, Scalar, Scalar),
-  r1cs_eval_proof: R1CSEvalProof,
+  block_inst_evals: (Scalar, Scalar, Scalar),
+  block_r1cs_eval_proof: R1CSEvalProof,
+  consis_inst_evals: (Scalar, Scalar, Scalar),
+  consis_r1cs_eval_proof: R1CSEvalProof,
 }
 
 impl SNARK {
@@ -372,8 +374,8 @@ impl SNARK {
     block_comm.comm.append_to_transcript(b"block_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
-    let (r1cs_sat_proof, rp, _rq, rx, ry) = {
-      let (proof, rp, rq, rx, ry) = {
+    let (r1cs_sat_proof, block_challenges, consis_challenges) = {
+      let (proof, block_challenges, consis_challenges) = {
         R1CSProof::prove(
           block_max_num_proofs,
           block_num_proofs,
@@ -393,45 +395,87 @@ impl SNARK {
       let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
       Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-      (proof, rp, rq, rx, ry)
+      (proof, block_challenges, consis_challenges)
     };
 
-    // We send evaluations of A, B, C at r = (rx, ry) as claims
-    // to enable the verifier complete the first sum-check
-    let timer_eval = Timer::new("eval_sparse_polys");
-    let inst_evals = {
-      let (Ar, Br, Cr) = block_inst.inst.evaluate(&rp, &rx, &ry);
-      Ar.append_to_transcript(b"Ar_claim", transcript);
-      Br.append_to_transcript(b"Br_claim", transcript);
-      Cr.append_to_transcript(b"Cr_claim", transcript);
-      (Ar, Br, Cr)
+    // Final evaluation on BLOCK
+    let (block_inst_evals, block_r1cs_eval_proof) = {
+      let [rp, _, rx, ry] = block_challenges;
+      let inst = block_inst;
+      let timer_eval = Timer::new("eval_sparse_polys");
+      let inst_evals = {
+        let (Ar, Br, Cr) = inst.inst.evaluate(&rp, &rx, &ry);
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        (Ar, Br, Cr)
+      };
+      timer_eval.stop();
+
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &block_decomm.decomm,
+          &[rp, rx].concat(),
+          &ry,
+          &inst_evals,
+          &block_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
+
+      timer_prove.stop();
+      (inst_evals, r1cs_eval_proof)
     };
-    timer_eval.stop();
 
-    let r1cs_eval_proof = {
-      let proof = R1CSEvalProof::prove(
-        &block_decomm.decomm,
-        &[rp, rx].concat(),
-        &ry,
-        &inst_evals,
-        &block_gens.gens_r1cs_eval,
-        transcript,
-        &mut random_tape,
-      );
+    // Final evaluation on CONSIS
+    let (consis_inst_evals, consis_r1cs_eval_proof) = {
+      let [_, rx, ry] = consis_challenges;
+      let inst = consis_inst;
+      let timer_eval = Timer::new("eval_sparse_polys");
+      let inst_evals = {
+        let (Ar, Br, Cr) = inst.inst.evaluate(&vec![], &rx, &ry);
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        (Ar, Br, Cr)
+      };
+      timer_eval.stop();
 
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-      proof
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &consis_decomm.decomm,
+          &rx,
+          &ry,
+          &inst_evals,
+          &consis_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
+
+      timer_prove.stop();
+      (inst_evals, r1cs_eval_proof)
     };
 
-    timer_prove.stop();
     SNARK {
       r1cs_sat_proof,
-      inst_evals,
-      r1cs_eval_proof,
+      block_inst_evals,
+      block_r1cs_eval_proof,
+      consis_inst_evals,
+      consis_r1cs_eval_proof
     }
   }
 
+  /*
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
   pub fn verify(
     &self,
@@ -462,10 +506,11 @@ impl SNARK {
       block_max_num_proofs,
       block_num_proofs,
       &block_gens.gens_r1cs_sat,
-      &self.inst_evals,
+      &self.block_inst_evals,
       consis_num_cons,
       consis_num_proofs,
       &consis_gens.gens_r1cs_sat,
+      &self.consis_inst_evals,
       transcript,
     )?;
     timer_sat_proof.stop();
@@ -487,6 +532,7 @@ impl SNARK {
     timer_verify.stop();
     Ok(())
   }
+  */
 }
 
 /*
