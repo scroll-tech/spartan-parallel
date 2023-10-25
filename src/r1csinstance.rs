@@ -346,7 +346,7 @@ impl R1CSInstance {
 
   // Az(p, q, x) <- A(p, x) * z(p, q, x), where we require p for A and z are the same
   // Return Az, Bz, Cz as DensePolynomial_PQX
-  pub fn multiply_vec_bunched(
+  pub fn multiply_vec_block(
     &self,
     num_instances: usize,
     num_proofs: &Vec<usize>,
@@ -380,6 +380,34 @@ impl R1CSInstance {
       DensePolynomial_PQX::new_rev(&Az, num_proofs, max_num_proofs),
       DensePolynomial_PQX::new_rev(&Bz, num_proofs, max_num_proofs),
       DensePolynomial_PQX::new_rev(&Cz, num_proofs, max_num_proofs)
+    )
+  }
+
+  pub fn multiply_vec_consis(
+    &self,
+    p: usize,
+    num_rows: usize,
+    num_cols: usize,
+    z_list: &Vec<Vec<Scalar>>,
+  ) -> (DensePolynomial, DensePolynomial, DensePolynomial) {
+    assert_eq!(num_rows, self.num_cons);
+    assert_eq!(num_cols, self.num_vars);
+    let mut Az = Vec::new();
+    let mut Bz = Vec::new();
+    let mut Cz = Vec::new();
+
+    for z in z_list {
+      assert_eq!(z.len(), num_cols);
+      assert_eq!(z.len(), z.len().next_power_of_two());
+
+      Az.extend(self.A_list[p].multiply_vec(num_rows, num_cols, z));
+      Bz.extend(self.B_list[p].multiply_vec(num_rows, num_cols, z));
+      Cz.extend(self.C_list[p].multiply_vec(num_rows, num_cols, z));
+    }
+    (
+      DensePolynomial::new(Az),
+      DensePolynomial::new(Bz),
+      DensePolynomial::new(Cz),
     )
   }
 

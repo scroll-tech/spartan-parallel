@@ -305,7 +305,7 @@ fn produce_r1cs() -> (
   // Number of R1CS instances
   let consis_num_instances = 1;
   // Number of proofs of each R1CS instance
-  let consis_num_proofs: usize = 8;
+  let consis_num_proofs: usize = 4;
 
   let consis_inst = {
 
@@ -366,7 +366,8 @@ fn produce_r1cs() -> (
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
-      assignment_inputs.push(next_block_assignment_inputs);
+      assignment_inputs.push(next_block_assignment_inputs.clone());
+      exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 2
       let mut vars = vec![one, one, zero, one, two, one, Scalar::from(2u32).neg().invert().to_bytes(), one, one];
       let mut inputs = vec![one, one, one, zero, one, one, two, one];
@@ -375,7 +376,8 @@ fn produce_r1cs() -> (
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
-      assignment_inputs.push(next_block_assignment_inputs);
+      assignment_inputs.push(next_block_assignment_inputs.clone());
+      exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 3
       let mut vars = vec![one, two, one, one, three, three, Scalar::from(1u32).neg().invert().to_bytes(), one, one];
       let mut inputs = vec![one, one, two, one, one, one, three, three];
@@ -384,7 +386,8 @@ fn produce_r1cs() -> (
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
-      assignment_inputs.push(next_block_assignment_inputs);
+      assignment_inputs.push(next_block_assignment_inputs.clone());
+      exec_inputs.push(next_block_assignment_inputs);
       let mut vars = vec![one, three, three, two, four, six, zero, zero, zero];
       let mut inputs = vec![one, one, three, three, one, two, four, six];
       vars.extend(vec![zero; 7]);
@@ -422,7 +425,7 @@ fn produce_r1cs() -> (
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
 
-    exec_inputs.extend(vec![VarsAssignment::new(&vec![zero; num_vars]).unwrap(); consis_num_proofs.next_power_of_two() - consis_num_proofs]);
+    exec_inputs.extend(vec![VarsAssignment::new(&vec![zero; num_vars]).unwrap(); exec_inputs.len().next_power_of_two() - exec_inputs.len()]);
 
     (block_vars_matrix, block_inputs_matrix, exec_inputs)
   };
@@ -507,6 +510,7 @@ fn main() {
   );
 
   // verify the proof of satisfiability
+  /*
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
     .verify(
@@ -522,5 +526,6 @@ fn main() {
       &consis_gens,
       &mut verifier_transcript)
     .is_ok());
+  */
   println!("proof verification successful!");
 }

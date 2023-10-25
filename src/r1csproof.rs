@@ -43,8 +43,8 @@ pub struct R1CSProof {
   pok_claims_phase2: (KnowledgeProof, ProductProof),
   proof_eq_sc_phase1: EqualityProof,
   sc_proof_phase2: ZKSumcheckInstanceProof,
-  block_comm_vars_at_ry_list: Vec<CompressedGroup>,
-  block_comm_vars_at_ry: CompressedGroup,
+  comm_vars_at_ry_list: Vec<CompressedGroup>,
+  comm_vars_at_ry: CompressedGroup,
   proof_eval_vars_at_ry_list: Vec<PolyEvalProof>,
   proof_eq_sc_phase2: EqualityProof,
 }
@@ -85,7 +85,7 @@ impl R1CSGens {
 }
 
 impl R1CSProof {
-  fn prove_phase_one(
+  fn block_prove_phase_one(
     num_rounds: usize,
     num_rounds_x: usize,
     num_rounds_q_max: usize,
@@ -132,7 +132,7 @@ impl R1CSProof {
     (sc_proof_phase_one, r, claims, blind_claim_postsc)
   }
 
-  fn prove_phase_two(
+  fn block_prove_phase_two(
     num_rounds: usize,
     claim: &Scalar,
     blind_claim: &Scalar,
@@ -161,6 +161,70 @@ impl R1CSProof {
 
     (sc_proof_phase_two, r, claims, blind_claim_postsc)
   }
+
+  fn consis_prove_phase_one(
+    num_rounds: usize,
+    evals_tau: &mut DensePolynomial,
+    evals_Az: &mut DensePolynomial,
+    evals_Bz: &mut DensePolynomial,
+    evals_Cz: &mut DensePolynomial,
+    gens: &R1CSSumcheckGens,
+    transcript: &mut Transcript,
+    random_tape: &mut RandomTape,
+  ) -> (ZKSumcheckInstanceProof, Vec<Scalar>, Vec<Scalar>, Scalar) {
+    let comb_func = |poly_A_comp: &Scalar,
+                     poly_B_comp: &Scalar,
+                     poly_C_comp: &Scalar,
+                     poly_D_comp: &Scalar|
+     -> Scalar { poly_A_comp * (poly_B_comp * poly_C_comp - poly_D_comp) };
+
+    let (sc_proof_phase_one, r, claims, blind_claim_postsc) =
+      ZKSumcheckInstanceProof::prove_cubic_with_additive_term(
+        &Scalar::zero(), // claim is zero
+        &Scalar::zero(), // blind for claim is also zero
+        num_rounds,
+        evals_tau,
+        evals_Az,
+        evals_Bz,
+        evals_Cz,
+        comb_func,
+        &gens.gens_1,
+        &gens.gens_4,
+        transcript,
+        random_tape,
+      );
+
+    (sc_proof_phase_one, r, claims, blind_claim_postsc)
+  }
+
+  fn consis_prove_phase_two(
+    num_rounds: usize,
+    claim: &Scalar,
+    blind_claim: &Scalar,
+    evals_z: &mut DensePolynomial,
+    evals_ABC: &mut DensePolynomial,
+    gens: &R1CSSumcheckGens,
+    transcript: &mut Transcript,
+    random_tape: &mut RandomTape,
+  ) -> (ZKSumcheckInstanceProof, Vec<Scalar>, Vec<Scalar>, Scalar) {
+    let comb_func =
+      |poly_A_comp: &Scalar, poly_B_comp: &Scalar| -> Scalar { poly_A_comp * poly_B_comp };
+    let (sc_proof_phase_two, r, claims, blind_claim_postsc) = ZKSumcheckInstanceProof::prove_quad(
+      claim,
+      blind_claim,
+      num_rounds,
+      evals_z,
+      evals_ABC,
+      comb_func,
+      &gens.gens_1,
+      &gens.gens_3,
+      transcript,
+      random_tape,
+    );
+
+    (sc_proof_phase_two, r, claims, blind_claim_postsc)
+  }
+
 
   fn protocol_name() -> &'static [u8] {
     b"R1CS proof"
@@ -192,320 +256,599 @@ impl R1CSProof {
       assert!(block_vars_mat[i].len() == block_vars_mat[i].len().next_power_of_two());
     }
 
-    let num_cons = block_inst.get_num_cons();
-
     // --
     // COMMITMENTS
     // --
 
-    let timer_commit = Timer::new("polycommit");
-    // commit the witnesses and inputs separately instance-by-instance
-    let mut block_poly_vars_list = Vec::new();
-    let mut block_comm_vars_list = Vec::new();
-    let mut block_poly_io_list = Vec::new();
-    let mut block_comm_io_list = Vec::new();
-    for p in 0..block_num_instances {
-      let (block_poly_vars, block_comm_vars) = {
-        // Flatten the witnesses into a Q_i * X list
-        let vars_list_p = block_vars_mat[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+    let (
+      block_poly_vars_list,
+      block_comm_vars_list,
+      block_poly_io_list,
+      block_comm_io_list,
+      exec_poly_io, 
+      exec_comm_io
+    ) = {
+      let timer_commit = Timer::new("polycommit");
+      // commit the witnesses and inputs separately instance-by-instance
+      let mut block_poly_vars_list = Vec::new();
+      let mut block_comm_vars_list = Vec::new();
+      let mut block_poly_io_list = Vec::new();
+      let mut block_comm_io_list = Vec::new();
+
+      for p in 0..block_num_instances {
+        let (block_poly_vars, block_comm_vars) = {
+          // Flatten the witnesses into a Q_i * X list
+          let vars_list_p = block_vars_mat[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let block_poly_vars = DensePolynomial::new(vars_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (block_comm_vars, _blinds_vars) = block_poly_vars.commit(&block_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          block_comm_vars.append_to_transcript(b"poly_commitment", transcript);
+          (block_poly_vars, block_comm_vars)
+        };
+        let (block_poly_io, block_comm_io) = {
+          // Flatten the inputs into a Q_i * X list
+          let io_list_p = block_inputs_mat[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let block_poly_io = DensePolynomial::new(io_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (block_comm_io, _blinds_io) = block_poly_io.commit(&block_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          block_comm_io.append_to_transcript(b"poly_commitment", transcript);
+          (block_poly_io, block_comm_io)
+        };
+        block_poly_vars_list.push(block_poly_vars);
+        block_comm_vars_list.push(block_comm_vars);
+        block_poly_io_list.push(block_poly_io);
+        block_comm_io_list.push(block_comm_io);
+      }
+
+      let (exec_poly_io, exec_comm_io) = {
+        let exec_io_list = exec_inputs.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
         // create a multilinear polynomial using the supplied assignment for variables
-        let block_poly_vars = DensePolynomial::new(vars_list_p);
+        let exec_poly_io = DensePolynomial::new(exec_io_list);
 
         // produce a commitment to the satisfying assignment
-        let (block_comm_vars, _blinds_vars) = block_poly_vars.commit(&block_gens.gens_pc, None);
+        let (exec_comm_io, _blinds_io) = exec_poly_io.commit(&consis_gens.gens_pc, None);
 
         // add the commitment to the prover's transcript
-        block_comm_vars.append_to_transcript(b"poly_commitment", transcript);
-        (block_poly_vars, block_comm_vars)
+        exec_comm_io.append_to_transcript(b"poly_commitment", transcript);
+        (exec_poly_io, exec_comm_io)
       };
-      let (block_poly_io, block_comm_io) = {
-        // Flatten the inputs into a Q_i * X list
-        let io_list_p = block_inputs_mat[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-        // create a multilinear polynomial using the supplied assignment for variables
-        let block_poly_io = DensePolynomial::new(io_list_p);
+      timer_commit.stop();
 
-        // produce a commitment to the satisfying assignment
-        let (block_comm_io, _blinds_io) = block_poly_io.commit(&block_gens.gens_pc, None);
-
-        // add the commitment to the prover's transcript
-        block_comm_io.append_to_transcript(b"poly_commitment", transcript);
-        (block_poly_io, block_comm_io)
-      };
-      block_poly_vars_list.push(block_poly_vars);
-      block_comm_vars_list.push(block_comm_vars);
-      block_poly_io_list.push(block_poly_io);
-      block_comm_io_list.push(block_comm_io);
-    }
-    let (exec_poly_io, exec_comm_io) = {
-      let exec_io_list = exec_inputs.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-      // create a multilinear polynomial using the supplied assignment for variables
-      let exec_poly_io = DensePolynomial::new(exec_io_list);
-
-      // produce a commitment to the satisfying assignment
-      let (exec_comm_io, _blinds_io) = exec_poly_io.commit(&block_gens.gens_pc, None);
-
-      // add the commitment to the prover's transcript
-      exec_comm_io.append_to_transcript(b"poly_commitment", transcript);
-      (exec_poly_io, exec_comm_io)
+      (
+        block_poly_vars_list,
+        block_comm_vars_list,
+        block_poly_io_list,
+        block_comm_io_list,
+        exec_poly_io, 
+        exec_comm_io
+      )
     };
-    timer_commit.stop();
 
     // --
     // BLOCK CORRECTNESS
     // --
+    let (
+      block_sc_proof_phase1,
+      block_claims_phase2,
+      block_pok_claims_phase2,
+      block_proof_eq_sc_phase1,
+      block_sc_proof_phase2,
+      block_comm_vars_at_ry_list,
+      block_comm_vars_at_ry,
+      block_proof_eval_vars_at_ry_list,
+      block_proof_eq_sc_phase2,
+      block_rp,
+      block_rq_rev,
+      block_rx,
+      block_ry
+    ) = {
+      let gens = block_gens;
+      let num_cons = block_inst.get_num_cons();
+      let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
 
-    let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
-
-    // append input to variables to create a single vector z
-    let mut z_mat = Vec::new();
-    for i in 0..block_num_instances {
-      z_mat.push(Vec::new());
-      for j in 0..block_vars_mat[i].len() {
-        z_mat[i].push([block_vars_mat[i][j].clone(), block_inputs_mat[i][j].clone()].concat());
+      // append input to variables to create a single vector z
+      let mut z_mat = Vec::new();
+      for i in 0..block_num_instances {
+        z_mat.push(Vec::new());
+        for j in 0..block_vars_mat[i].len() {
+          z_mat[i].push([block_vars_mat[i][j].clone(), block_inputs_mat[i][j].clone()].concat());
+        }
       }
-    }
-    let z_len = z_mat[0][0].len();
+      let z_len = z_mat[0][0].len();
 
-    // derive the verifier's challenge \tau
-    let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
-      (block_num_instances.log_2(), block_max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
-    let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
-    let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
-    let tau_x = transcript.challenge_vector(b"challenge_tau_x", num_rounds_x);
+      // derive the verifier's challenge \tau
+      let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
+        (block_num_instances.log_2(), block_max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
+      let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
+      let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
+      let tau_x = transcript.challenge_vector(b"challenge_tau_x", num_rounds_x);
 
-    // compute the initial evaluation table for R(\tau, x)
-    let mut poly_tau_p = DensePolynomial::new(EqPolynomial::new(tau_p).evals());
-    let mut poly_tau_q = DensePolynomial::new(EqPolynomial::new(tau_q).evals());
-    let mut poly_tau_x = DensePolynomial::new(EqPolynomial::new(tau_x).evals());
-    let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
-      block_inst.multiply_vec_bunched(block_num_instances, block_num_proofs, block_max_num_proofs, num_cons, z_len, &z_mat);
-
-    // Sumcheck 1: (Az * Bz - Cz) * eq(x, q, p) = 0
-    let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::prove_phase_one(
-      num_rounds_x + num_rounds_q + num_rounds_p,
-      num_rounds_x,
-      num_rounds_q,
-      num_rounds_p,
-      &block_num_proofs,
-      &mut poly_tau_p,
-      &mut poly_tau_q,
-      &mut poly_tau_x,
-      &mut poly_Az,
-      &mut poly_Bz,
-      &mut poly_Cz,
-      &block_gens.gens_sc,
-      transcript,
-      random_tape,
-    );
-    assert_eq!(poly_tau_p.len(), 1);
-    assert_eq!(poly_tau_q.len(), 1);
-    assert_eq!(poly_tau_x.len(), 1);
-    assert_eq!(poly_Az.len(), 1);
-    assert_eq!(poly_Bz.len(), 1);
-    assert_eq!(poly_Cz.len(), 1);
-    timer_sc_proof_phase1.stop();
-
-    let (tau_claim, Az_claim, Bz_claim, Cz_claim) =
-      (&(poly_tau_p[0] * poly_tau_q[0] * poly_tau_x[0]), &poly_Az.index(0, 0, 0), &poly_Bz.index(0, 0, 0), &poly_Cz.index(0, 0, 0));
-
-    let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
-      random_tape.random_scalar(b"Az_blind"),
-      random_tape.random_scalar(b"Bz_blind"),
-      random_tape.random_scalar(b"Cz_blind"),
-      random_tape.random_scalar(b"prod_Az_Bz_blind"),
-    );
-
-    let (pok_Cz_claim, comm_Cz_claim) = {
-      KnowledgeProof::prove(
-        &block_gens.gens_sc.gens_1,
-        transcript,
-        random_tape,
-        Cz_claim,
-        &Cz_blind,
-      )
-    };
-
-    let (proof_prod, comm_Az_claim, comm_Bz_claim, comm_prod_Az_Bz_claims) = {
-      let prod = Az_claim * Bz_claim;
-      ProductProof::prove(
-        &block_gens.gens_sc.gens_1,
-        transcript,
-        random_tape,
-        Az_claim,
-        &Az_blind,
-        Bz_claim,
-        &Bz_blind,
-        &prod,
-        &prod_Az_Bz_blind,
-      )
-    };
-
-    comm_Az_claim.append_to_transcript(b"comm_Az_claim", transcript);
-    comm_Bz_claim.append_to_transcript(b"comm_Bz_claim", transcript);
-    comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
-    comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
-
-    // prove the final step of sum-check #1
-    let taus_bound_rx = tau_claim;
-
-    let blind_expected_claim_postsc1 = taus_bound_rx * (prod_Az_Bz_blind - Cz_blind);
-    let claim_post_phase1 = (Az_claim * Bz_claim - Cz_claim) * taus_bound_rx;
-    let (proof_eq_sc_phase1, _C1, _C2) = EqualityProof::prove(
-      &block_gens.gens_sc.gens_1,
-      transcript,
-      random_tape,
-      &claim_post_phase1,
-      &blind_expected_claim_postsc1,
-      &claim_post_phase1,
-      &blind_claim_postsc1,
-    );
-
-    // Separate the result rx into rp, rq, and rx
-    let (rx, rq_rev) = rx.split_at(num_rounds_x);
-    let (rq_rev, rp) = rq_rev.split_at(num_rounds_q);
-    let rx = rx.to_vec();
-    let rq_rev = rq_rev.to_vec();
-    let rq: Vec<Scalar> = rq_rev.iter().copied().rev().collect();
-    let rp = rp.to_vec();
-
-    let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
-    // combine the three claims into a single claim
-    let r_A = transcript.challenge_scalar(b"challenge_Az");
-    let r_B = transcript.challenge_scalar(b"challenge_Bz");
-    let r_C = transcript.challenge_scalar(b"challenge_Cz");
-
-    let claim_phase2 = r_A * Az_claim + r_B * Bz_claim + r_C * Cz_claim;
-    let blind_claim_phase2 = r_A * Az_blind + r_B * Bz_blind + r_C * Cz_blind;
-
-    let evals_ABC = {
       // compute the initial evaluation table for R(\tau, x)
-      let evals_rx = EqPolynomial::new(rx.clone()).evals();
-      let (evals_A, evals_B, evals_C) =
-      block_inst.compute_eval_table_sparse(block_inst.get_num_cons(), z_len, &evals_rx);
+      let mut poly_tau_p = DensePolynomial::new(EqPolynomial::new(tau_p).evals());
+      let mut poly_tau_q = DensePolynomial::new(EqPolynomial::new(tau_q).evals());
+      let mut poly_tau_x = DensePolynomial::new(EqPolynomial::new(tau_x).evals());
+      let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
+        block_inst.multiply_vec_block(block_num_instances, block_num_proofs, block_max_num_proofs, num_cons, z_len, &z_mat);
 
-      assert_eq!(evals_A.len(), evals_B.len());
-      assert_eq!(evals_A.len(), evals_C.len());
-      (0..evals_A.len())
-        .map(|i| r_A * evals_A[i] + r_B * evals_B[i] + r_C * evals_C[i])
-        .collect::<Vec<Scalar>>()
+      // Sumcheck 1: (Az * Bz - Cz) * eq(x, q, p) = 0
+      let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::block_prove_phase_one(
+        num_rounds_x + num_rounds_q + num_rounds_p,
+        num_rounds_x,
+        num_rounds_q,
+        num_rounds_p,
+        &block_num_proofs,
+        &mut poly_tau_p,
+        &mut poly_tau_q,
+        &mut poly_tau_x,
+        &mut poly_Az,
+        &mut poly_Bz,
+        &mut poly_Cz,
+        &gens.gens_sc,
+        transcript,
+        random_tape,
+      );
+      assert_eq!(poly_tau_p.len(), 1);
+      assert_eq!(poly_tau_q.len(), 1);
+      assert_eq!(poly_tau_x.len(), 1);
+      assert_eq!(poly_Az.len(), 1);
+      assert_eq!(poly_Bz.len(), 1);
+      assert_eq!(poly_Cz.len(), 1);
+      timer_sc_proof_phase1.stop();
+
+      let (tau_claim, Az_claim, Bz_claim, Cz_claim) =
+        (&(poly_tau_p[0] * poly_tau_q[0] * poly_tau_x[0]), &poly_Az.index(0, 0, 0), &poly_Bz.index(0, 0, 0), &poly_Cz.index(0, 0, 0));
+
+      let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
+        random_tape.random_scalar(b"Az_blind"),
+        random_tape.random_scalar(b"Bz_blind"),
+        random_tape.random_scalar(b"Cz_blind"),
+        random_tape.random_scalar(b"prod_Az_Bz_blind"),
+      );
+
+      let (pok_Cz_claim, comm_Cz_claim) = {
+        KnowledgeProof::prove(
+          &gens.gens_sc.gens_1,
+          transcript,
+          random_tape,
+          Cz_claim,
+          &Cz_blind,
+        )
+      };
+
+      let (proof_prod, comm_Az_claim, comm_Bz_claim, comm_prod_Az_Bz_claims) = {
+        let prod = Az_claim * Bz_claim;
+        ProductProof::prove(
+          &gens.gens_sc.gens_1,
+          transcript,
+          random_tape,
+          Az_claim,
+          &Az_blind,
+          Bz_claim,
+          &Bz_blind,
+          &prod,
+          &prod_Az_Bz_blind,
+        )
+      };
+
+      comm_Az_claim.append_to_transcript(b"comm_Az_claim", transcript);
+      comm_Bz_claim.append_to_transcript(b"comm_Bz_claim", transcript);
+      comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
+      comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
+
+      // prove the final step of sum-check #1
+      let taus_bound_rx = tau_claim;
+
+      let blind_expected_claim_postsc1 = taus_bound_rx * (prod_Az_Bz_blind - Cz_blind);
+      let claim_post_phase1 = (Az_claim * Bz_claim - Cz_claim) * taus_bound_rx;
+      let (proof_eq_sc_phase1, _C1, _C2) = EqualityProof::prove(
+        &gens.gens_sc.gens_1,
+        transcript,
+        random_tape,
+        &claim_post_phase1,
+        &blind_expected_claim_postsc1,
+        &claim_post_phase1,
+        &blind_claim_postsc1,
+      );
+
+      // Separate the result rx into rp, rq, and rx
+      let (rx, rq_rev) = rx.split_at(num_rounds_x);
+      let (rq_rev, rp) = rq_rev.split_at(num_rounds_q);
+      let rx = rx.to_vec();
+      let rq_rev = rq_rev.to_vec();
+      let rq: Vec<Scalar> = rq_rev.iter().copied().rev().collect();
+      let rp = rp.to_vec();
+
+      let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
+      // combine the three claims into a single claim
+      let r_A = transcript.challenge_scalar(b"challenge_Az");
+      let r_B = transcript.challenge_scalar(b"challenge_Bz");
+      let r_C = transcript.challenge_scalar(b"challenge_Cz");
+
+      let claim_phase2 = r_A * Az_claim + r_B * Bz_claim + r_C * Cz_claim;
+      let blind_claim_phase2 = r_A * Az_blind + r_B * Bz_blind + r_C * Cz_blind;
+
+      let evals_ABC = {
+        // compute the initial evaluation table for R(\tau, x)
+        let evals_rx = EqPolynomial::new(rx.clone()).evals();
+        let (evals_A, evals_B, evals_C) =
+        block_inst.compute_eval_table_sparse(block_inst.get_num_cons(), z_len, &evals_rx);
+
+        assert_eq!(evals_A.len(), evals_B.len());
+        assert_eq!(evals_A.len(), evals_C.len());
+        (0..evals_A.len())
+          .map(|i| r_A * evals_A[i] + r_B * evals_B[i] + r_C * evals_C[i])
+          .collect::<Vec<Scalar>>()
+      };
+      let mut ABC_poly = DensePolynomial::new(evals_ABC);
+
+      // Construct a p * q * len(z) matrix Z and bound it to r_q
+      let mut Z = DensePolynomial_PQX::new_rev(&z_mat, &block_num_proofs, block_max_num_proofs);
+      Z.bound_poly_vars_rq(&rq_rev.to_vec());
+      let mut Z_poly = Z.to_dense_poly();
+
+      // An Eq function to match p with rp
+      let mut eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_y));
+
+      // Sumcheck 2: (rA + rB + rC) * Z * eq(p) = e
+      let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::block_prove_phase_two(
+        num_rounds_p + num_rounds_y,
+        &claim_phase2,
+        &blind_claim_phase2,
+        &mut Z_poly,
+        &mut ABC_poly,
+        &mut eq_p_rp_poly,
+        &gens.gens_sc,
+        transcript,
+        random_tape,
+      );
+      timer_sc_proof_phase2.stop();
+
+      // Separate ry into rp and ry
+      let (rp, ry) = ry.split_at(num_rounds_p);
+      let rp = rp.to_vec();
+      let ry = ry.to_vec();
+
+      assert_eq!(Z_poly.len(), 1);
+      assert_eq!(ABC_poly.len(), 1);
+
+      // Bind the witnesses and inputs instance-by-instance
+      let mut eval_vars_at_ry_list = Vec::new();
+      let mut proof_eval_vars_at_ry_list = Vec::new();
+      let mut comm_vars_at_ry_list = Vec::new();
+      let timer_polyeval = Timer::new("polyeval");
+      for p in 0..block_num_instances {
+        // Compute combined_poly as (Scalar::one() - ry[0]) * block_poly_vars + ry[0] * block_poly_io
+        let combined_poly = DensePolynomial::new(
+          (0..block_poly_vars_list[p].len()).map(
+            |i| (Scalar::one() - ry[0]) * block_poly_vars_list[p][i] + ry[0] * block_poly_io_list[p][i]).collect());
+
+        // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
+        let rq_short = &rq[num_rounds_q - block_num_proofs[p].log_2()..];
+        let r = [rq_short, &ry[1..]].concat();
+        let eval_vars_at_ry = combined_poly.evaluate(&r);
+
+        let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
+          &combined_poly,
+          None,
+          &r,
+          &eval_vars_at_ry,
+          None,
+          &gens.gens_pc,
+          transcript,
+          random_tape,
+        );
+
+        eval_vars_at_ry_list.push(eval_vars_at_ry);
+        proof_eval_vars_at_ry_list.push(proof_eval_vars_at_ry);
+        comm_vars_at_ry_list.push(comm_vars_at_ry);
+      }
+      timer_polyeval.stop();
+
+      // Bind the resulting witness list to rp
+      // block_poly_vars stores the result of each witness matrix bounded to (rq_short ++ ry)
+      // but we want to bound them to (rq ++ ry)
+      // So we need to multiply each entry by (1 - rq0)(1 - rq1)...
+      for p in 0..block_num_instances {
+        for q in 0..(num_rounds_q - block_num_proofs[p].log_2()) {
+          eval_vars_at_ry_list[p] *= Scalar::one() - rq[q];
+        }
+      }
+      let block_poly_vars = DensePolynomial::new(eval_vars_at_ry_list);
+      let eval_vars_at_ry = block_poly_vars.evaluate(&rp);
+      let comm_vars_at_ry = eval_vars_at_ry.commit(&Scalar::zero(), &gens.gens_pc.gens.gens_1).compress();
+
+      // prove the final step of sum-check #2
+      let blind_expected_claim_postsc2 = Scalar::zero();
+      let claim_post_phase2 = claims_phase2[0] * claims_phase2[1] * claims_phase2[2];
+      let (proof_eq_sc_phase2, _C1, _C2) = EqualityProof::prove(
+        &gens.gens_pc.gens.gens_1,
+        transcript,
+        random_tape,
+        &claim_post_phase2,
+        &blind_expected_claim_postsc2,
+        &claim_post_phase2,
+        &blind_claim_postsc2,
+      );
+
+      timer_prove.stop();
+
+      let claims_phase2 = (
+        comm_Az_claim,
+        comm_Bz_claim,
+        comm_Cz_claim,
+        comm_prod_Az_Bz_claims,
+      );
+      let pok_claims_phase2 = (
+        pok_Cz_claim, proof_prod
+      );
+
+      (
+        sc_proof_phase1,
+        claims_phase2,
+        pok_claims_phase2,
+        proof_eq_sc_phase1,
+        sc_proof_phase2,
+        comm_vars_at_ry_list,
+        comm_vars_at_ry,
+        proof_eval_vars_at_ry_list,
+        proof_eq_sc_phase2,
+        rp,
+        rq_rev,
+        rx,
+        ry,)
     };
-    let mut ABC_poly = DensePolynomial::new(evals_ABC);
 
-    // Construct a p * q * len(z) matrix Z and bound it to r_q
-    let mut Z = DensePolynomial_PQX::new_rev(&z_mat, &block_num_proofs, block_max_num_proofs);
-    Z.bound_poly_vars_rq(&rq_rev.to_vec());
-    let mut Z_poly = Z.to_dense_poly();
+    // --
+    // CONSISTENCY
+    // --
 
-    // An Eq function to match p with rp
-    let mut eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_y));
+    let (
+      consis_sc_proof_phase1,
+      consis_claims_phase2,
+      consis_pok_claims_phase2,
+      consis_proof_eq_sc_phase1,
+      consis_sc_proof_phase2,
+      consis_comm_vars_at_ry,
+      consis_proof_eval_vars_at_ry,
+      consis_proof_eq_sc_phase2,
+      consis_rq,
+      consis_rx,
+      consis_ry,
+    ) = {
+      let gens = consis_gens;
+      let num_cons = consis_inst.get_num_cons();
+      let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
 
-    // Sumcheck 2: (rA + rB + rC) * Z * eq(p) = e
-    let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::prove_phase_two(
-      num_rounds_p + num_rounds_y,
-      &claim_phase2,
-      &blind_claim_phase2,
-      &mut Z_poly,
-      &mut ABC_poly,
-      &mut eq_p_rp_poly,
-      &block_gens.gens_sc,
-      transcript,
-      random_tape,
-    );
-    timer_sc_proof_phase2.stop();
+      // each z is consisted of two consecutive exec_inputs
+      let mut z_list = Vec::new();
+      for i in 0..consis_num_proofs {
+        z_list.push([exec_inputs[i].clone(), exec_inputs[i + 1].clone()].concat());
+      }
+      let z_len = z_list[0].len();
 
-    // Separate ry into rp and ry
-    let (rp, ry) = ry.split_at(num_rounds_p);
-    let rp = rp.to_vec();
-    let ry = ry.to_vec();
+      // derive the verifier's challenge \tau, this time without q
+      let (num_rounds_q, num_rounds_x, num_rounds_y) = 
+        (consis_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
+      let tau = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q + num_rounds_x);
 
-    assert_eq!(Z_poly.len(), 1);
-    assert_eq!(ABC_poly.len(), 1);
+      // compute the initial evaluation table for R(\tau, x)
+      let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
+      let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
+        block_inst.multiply_vec_consis(0, num_cons, z_len, &z_list);
 
-    // Bind the witnesses and inputs instance-by-instance
-    let mut eval_vars_at_ry_list = Vec::new();
-    let mut proof_eval_vars_at_ry_list = Vec::new();
-    let mut block_comm_vars_at_ry_list = Vec::new();
-    let timer_polyeval = Timer::new("polyeval");
-    for p in 0..block_num_instances {
-      // Compute combined_poly as (Scalar::one() - ry[0]) * block_poly_vars + ry[0] * block_poly_io
+      // Sumcheck 1: (Az * Bz - Cz) * eq(x, q, p) = 0
+      let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::consis_prove_phase_one(
+        num_rounds_q + num_rounds_x,
+        &mut poly_tau,
+        &mut poly_Az,
+        &mut poly_Bz,
+        &mut poly_Cz,
+        &consis_gens.gens_sc,
+        transcript,
+        random_tape,
+      );
+      assert_eq!(poly_tau.len(), 1);
+      assert_eq!(poly_Az.len(), 1);
+      assert_eq!(poly_Bz.len(), 1);
+      assert_eq!(poly_Cz.len(), 1);
+      timer_sc_proof_phase1.stop();
+
+      let (tau_claim, Az_claim, Bz_claim, Cz_claim) =
+        (&poly_tau[0], &poly_Az[0], &poly_Bz[0], &poly_Cz[0]);
+
+      let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
+        random_tape.random_scalar(b"Az_blind"),
+        random_tape.random_scalar(b"Bz_blind"),
+        random_tape.random_scalar(b"Cz_blind"),
+        random_tape.random_scalar(b"prod_Az_Bz_blind"),
+      );
+
+      let (pok_Cz_claim, comm_Cz_claim) = {
+        KnowledgeProof::prove(
+          &gens.gens_sc.gens_1,
+          transcript,
+          random_tape,
+          Cz_claim,
+          &Cz_blind,
+        )
+      };
+
+      let (proof_prod, comm_Az_claim, comm_Bz_claim, comm_prod_Az_Bz_claims) = {
+        let prod = Az_claim * Bz_claim;
+        ProductProof::prove(
+          &gens.gens_sc.gens_1,
+          transcript,
+          random_tape,
+          Az_claim,
+          &Az_blind,
+          Bz_claim,
+          &Bz_blind,
+          &prod,
+          &prod_Az_Bz_blind,
+        )
+      };
+
+      comm_Az_claim.append_to_transcript(b"comm_Az_claim", transcript);
+      comm_Bz_claim.append_to_transcript(b"comm_Bz_claim", transcript);
+      comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
+      comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
+
+      // prove the final step of sum-check #1
+      let taus_bound_rx = tau_claim;
+
+      let blind_expected_claim_postsc1 = taus_bound_rx * (prod_Az_Bz_blind - Cz_blind);
+      let claim_post_phase1 = (Az_claim * Bz_claim - Cz_claim) * taus_bound_rx;
+      let (proof_eq_sc_phase1, _C1, _C2) = EqualityProof::prove(
+        &gens.gens_sc.gens_1,
+        transcript,
+        random_tape,
+        &claim_post_phase1,
+        &blind_expected_claim_postsc1,
+        &claim_post_phase1,
+        &blind_claim_postsc1,
+      );
+
+      // Separate the result rx into rp, rq, and rx
+      let (rq, rx) = rx.split_at(num_rounds_q);
+      let rq = rq.to_vec();
+      let rx = rx.to_vec();
+
+      let timer_sc_proof_phase2 = Timer::new("prove_sc_phase_two");
+      // combine the three claims into a single claim
+      let r_A = transcript.challenge_scalar(b"challenge_Az");
+      let r_B = transcript.challenge_scalar(b"challenge_Bz");
+      let r_C = transcript.challenge_scalar(b"challenge_Cz");
+
+      let claim_phase2 = r_A * Az_claim + r_B * Bz_claim + r_C * Cz_claim;
+      let blind_claim_phase2 = r_A * Az_blind + r_B * Bz_blind + r_C * Cz_blind;
+
+      let evals_ABC = {
+        // compute the initial evaluation table for R(\tau, x)
+        let evals_rx = EqPolynomial::new(rx.clone()).evals();
+        let (evals_A, evals_B, evals_C) =
+        consis_inst.compute_eval_table_sparse(block_inst.get_num_cons(), z_len, &evals_rx);
+
+        assert_eq!(evals_A.len(), evals_B.len());
+        assert_eq!(evals_A.len(), evals_C.len());
+        (0..evals_A.len())
+          .map(|i| r_A * evals_A[i] + r_B * evals_B[i] + r_C * evals_C[i])
+          .collect::<Vec<Scalar>>()
+      };
+      let mut ABC_poly = DensePolynomial::new(evals_ABC);
+
+      // Construct a q * len(z) matrix Z and bound it to r_q
+      let Z = z_list.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+      let mut Z_poly = DensePolynomial::new(Z);
+      for r in &rq {
+        Z_poly.bound_poly_var_top(r);
+      }
+
+      // Sumcheck 2: (rA + rB + rC) * Z * eq(p) = e
+      let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::consis_prove_phase_two(
+        num_rounds_y,
+        &claim_phase2,
+        &blind_claim_phase2,
+        &mut Z_poly,
+        &mut ABC_poly,
+        &gens.gens_sc,
+        transcript,
+        random_tape,
+      );
+      timer_sc_proof_phase2.stop();
+
+      assert_eq!(Z_poly.len(), 1);
+      assert_eq!(ABC_poly.len(), 1);
+
+      let timer_polyeval = Timer::new("polyeval");
+      // Compute combined_poly as (Scalar::one() - ry[0]) * exec_poly_io[i] + ry[0] * exec_poly_io[i + 1]
+      let num_inputs = exec_inputs[0].len();
       let combined_poly = DensePolynomial::new(
-        (0..block_poly_vars_list[p].len()).map(
-          |i| (Scalar::one() - ry[0]) * block_poly_vars_list[p][i] + ry[0] * block_poly_io_list[p][i]).collect());
+        (0..consis_num_proofs * num_inputs).map(
+          |i| (Scalar::one() - ry[0]) * exec_poly_io[i] + ry[0] * exec_poly_io[i + num_inputs]).collect());
 
-      // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
-      let rq_short = &rq[num_rounds_q - block_num_proofs[p].log_2()..];
-      let r = [rq_short, &ry[1..]].concat();
+      let r = [rq.clone(), ry[1..].to_vec()].concat();
       let eval_vars_at_ry = combined_poly.evaluate(&r);
 
-      let (proof_eval_vars_at_ry, block_comm_vars_at_ry) = PolyEvalProof::prove(
+      let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
         &combined_poly,
         None,
         &r,
         &eval_vars_at_ry,
         None,
-        &block_gens.gens_pc,
+        &gens.gens_pc,
         transcript,
         random_tape,
       );
+      timer_polyeval.stop();
 
-      eval_vars_at_ry_list.push(eval_vars_at_ry);
-      proof_eval_vars_at_ry_list.push(proof_eval_vars_at_ry);
-      block_comm_vars_at_ry_list.push(block_comm_vars_at_ry);
-    }
-    timer_polyeval.stop();
+      // DEBUGGING TODO: CHECK THESE TWO VALUES ARE EQUAL!
+ 
+      // prove the final step of sum-check #2
+      let blind_expected_claim_postsc2 = Scalar::zero();
+      let claim_post_phase2 = claims_phase2[0] * claims_phase2[1];
+      let (proof_eq_sc_phase2, _C1, _C2) = EqualityProof::prove(
+        &gens.gens_pc.gens.gens_1,
+        transcript,
+        random_tape,
+        &claim_post_phase2,
+        &blind_expected_claim_postsc2,
+        &claim_post_phase2,
+        &blind_claim_postsc2,
+      );
 
-    // Bind the resulting witness list to rp
-    // block_poly_vars stores the result of each witness matrix bounded to (rq_short ++ ry)
-    // but we want to bound them to (rq ++ ry)
-    // So we need to multiply each entry by (1 - rq0)(1 - rq1)...
-    for p in 0..block_num_instances {
-      for q in 0..(num_rounds_q - block_num_proofs[p].log_2()) {
-        eval_vars_at_ry_list[p] *= Scalar::one() - rq[q];
-      }
-    }
-    let block_poly_vars = DensePolynomial::new(eval_vars_at_ry_list);
-    let eval_vars_at_ry = block_poly_vars.evaluate(&rp);
-    let block_comm_vars_at_ry = eval_vars_at_ry.commit(&Scalar::zero(), &block_gens.gens_pc.gens.gens_1).compress();
+      timer_prove.stop();
 
-    // prove the final step of sum-check #2
-    let blind_expected_claim_postsc2 = Scalar::zero();
-    let claim_post_phase2 = claims_phase2[0] * claims_phase2[1] * claims_phase2[2];
-    let (proof_eq_sc_phase2, _C1, _C2) = EqualityProof::prove(
-      &block_gens.gens_pc.gens.gens_1,
-      transcript,
-      random_tape,
-      &claim_post_phase2,
-      &blind_expected_claim_postsc2,
-      &claim_post_phase2,
-      &blind_claim_postsc2,
-    );
+      let claims_phase2 = (
+        comm_Az_claim,
+        comm_Bz_claim,
+        comm_Cz_claim,
+        comm_prod_Az_Bz_claims,
+      );
+      let pok_claims_phase2 = (
+        pok_Cz_claim, proof_prod
+      );
 
-    timer_prove.stop();
+      (
+        sc_proof_phase1,
+        claims_phase2,
+        pok_claims_phase2,
+        proof_eq_sc_phase1,
+        sc_proof_phase2,
+        comm_vars_at_ry,
+        proof_eval_vars_at_ry,
+        proof_eq_sc_phase2,
+        rq,
+        rx,
+        ry,)
+    };
 
     (
       R1CSProof {
         block_comm_vars_list,
         block_comm_io_list,
         exec_comm_io,
-        sc_proof_phase1,
-        claims_phase2: (
-          comm_Az_claim,
-          comm_Bz_claim,
-          comm_Cz_claim,
-          comm_prod_Az_Bz_claims,
-        ),
-        pok_claims_phase2: (pok_Cz_claim, proof_prod),
-        proof_eq_sc_phase1,
-        sc_proof_phase2,
-        block_comm_vars_at_ry_list,
-        block_comm_vars_at_ry,
-        proof_eval_vars_at_ry_list,
-        proof_eq_sc_phase2,
+        sc_proof_phase1: block_sc_proof_phase1,
+        claims_phase2: block_claims_phase2,
+        pok_claims_phase2: block_pok_claims_phase2,
+        proof_eq_sc_phase1: block_proof_eq_sc_phase1,
+        sc_proof_phase2: block_sc_proof_phase2,
+        comm_vars_at_ry_list: block_comm_vars_at_ry_list,
+        comm_vars_at_ry: block_comm_vars_at_ry,
+        proof_eval_vars_at_ry_list: block_proof_eval_vars_at_ry_list,
+        proof_eq_sc_phase2: block_proof_eq_sc_phase2,
       },
-      rp,
-      rq_rev,
-      rx,
-      ry,
+      block_rp,
+      block_rq_rev,
+      block_rx,
+      block_ry,
     )
   }
 
@@ -667,24 +1010,24 @@ impl R1CSProof {
         &block_gens.gens_pc,
         transcript,
         &r,
-        &self.block_comm_vars_at_ry_list[p],
+        &self.comm_vars_at_ry_list[p],
         &comm_combined,
       )?;
     }
 
     // Then on rp
-    let mut expected_block_comm_vars_list: Vec<RistrettoPoint> = self.block_comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
+    let mut expected_block_comm_vars_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
     for p in 0..block_num_instances {
       for q in 0..(num_rounds_q - block_num_proofs[p].log_2()) {
         expected_block_comm_vars_list[p] *= Scalar::one() - rq[q];
       }
     }
     let EQ_p = EqPolynomial::new(rp.clone()).evals();
-    let expected_block_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_block_comm_vars_list).compress();
-    assert_eq!(expected_block_comm_vars_at_ry, self.block_comm_vars_at_ry);
+    let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_block_comm_vars_list).compress();
+    assert_eq!(expected_comm_vars_at_ry, self.comm_vars_at_ry);
 
     // compute commitment to eval_Z_at_ry = (Scalar::one() - ry[0]) * self.eval_vars_at_ry + ry[0] * poly_input_eval
-    let comm_eval_Z_at_ry = &self.block_comm_vars_at_ry.decompress().unwrap();
+    let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();
 
     // perform the final check in the second sum-check protocol
     let (eval_A_r, eval_B_r, eval_C_r) = block_evals;
