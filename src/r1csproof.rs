@@ -625,22 +625,12 @@ impl R1CSProof {
       let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
 
       let num_inputs = exec_inputs[0].len();
-      // interpolate exec_inputs to get its evaluation on the next num_inputs point
-      fn to_binary_scalars(x: usize) -> Vec<Scalar> {
-        (0..x.next_power_of_two().log_2()).rev().map(|n| (x >> n) & 1).map(|i| if i == 0 { Scalar::zero() } else { Scalar::one() }).collect()
-      }
       // each z is consisted of two consecutive exec_inputs
       let mut z_list = Vec::new();
       for i in 0..consis_num_proofs - 1 {
         z_list.push([exec_inputs[i].clone(), exec_inputs[i + 1].clone()].concat());
       }
-      z_list.push(
-        [exec_inputs[consis_num_proofs - 1].clone(),
-          (consis_num_proofs * num_inputs .. (consis_num_proofs + 1) * num_inputs).map(
-            |i| exec_poly_io.evaluate(&to_binary_scalars(i))
-          ).collect()
-        ].concat()
-      );
+      z_list.push([exec_inputs[consis_num_proofs - 1].clone(), exec_inputs[consis_num_proofs - 1].clone()].concat());
       let z_len = z_list[0].len();
 
       // derive the verifier's challenge \tau, this time without p
@@ -778,30 +768,14 @@ impl R1CSProof {
 
       let timer_polyeval = Timer::new("polyeval");
       // Compute combined_poly as (Scalar::one() - ry[0]) * exec_poly_io[i] + ry[0] * exec_poly_io[i + 1]
-      let mut combined_inputs: Vec<Scalar> = (0..(consis_num_proofs - 1) * num_inputs).map(
-        |i| (Scalar::one() - ry[0]) * exec_poly_io[i] + ry[0] * exec_poly_io[i + num_inputs]).collect();
-      combined_inputs.extend((0..exec_inputs[0].len()).map(|i| (Scalar::one() - ry[0]) * exec_inputs[exec_inputs.len() - 1][i] + ry[0] * exec_inputs[0][i]));
-      let combined_poly = DensePolynomial::new(combined_inputs);
-
-      // let combined_poly = DensePolynomial::new(
-      //   [(0..(consis_num_proofs - 1) * num_inputs).map(
-      //     |i| (Scalar::one() - ry[0]) * exec_poly_io[i] + ry[0] * exec_poly_io[i + num_inputs]).collect(),
-      //   vec![Scalar::zero(); exec_inputs[0].len()], exec_inputs[0].clone()].concat());
+      let combined_poly = DensePolynomial::new(
+        [(0..(consis_num_proofs - 1) * num_inputs).map(
+          |i| (Scalar::one() - ry[0]) * exec_poly_io[i] + ry[0] * exec_poly_io[i + num_inputs]).collect(),
+        vec![Scalar::zero(); num_inputs]].concat());
 
       let r = [rq.clone(), ry[1..].to_vec()].concat();
-      
       let eval_vars_at_ry = combined_poly.evaluate(&r);
-      
-      let num_inputs: u64 = exec_inputs[0].len().try_into().unwrap();
-      let r_plus_1: Vec<Scalar> = r.iter().map(|i| i + Scalar::from(num_inputs)).collect();
-      let eval_vars_at_ry_plus_0 = exec_poly_io.evaluate(&r);
-      let eval_vars_at_ry_plus_1 = exec_poly_io.evaluate(&r_plus_1);
-      let eval_vars_at_ry_combined  = (Scalar::one() - ry[0]) * eval_vars_at_ry_plus_0 + ry[0] * eval_vars_at_ry_plus_1;
-
-      println!("CLAIM: {:?}", Z_poly[0]);
-      println!("EXPECTED 1: {:?}", eval_vars_at_ry);
-      println!("EXPECTED 2: {:?}", eval_vars_at_ry_combined);
-
+    
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
         &combined_poly,
         None,
@@ -813,31 +787,6 @@ impl R1CSProof {
         random_tape,
       );
 
-      /*
-      let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
-        // &combined_poly,
-        & exec_poly_io,
-        None,
-        &r,
-        &eval_vars_at_ry,
-        None,
-        &gens.gens_pc,
-        transcript,
-        random_tape,
-      );
-
-      let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
-        // &combined_poly,
-        & exec_poly_io,
-        None,
-        &r,
-        &eval_vars_at_ry,
-        None,
-        &gens.gens_pc,
-        transcript,
-        random_tape,
-      );
-      */
       timer_polyeval.stop();
  
       // prove the final step of sum-check #2
