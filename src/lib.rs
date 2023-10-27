@@ -475,7 +475,6 @@ impl SNARK {
     }
   }
 
-  /*
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
   pub fn verify(
     &self,
@@ -499,7 +498,7 @@ impl SNARK {
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
     let timer_sat_proof = Timer::new("verify_sat_proof");
-    let (rp, _rq, rx, ry) = self.r1cs_sat_proof.verify(
+    let (block_challenges, consis_challenges) = self.r1cs_sat_proof.verify(
       block_comm.comm.get_num_vars(),
       block_num_cons,
       block_num_instances,
@@ -516,23 +515,40 @@ impl SNARK {
     timer_sat_proof.stop();
 
     let timer_eval_proof = Timer::new("verify_eval_proof");
-    let (Ar, Br, Cr) = &self.inst_evals;
+    // Verify Evaluation on BLOCK
+    let (Ar, Br, Cr) = &self.block_inst_evals;
     Ar.append_to_transcript(b"Ar_claim", transcript);
     Br.append_to_transcript(b"Br_claim", transcript);
     Cr.append_to_transcript(b"Cr_claim", transcript);
-    self.r1cs_eval_proof.verify(
+    let [rp, _, rx, ry] = block_challenges;
+    self.block_r1cs_eval_proof.verify(
       &block_comm.comm,
       &[rp, rx].concat(),
       &ry,
-      &self.inst_evals,
+      &self.block_inst_evals,
       &block_gens.gens_r1cs_eval,
       transcript,
     )?;
+
+    // Verify Evaluation on CONSIS
+    let (Ar, Br, Cr) = &self.block_inst_evals;
+    Ar.append_to_transcript(b"Ar_claim", transcript);
+    Br.append_to_transcript(b"Br_claim", transcript);
+    Cr.append_to_transcript(b"Cr_claim", transcript);
+    let [_, rx, ry] = consis_challenges;
+    self.block_r1cs_eval_proof.verify(
+      &block_comm.comm,
+      &rx,
+      &ry,
+      &self.block_inst_evals,
+      &block_gens.gens_r1cs_eval,
+      transcript,
+    )?;
+
     timer_eval_proof.stop();
     timer_verify.stop();
     Ok(())
   }
-  */
 }
 
 /*

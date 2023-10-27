@@ -630,8 +630,8 @@ impl R1CSProof {
       for i in 0..consis_num_proofs - 1 {
         z_list.push([exec_inputs[i].clone(), exec_inputs[i + 1].clone()].concat());
       }
-      z_list.push([exec_inputs[consis_num_proofs - 1].clone(), exec_inputs[consis_num_proofs - 1].clone()].concat());
       let z_len = z_list[0].len();
+      z_list.push(vec![Scalar::zero(); z_len]);
 
       // derive the verifier's challenge \tau, this time without p
       let (num_rounds_q, num_rounds_x, num_rounds_y) = 
@@ -641,7 +641,7 @@ impl R1CSProof {
       // compute the initial evaluation table for R(\tau, x)
       let mut poly_tau = DensePolynomial::new(EqPolynomial::new(tau).evals());
       let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
-        block_inst.multiply_vec_consis(0, num_cons, z_len, &z_list);
+        consis_inst.multiply_vec_consis(0, num_cons, z_len, &z_list);
 
       // Sumcheck 1: (Az * Bz - Cz) * eq(x, q, p) = 0
       let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::consis_prove_phase_one(
@@ -650,7 +650,7 @@ impl R1CSProof {
         &mut poly_Az,
         &mut poly_Bz,
         &mut poly_Cz,
-        &consis_gens.gens_sc,
+        &gens.gens_sc,
         transcript,
         random_tape,
       );
@@ -733,7 +733,7 @@ impl R1CSProof {
         // compute the initial evaluation table for R(\tau, x)
         let evals_rx = EqPolynomial::new(rx.clone()).evals();
         let (evals_A, evals_B, evals_C) =
-        consis_inst.compute_eval_table_sparse(block_inst.get_num_cons(), z_len, &evals_rx);
+        consis_inst.compute_eval_table_sparse(consis_inst.get_num_cons(), z_len, &evals_rx);
 
         assert_eq!(evals_A.len(), evals_B.len());
         assert_eq!(evals_A.len(), evals_C.len());
@@ -775,7 +775,7 @@ impl R1CSProof {
 
       let r = [rq.clone(), ry[1..].to_vec()].concat();
       let eval_vars_at_ry = combined_poly.evaluate(&r);
-    
+
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
         &combined_poly,
         None,
@@ -789,6 +789,8 @@ impl R1CSProof {
 
       timer_polyeval.stop();
  
+      println!("PROVER RX: {:?}", rx);
+
       // prove the final step of sum-check #2
       let blind_expected_claim_postsc2 = Scalar::zero();
       let claim_post_phase2 = claims_phase2[0] * claims_phase2[1];
@@ -843,7 +845,6 @@ impl R1CSProof {
     )
   }
 
-  /*
   pub fn verify(
     &self,
     num_vars: usize,
@@ -858,7 +859,7 @@ impl R1CSProof {
     consis_gens: &R1CSGens,
     consis_evals: &(Scalar, Scalar, Scalar),
     transcript: &mut Transcript,
-  ) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
+  ) -> Result<([Vec<Scalar>; 4], [Vec<Scalar>; 3]), ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
     // --
@@ -875,10 +876,10 @@ impl R1CSProof {
     // --
     // BLOCK CORRECTNESS
     // --
-    let (block_rp, block_rq_rev, block_rx, block_ry) = {
+    let block_challenges = {
       let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (block_num_cons.log_2(), block_num_instances.log_2(), block_max_num_proofs.log_2(), num_vars.log_2());
 
-      let proof = self.block_proof;
+      let proof = &self.block_proof;
       let gens = block_gens;
 
       // derive the verifier's challenge tau
@@ -1036,16 +1037,16 @@ impl R1CSProof {
         &expected_claim_post_phase2,
         &comm_claim_post_phase2,
       )?;
-      (rp, rq_rev, rx, ry)
+      [rp, rq_rev, rx, ry]
     };
 
     // --
     // CONSISTENCY
     // --
-    let (consis_rq, consis_rx, consis_ry) = {
+    let consis_challenges = {
       let (num_rounds_q, num_rounds_x, num_rounds_y) = (consis_num_proofs.log_2(), consis_num_cons.log_2(), num_vars.log_2());
 
-      let proof = self.consis_proof;
+      let proof = &self.consis_proof;
       let gens = consis_gens;
 
       // derive the verifier's challenge tau
@@ -1064,6 +1065,8 @@ impl R1CSProof {
         transcript,
       )?;
 
+      println!("BBB");
+
       // perform the intermediate sum-check test with claimed Az, Bz, and Cz
       let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &proof.claims_phase2;
       let (pok_Cz_claim, proof_prod) = &proof.pok_claims_phase2;
@@ -1081,6 +1084,8 @@ impl R1CSProof {
       comm_Bz_claim.append_to_transcript(b"comm_Bz_claim", transcript);
       comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
       comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
+
+      println!("CCC");
 
       // taus_bound_rx is really taus_bound_rq_rx
       let taus_bound_rx: Scalar = (0..rx.len())
@@ -1103,6 +1108,8 @@ impl R1CSProof {
         &expected_claim_post_phase1,
         &comm_claim_post_phase1,
       )?;
+
+      println!("DDD");
 
       // derive three public challenges and then derive a joint claim
       let r_A = transcript.challenge_scalar(b"challenge_Az");
@@ -1132,52 +1139,19 @@ impl R1CSProof {
         transcript,
       )?;
 
-      // verify Z(rq, ry) proof against the initial commitment
-      // Compute combined_poly as (Scalar::one() - ry[0]) * exec_poly_io[i] + ry[0] * exec_poly_io[i + 1]
-      let combined_poly = DensePolynomial::new(
-        (0..consis_num_proofs * num_inputs).map(
-          |i| (Scalar::one() - ry[0]) * exec_poly_io[i] + ry[0] * exec_poly_io[i + num_inputs]).collect());
+      println!("EEE");
 
-
-      // First instance-by-instance on ry
-      // comm_combined = (Scalar::one() - ry[0]) * block_comm_vars + ry[0] * comm_inputs
-      let comm_combined = PolyCommitment {
-        C: (0..self.block_comm_vars_list[p].C.len()).map(
-          |i| ((Scalar::one() - ry[0]) * self.block_comm_vars_list[p].C[i].decompress().unwrap()
-                      + ry[0] * self.block_comm_io_list[p].C[i].decompress().unwrap()).compress()
-        ).collect()
-      };
-
-      // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
-      let rq_short = &rq[num_rounds_q - block_num_proofs[p].log_2()..];
-      let r = [rq_short, &ry[1..]].concat();
-
-      proof.proof_eval_vars_at_ry_list[p].verify(
-        &gens.gens_pc,
-        transcript,
-        &r,
-        &proof.comm_vars_at_ry_list[p],
-        &comm_combined,
-      )?;
-
-      // Then on rp
-      let mut expected_block_comm_vars_list: Vec<RistrettoPoint> = proof.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
-      for p in 0..block_num_instances {
-        for q in 0..(num_rounds_q - block_num_proofs[p].log_2()) {
-          expected_block_comm_vars_list[p] *= Scalar::one() - rq[q];
-        }
-      }
-      let EQ_p = EqPolynomial::new(rp.clone()).evals();
-      let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_block_comm_vars_list).compress();
-      assert_eq!(expected_comm_vars_at_ry, proof.comm_vars_at_ry);
+      // !!!TODO: verify Z(rq, ry) proof against the initial commitment!!!
+      // TODO: Match the records on Merlin Transcript
 
       // compute commitment to eval_Z_at_ry = (Scalar::one() - ry[0]) * self.eval_vars_at_ry + ry[0] * poly_input_eval
       let comm_eval_Z_at_ry = &proof.comm_vars_at_ry.decompress().unwrap();
 
       // perform the final check in the second sum-check protocol
-      let (eval_A_r, eval_B_r, eval_C_r) = block_evals;
+      let (eval_A_r, eval_B_r, eval_C_r) = consis_evals;
+      println!("VERIFIER RX: {:?}", rx);
       let expected_claim_post_phase2 =
-        ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry * p_rp_poly_bound_ry).compress();
+        ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry).compress();
       // verify proof that expected_claim_post_phase2 == claim_post_phase2
       proof.proof_eq_sc_phase2.verify(
         &gens.gens_sc.gens_1,
@@ -1185,12 +1159,14 @@ impl R1CSProof {
         &expected_claim_post_phase2,
         &comm_claim_post_phase2,
       )?;
-      (rq, rx, ry)
+      
+      println!("FFF");
+
+      [rq, rx, ry]
     };
 
-    Ok((block_rp, block_rq_rev, block_rx, block_ry))
+    Ok((block_challenges, consis_challenges))
   }
-  */
 }
 
 #[cfg(test)]

@@ -125,9 +125,6 @@ fn produce_r1cs() -> (
       let sc = int_to_scalar(vars.1);
       B.push((i, vars.0, sc));
     }
-    if args_C.len() == 0 {
-      C.push((i, V_cnst, zero));
-    }
     for vars in &args_C {
       let sc = int_to_scalar(vars.1);
       C.push((i, vars.0, sc));
@@ -141,7 +138,7 @@ fn produce_r1cs() -> (
 
   //                    0    1    2    3    4    5    6    7    8
   // variable orders:  b0   i0   s0   b1   i1   s1   Z0   Z1   B0 
-  // input orders:      1  b_i  i_i  s_i    1  b_o  i_o  s_o
+  // input orders:  valid  b_i  i_i  s_i    1  b_o  i_o  s_o
   let V_b0 = 0;
   let V_i0 = 1;
   let V_s0 = 2;
@@ -151,10 +148,11 @@ fn produce_r1cs() -> (
   let V_Z0 = 6;
   let V_Z1 = 7;
   let V_B0 = 8;
-  let V_cnst = num_vars;
+  let V_valid = num_vars;
   let V_bi = num_vars + 1;
   let V_ii = num_vars + 2;
   let V_si = num_vars + 3;
+  let V_cnst = num_vars + 4;
   let V_bo = num_vars + 5;
   let V_io = num_vars + 6;
   let V_so = num_vars + 7;
@@ -301,14 +299,13 @@ fn produce_r1cs() -> (
   // maximum value among the R1CS instances
   // Each CONSIS proof takes in two input assignments and check their consistency
   let consis_num_cons = 16;
-  let consis_num_non_zero_entries = input_output_cutoff;
+  let consis_num_non_zero_entries = 2 * input_output_cutoff;
   // Number of R1CS instances
   let consis_num_instances = 1;
   // Number of proofs of each R1CS instance
   let consis_num_proofs: usize = 8;
 
   let consis_inst = {
-
     let mut A_list = Vec::new();
     let mut B_list = Vec::new();
     let mut C_list = Vec::new();
@@ -320,13 +317,13 @@ fn produce_r1cs() -> (
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
       // R1CS:
-      // Consistency of the constant 1
-      (A, B, C) = gen_constr(A, B, C, V_cnst,
-        0, vec![(0, 1)], vec![], vec![(num_vars, 1)]);
-      // Consistency of everything else
+      // Consistency of the constant 1, only if the second part of the input is valid
+      (A, B, C) = gen_constr(A, B, C, input_output_cutoff,
+        0, vec![(input_output_cutoff, 1), (num_vars + input_output_cutoff, -1)], vec![(num_vars, 1)], vec![]);
+      // Consistency of inputs, only if the second part of the input is valid
       for i in 1..input_output_cutoff {
-        (A, B, C) = gen_constr(A, B, C, V_cnst,
-          i, vec![(input_output_cutoff + i, 1)], vec![], vec![(num_vars + i, 1)]);
+        (A, B, C) = gen_constr(A, B, C, input_output_cutoff,
+          i, vec![(input_output_cutoff + i, 1), (num_vars + i, -1)], vec![(num_vars, 1)], vec![]);
       }
 
       (A, B, C)
@@ -357,7 +354,7 @@ fn produce_r1cs() -> (
       let mut assignment_inputs = Vec::new();
       //                    0    1    2    3    4    5    6    7    8
       // variable orders:  b0   i0   s0   b1   i1   s1   Z0   Z1   B0 
-      // input orders:      1  b_i  i_i  s_i    1  b_o  i_o  s_o
+      // input orders:  valid  b_i  i_i  s_i    1  b_o  i_o  s_o
       // Iteration i = 1
       let mut vars = vec![one, zero, zero, one, one, zero, Scalar::from(3u32).neg().invert().to_bytes(), one, one];
       let mut inputs = vec![one, one, zero, zero, one, one, one, zero];
@@ -409,7 +406,7 @@ fn produce_r1cs() -> (
       let mut assignment_inputs = Vec::new();
       //                    0    1    2    3    4    5    6    7    8
       // variable orders:  b0   i0   s0   b1   i1   s1   Z0   Z1   B0 
-      // input orders:      1  b_i  i_i  s_i    1  b_o  i_o  s_o
+      // input orders:  valid  b_i  i_i  s_i    1  b_o  i_o  s_o
       let mut vars = vec![zero, zero, zero, one, zero, zero, Scalar::from(4u32).neg().invert().to_bytes(), one, one];
       let mut inputs = vec![one, zero, zero, zero, one, one, zero, zero];
       vars.extend(vec![zero; 7]);
@@ -425,7 +422,11 @@ fn produce_r1cs() -> (
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
 
-    exec_inputs.extend(vec![exec_inputs[exec_inputs.len() - 1].clone(); exec_inputs.len().next_power_of_two() - exec_inputs.len()]);
+    assert!(consis_num_proofs >= exec_inputs.len());
+    let pad_size = consis_num_proofs - exec_inputs.len();
+    for _ in 0..pad_size {
+      exec_inputs.push(VarsAssignment::new(&vec![zero; num_vars]).unwrap());
+    }
 
     (block_vars_matrix, block_inputs_matrix, exec_inputs)
   };
@@ -510,7 +511,6 @@ fn main() {
   );
 
   // verify the proof of satisfiability
-  /*
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
     .verify(
@@ -526,6 +526,5 @@ fn main() {
       &consis_gens,
       &mut verifier_transcript)
     .is_ok());
-  */
   println!("proof verification successful!");
 }
