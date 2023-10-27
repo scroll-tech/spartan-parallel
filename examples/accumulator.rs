@@ -52,13 +52,15 @@ fn produce_r1cs() -> (
   usize,
   Vec<usize>,
   Instance,
-  Vec<Vec<VarsAssignment>>,
-  Vec<Vec<InputsAssignment>>,
-  usize,
   usize,
   usize,
   usize,
   Instance,
+  usize,
+  usize,
+  Instance,
+  Vec<Vec<VarsAssignment>>,
+  Vec<Vec<InputsAssignment>>,
   Vec<InputsAssignment>
 ) {
   // bad test cases for debugging
@@ -70,11 +72,11 @@ fn produce_r1cs() -> (
   // BLOCK: correctness within a block
   // CONSIS: consistency between blocks
   // PERM: permutation between two orderings
-
+  //
   // Separate inputs into two lists:
   // BLOCK_ORDER
   // EXEC_ORDER
-
+  //
   // Separate vars into three lists
   // BLOCK, CONSIS, PERM
 
@@ -148,7 +150,7 @@ fn produce_r1cs() -> (
   let V_Z0 = 6;
   let V_Z1 = 7;
   let V_B0 = 8;
-  let V_valid = num_vars;
+  // let V_valid = num_vars;
   let V_bi = num_vars + 1;
   let V_ii = num_vars + 2;
   let V_si = num_vars + 3;
@@ -164,6 +166,10 @@ fn produce_r1cs() -> (
   // Number of R1CS instances
   let block_num_instances = 2;
   // Number of proofs of each R1CS instance
+  // OBTAINED DURING COMPILE TIME
+  let block_max_num_proofs_bound = 8;
+  let block_num_proofs_bound = vec![8, 1];
+  // OBTAINED DURING RUNTIME
   let block_max_num_proofs = 4;
   let block_num_proofs = vec![4, 1];
 
@@ -300,10 +306,11 @@ fn produce_r1cs() -> (
   // Each CONSIS proof takes in two input assignments and check their consistency
   let consis_num_cons = 16;
   let consis_num_non_zero_entries = 2 * input_output_cutoff;
-  // Number of R1CS instances
-  let consis_num_instances = 1;
   // Number of proofs of each R1CS instance
   let consis_num_proofs: usize = 8;
+
+  let V_cnst = input_output_cutoff;
+  let V_valid = num_vars;
 
   let consis_inst = {
     let mut A_list = Vec::new();
@@ -319,11 +326,11 @@ fn produce_r1cs() -> (
       // R1CS:
       // Consistency of the constant 1, only if the second part of the input is valid
       (A, B, C) = gen_constr(A, B, C, input_output_cutoff,
-        0, vec![(input_output_cutoff, 1), (num_vars + input_output_cutoff, -1)], vec![(num_vars, 1)], vec![]);
+        0, vec![(V_cnst, 1), (num_vars + V_cnst, -1)], vec![(V_valid, 1)], vec![]);
       // Consistency of inputs, only if the second part of the input is valid
       for i in 1..input_output_cutoff {
         (A, B, C) = gen_constr(A, B, C, input_output_cutoff,
-          i, vec![(input_output_cutoff + i, 1), (num_vars + i, -1)], vec![(num_vars, 1)], vec![]);
+          i, vec![(input_output_cutoff + i, 1), (num_vars + i, -1)], vec![(V_valid, 1)], vec![]);
       }
 
       (A, B, C)
@@ -332,9 +339,119 @@ fn produce_r1cs() -> (
     B_list.push(B);
     C_list.push(C);
 
-    let consis_inst = Instance::new(consis_num_instances, consis_num_cons, 2 * num_vars, &A_list, &B_list, &C_list).unwrap();
+    let consis_inst = Instance::new(1, consis_num_cons, 2 * num_vars, &A_list, &B_list, &C_list).unwrap();
     
     consis_inst
+  };
+
+  // --
+  // PERM Instances
+  // --
+  // PERM is consisted of two instances
+  // PERM_BLOCK computes the polynomial defined by block_inputs
+  // PERM_EXEC computes the polynomial defined by exec_inputs
+  // Finally, the verifier checks that the two products are the same
+  // The product is defined by PROD = \prod(\tau - (\sum_i a_i * r^{i-1}))
+  // There is only one proof
+
+  // PERM_BLOCK takes in a num_vars (V) * (4 * num_instances (P) * max_num_proofs (Qmax)) vector as Z, consisted of
+  // Z[0]: \tau, r, r^2, ... r^{V-1}
+  // Z[1..V]: Empty
+  // Z[V..2*V]: block_inputs, in the order of instances. Some of them might be empty
+  // Z[2*V..3*V]: entry i stores block_inputs[q][i] * r^i
+  // Z[3*V..4*V]: entry 0 stores the product of x_q = block_inputs[q][i] * r^i, entry 2 stores cumulative product (tau - x_0) * ... * (tau - x_q), all other entries sit empty
+
+  // NOTE: During actual proving, only the constraints corresponding to valid inputs will be evaluated.
+  // As a result, if front-end can provide the number of times each BLOCK INSTANCE will be executed, we can avoid adding unnecessary entries.
+  // This value is captured by block_num_proofs_bound
+  
+  let Z_section_size = block_num_instances * block_max_num_proofs_bound * num_vars;
+  
+  let (perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries) = {
+    let mut constraint_count = 0;
+
+    let mut A_list = Vec::new();
+    let mut B_list = Vec::new();
+    let mut C_list = Vec::new();
+    
+    // Check output of the last block is the input of the next block
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      // Where things are defined
+      let V_tau = 0;
+      let V_r = 1;
+      // The best way to find a CONSTANT ONE is to peak into the constant term of the first input, which is guaranteed to be valid
+      let V_cnst = Z_section_size + input_output_cutoff;
+
+      // R1CS:
+      // Correctness of r^2, r^3, ...
+      for i in 2..num_vars {
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          constraint_count, vec![(i - 1, 1)], vec![(V_r, 1)], vec![(i, 1)]);
+        constraint_count += 1;
+      }
+      // Correctness of block_io * <r^0, r, r^2, ...>
+      for p in 0..block_num_instances {
+        // Only add the constraint if Z[i] might be valid
+        for q in 0..block_num_proofs_bound[p] {
+          let i = p * block_num_instances + q;
+          (A, B, C) = gen_constr(A, B, C, V_cnst,
+            //                                block_io[i][0]                                  1               block_io[i][0] * 1
+            constraint_count, vec![(Z_section_size + i * num_vars, 1)], vec![], vec![(2 * Z_section_size + i * num_vars, 1)]);
+          constraint_count += 1;
+          for j in 1..num_vars {
+            (A, B, C) = gen_constr(A, B, C, V_cnst,
+              //                                block_io[i][j]                                       r^j                   block_io[i][j] * r^j
+              constraint_count, vec![(Z_section_size + i * num_vars + j, 1)], vec![(j, 1)], vec![(2 * Z_section_size + i * num_vars + j, 1)]);
+            constraint_count += 1;
+          }
+        }
+      }
+      // Correctness of x[i] = sum_j(block_io[i][j] * r^j)
+      for p in 0..block_num_instances {
+        // Only add the constraint if Z[i] might be valid
+        for q in 0..block_num_proofs_bound[p] {
+          let i = p * block_num_instances + q;
+          (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count,
+              (0..num_vars).map(|j| (2 * Z_section_size + i * num_vars + j, 1)).collect(), 
+              vec![], 
+              vec![(3 * Z_section_size + i * num_vars, 1)]);
+          constraint_count += 1;
+        }
+      }
+      // Correctness of cumulative product
+      // x[0] and tau - x[0]
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        constraint_count, vec![(V_tau, 1), (3 * Z_section_size, -1)], vec![], vec![(3 * Z_section_size + 1, 1)]);
+      constraint_count += 1;
+      for p in 0..block_num_instances {
+        // Only add the constraint if Z[i] might be valid
+        for q in 0..block_num_proofs_bound[p] {
+          let i = p * block_num_instances + q;
+          (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count, 
+            vec![(V_tau, 1), (3 * Z_section_size + i * num_vars, -1)], 
+            vec![(3 * Z_section_size + (i - 1) * num_vars + 1, 1)], 
+            vec![(3 * Z_section_size + i * num_vars + 1, 1)]);
+          constraint_count += 1;
+        }
+      }
+
+      (A, B, C)
+    };
+
+    let perm_block_num_cons = constraint_count;
+    let perm_block_num_non_zero_entries = num_vars * constraint_count;
+
+    A_list.push(A);
+    B_list.push(B);
+    C_list.push(C);
+
+    let perm_block_inst = Instance::new(1, perm_block_num_cons, 4 * Z_section_size, &A_list, &B_list, &C_list).unwrap();
+    
+    (perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries)
   };
 
   // --
@@ -422,11 +539,15 @@ fn produce_r1cs() -> (
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
 
+    // Pad exec_inputs with 0
     assert!(consis_num_proofs >= exec_inputs.len());
     let pad_size = consis_num_proofs - exec_inputs.len();
     for _ in 0..pad_size {
       exec_inputs.push(VarsAssignment::new(&vec![zero; num_vars]).unwrap());
     }
+
+    // Witnesses for permutation cannot be generated until tau and r are generated
+    // Both can only be generated at proving time
 
     (block_vars_matrix, block_inputs_matrix, exec_inputs)
   };
@@ -443,13 +564,15 @@ fn produce_r1cs() -> (
     block_max_num_proofs,
     block_num_proofs,
     block_inst,
-    block_vars_matrix,
-    block_inputs_matrix,
     consis_num_cons,
     consis_num_non_zero_entries,
-    consis_num_instances,
     consis_num_proofs,
     consis_inst,
+    perm_block_num_cons,
+    perm_block_num_non_zero_entries,
+    perm_block_inst,
+    block_vars_matrix,
+    block_inputs_matrix,
     exec_inputs
   )
 }
@@ -465,13 +588,15 @@ fn main() {
     block_max_num_proofs,
     block_num_proofs,
     block_inst,
-    block_vars_matrix,
-    block_inputs_matrix,
     consis_num_cons,
     consis_num_non_zero_entries,
-    consis_num_instances,
     consis_num_proofs,
     consis_inst,
+    perm_block_num_cons,
+    perm_block_num_non_zero_entries,
+    perm_block_inst,
+    block_vars_matrix,
+    block_inputs_matrix,
     exec_inputs
   ) = produce_r1cs();
 
@@ -483,7 +608,7 @@ fn main() {
 
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
-  let consis_gens = SNARKGens::new(consis_num_cons, num_vars, consis_num_instances, consis_num_non_zero_entries);
+  let consis_gens = SNARKGens::new(consis_num_cons, num_vars, 1, consis_num_non_zero_entries);
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances

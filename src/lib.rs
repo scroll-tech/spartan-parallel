@@ -165,11 +165,13 @@ impl Instance {
         for &(row, col, val_bytes) in tups {
           // row must be smaller than num_cons
           if row >= num_cons {
+            println!("ROW: {}, NUM_CONS: {}", row, num_cons);
             return Err(R1CSError::InvalidIndex);
           }
 
           // col must be smaller than num_vars
           if col >= num_vars {
+            println!("COL: {}, NUM_VARS: {}", col, num_vars);
             return Err(R1CSError::InvalidIndex);
           }
 
