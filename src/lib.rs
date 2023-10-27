@@ -531,17 +531,17 @@ impl SNARK {
     )?;
 
     // Verify Evaluation on CONSIS
-    let (Ar, Br, Cr) = &self.block_inst_evals;
+    let (Ar, Br, Cr) = &self.consis_inst_evals;
     Ar.append_to_transcript(b"Ar_claim", transcript);
     Br.append_to_transcript(b"Br_claim", transcript);
     Cr.append_to_transcript(b"Cr_claim", transcript);
     let [_, rx, ry] = consis_challenges;
-    self.block_r1cs_eval_proof.verify(
-      &block_comm.comm,
+    self.consis_r1cs_eval_proof.verify(
+      &consis_comm.comm,
       &rx,
       &ry,
-      &self.block_inst_evals,
-      &block_gens.gens_r1cs_eval,
+      &self.consis_inst_evals,
+      &consis_gens.gens_r1cs_eval,
       transcript,
     )?;
 

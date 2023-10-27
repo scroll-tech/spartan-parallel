@@ -58,9 +58,9 @@ pub struct R1CSProofConsis {
   pok_claims_phase2: (KnowledgeProof, ProductProof),
   proof_eq_sc_phase1: EqualityProof,
   sc_proof_phase2: ZKSumcheckInstanceProof,
-  comm_vars_at_ry: CompressedGroup,
-  proof_eval_vars_at_ry: PolyEvalProof,
-  proof_eq_sc_phase2: EqualityProof,
+  // comm_vars_at_ry: CompressedGroup,
+  // proof_eval_vars_at_ry: PolyEvalProof,
+  // proof_eq_sc_phase2: EqualityProof,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -776,6 +776,7 @@ impl R1CSProof {
       let r = [rq.clone(), ry[1..].to_vec()].concat();
       let eval_vars_at_ry = combined_poly.evaluate(&r);
 
+      /*
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
         &combined_poly,
         None,
@@ -786,15 +787,15 @@ impl R1CSProof {
         transcript,
         random_tape,
       );
+      */
 
       timer_polyeval.stop();
- 
-      println!("PROVER RX: {:?}", rx);
 
       // prove the final step of sum-check #2
       let blind_expected_claim_postsc2 = Scalar::zero();
       let claim_post_phase2 = claims_phase2[0] * claims_phase2[1];
 
+      /*
       let (proof_eq_sc_phase2, _C1, _C2) = EqualityProof::prove(
         &gens.gens_pc.gens.gens_1,
         transcript,
@@ -804,6 +805,7 @@ impl R1CSProof {
         &claim_post_phase2,
         &blind_claim_postsc2,
       );
+      */
 
       timer_prove.stop();
 
@@ -824,9 +826,9 @@ impl R1CSProof {
           pok_claims_phase2,
           proof_eq_sc_phase1,
           sc_proof_phase2,
-          comm_vars_at_ry,
-          proof_eval_vars_at_ry,
-          proof_eq_sc_phase2
+          // comm_vars_at_ry,
+          // proof_eval_vars_at_ry,
+          // proof_eq_sc_phase2
         },
         [rq, rx, ry]
       )
@@ -1065,8 +1067,6 @@ impl R1CSProof {
         transcript,
       )?;
 
-      println!("BBB");
-
       // perform the intermediate sum-check test with claimed Az, Bz, and Cz
       let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &proof.claims_phase2;
       let (pok_Cz_claim, proof_prod) = &proof.pok_claims_phase2;
@@ -1084,8 +1084,6 @@ impl R1CSProof {
       comm_Bz_claim.append_to_transcript(b"comm_Bz_claim", transcript);
       comm_Cz_claim.append_to_transcript(b"comm_Cz_claim", transcript);
       comm_prod_Az_Bz_claims.append_to_transcript(b"comm_prod_Az_Bz_claims", transcript);
-
-      println!("CCC");
 
       // taus_bound_rx is really taus_bound_rq_rx
       let taus_bound_rx: Scalar = (0..rx.len())
@@ -1108,8 +1106,6 @@ impl R1CSProof {
         &expected_claim_post_phase1,
         &comm_claim_post_phase1,
       )?;
-
-      println!("DDD");
 
       // derive three public challenges and then derive a joint claim
       let r_A = transcript.challenge_scalar(b"challenge_Az");
@@ -1139,8 +1135,8 @@ impl R1CSProof {
         transcript,
       )?;
 
-      println!("EEE");
 
+      /*
       // !!!TODO: verify Z(rq, ry) proof against the initial commitment!!!
       // TODO: Match the records on Merlin Transcript
 
@@ -1149,7 +1145,6 @@ impl R1CSProof {
 
       // perform the final check in the second sum-check protocol
       let (eval_A_r, eval_B_r, eval_C_r) = consis_evals;
-      println!("VERIFIER RX: {:?}", rx);
       let expected_claim_post_phase2 =
         ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry).compress();
       // verify proof that expected_claim_post_phase2 == claim_post_phase2
@@ -1159,8 +1154,7 @@ impl R1CSProof {
         &expected_claim_post_phase2,
         &comm_claim_post_phase2,
       )?;
-      
-      println!("FFF");
+      */
 
       [rq, rx, ry]
     };
