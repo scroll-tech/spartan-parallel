@@ -58,6 +58,7 @@ fn produce_r1cs() -> (
   Instance,
   usize,
   usize,
+  usize,
   Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
@@ -359,7 +360,13 @@ fn produce_r1cs() -> (
   // Z[1..V]: Empty
   // Z[V..2*V]: block_inputs, in the order of instances. Some of them might be empty
   // Z[2*V..3*V]: entry i stores block_inputs[q][i] * r^i
-  // Z[3*V..4*V]: entry 0 stores the product of x_q = block_inputs[q][i] * r^i, entry 2 stores cumulative product (tau - x_0) * ... * (tau - x_q), all other entries sit empty
+  // Z[3*V..4*V]: entry 0 stores the product of x_q = block_inputs[q][i] * r^i,
+  //              entry 1 stores the CORRECT cumulative product (tau - x_0) * ... * (tau - x_q) for all VALID x_i
+  //              Z[i][1] = valid ? Z[i][0] * Z[prev][1] : Z[prev][1] = Z[prev][1] + (Z[i][0] - 1) * valid * Z[prev][1]
+  //              entry 2 stores (Z[i][0] - 1) * valid
+  //              entry 3 stores (Z[i][0] - 1) * valid * Z[prev][1]
+  //              all other entries are 0
+  // Note: this means that num_vars >= 4, which is almost always the case
 
   // NOTE: During actual proving, only the constraints corresponding to valid inputs will be evaluated.
   // As a result, if front-end can provide the number of times each BLOCK INSTANCE will be executed, we can avoid adding unnecessary entries.
@@ -367,7 +374,7 @@ fn produce_r1cs() -> (
   
   let Z_section_size = block_num_instances * block_max_num_proofs_bound * num_vars;
   
-  let (perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries) = {
+  let (perm_block_num_vars, perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries) = {
     let mut constraint_count = 0;
 
     let mut A_list = Vec::new();
@@ -427,21 +434,39 @@ fn produce_r1cs() -> (
       (A, B, C) = gen_constr(A, B, C, V_cnst,
         constraint_count, vec![(V_tau, 1), (3 * Z_section_size, -1)], vec![], vec![(3 * Z_section_size + 1, 1)]);
       constraint_count += 1;
+      // Note: we are not multiplying consecutive ones together, but rather consecutive VALID ones
+      let mut i_last = 0;
       for p in 0..block_num_instances {
         // Only add the constraint if Z[i] might be valid
         for q in 0..block_num_proofs_bound[p] {
           let i = p * block_num_instances + q;
+          // (Z[i][0] - 1) * valid, in slot 2
+          let V_valid = Z_section_size + i * num_vars;
           (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count, 
-            vec![(V_tau, 1), (3 * Z_section_size + i * num_vars, -1)], 
-            vec![(3 * Z_section_size + (i - 1) * num_vars + 1, 1)], 
+            vec![(3 * Z_section_size + i * num_vars, 1), (V_cnst, -1)], 
+            vec![(V_valid, 1)], 
+            vec![(3 * Z_section_size + i * num_vars + 2, 1)]);
+          constraint_count += 1;
+          // (Z[i][0] - 1) * valid * Z[prev][1] in slot 3
+          (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count, 
+            vec![(3 * Z_section_size + i * num_vars + 2, 1)], 
+            vec![(3 * Z_section_size + i_last * num_vars + 1, 1)], 
+            vec![(3 * Z_section_size + i * num_vars + 3, 1)]);
+          constraint_count += 1;
+          // Actual cumulative: Z[prev][1] + (Z[i][0] - 1) * valid * Z[prev][1], in slot 1
+          (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count, 
+            vec![(3 * Z_section_size + i * num_vars + 2, 1), (3 * Z_section_size + i * num_vars + 3, 1)], 
+            vec![], 
             vec![(3 * Z_section_size + i * num_vars + 1, 1)]);
           constraint_count += 1;
+          i_last = i;
         }
       }
 
       (A, B, C)
     };
 
+    let perm_block_num_vars = 4 * Z_section_size;
     let perm_block_num_cons = constraint_count;
     let perm_block_num_non_zero_entries = num_vars * constraint_count;
 
@@ -449,9 +474,9 @@ fn produce_r1cs() -> (
     B_list.push(B);
     C_list.push(C);
 
-    let perm_block_inst = Instance::new(1, perm_block_num_cons, 4 * Z_section_size, &A_list, &B_list, &C_list).unwrap();
+    let perm_block_inst = Instance::new(1, perm_block_num_cons, perm_block_num_vars, &A_list, &B_list, &C_list).unwrap();
     
-    (perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries)
+    (perm_block_num_vars, perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries)
   };
 
   // --
@@ -568,6 +593,7 @@ fn produce_r1cs() -> (
     consis_num_non_zero_entries,
     consis_num_proofs,
     consis_inst,
+    perm_block_num_vars,
     perm_block_num_cons,
     perm_block_num_non_zero_entries,
     perm_block_inst,
@@ -592,6 +618,7 @@ fn main() {
     consis_num_non_zero_entries,
     consis_num_proofs,
     consis_inst,
+    perm_block_num_vars,
     perm_block_num_cons,
     perm_block_num_non_zero_entries,
     perm_block_inst,
@@ -609,11 +636,13 @@ fn main() {
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
   let consis_gens = SNARKGens::new(consis_num_cons, num_vars, 1, consis_num_non_zero_entries);
+  let perm_block_gens = SNARKGens::new(perm_block_num_cons, perm_block_num_vars, 1, perm_block_num_non_zero_entries);
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
   let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
   let (consis_comm, consis_decomm) = SNARK::encode(&consis_inst, &consis_gens);
+  let (perm_block_comm, perm_block_decomm) = SNARK::encode(&perm_block_inst, &perm_block_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
@@ -629,6 +658,10 @@ fn main() {
     &consis_comm,
     &consis_decomm,
     &consis_gens,
+    &perm_block_inst,
+    &perm_block_comm,
+    &perm_block_decomm,
+    &perm_block_gens,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
