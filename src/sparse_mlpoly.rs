@@ -469,6 +469,62 @@ impl SparseMatPolynomial {
       })
   }
 
+  // Multiply_vec function tweaked for perm_block
+  // For each col, decode into instance / proof to check if z is 0
+  pub fn multiply_vec_perm_block(&self,
+    num_instances: usize, num_proofs: &Vec<usize>, num_proofs_bound: &Vec<usize>, max_num_proofs_bound: usize,
+    num_rows: usize, num_cols: usize, z: &(Vec<Scalar>, Vec<Vec<Vec<Scalar>>>, Vec<Vec<Vec<Scalar>>>, Vec<Vec<Vec<Scalar>>>)
+  ) -> Vec<Scalar> {
+    let Z_section_size = num_instances * max_num_proofs_bound * num_cols;
+
+    (0..self.M.len())
+      .map(|i| {
+        let row = self.M[i].row;
+        let col = self.M[i].col;
+
+        // Determine which section of Z we are looking at
+        let sec = col / Z_section_size;
+        let col = col % Z_section_size;
+        match sec {
+          // Section 0: tau, r, r^2, etc.
+          0 => {
+            // col must be between 0..num_cols since only the first roll of Z0 is occupied
+            assert!(col < num_cols);
+            let val = &self.M[i].val;
+            (row, val * (z.0)[col])
+          }
+          // Section 1, 2: if proof < num_proof, access z; otherwise return 0
+          // Section 3: every (sec, inst, proof) triple should have a corresponding z entry
+          1 | 2 | 3 => {
+            // Find instance and proof
+            let inst = col / num_instances;
+            let col = col & num_instances;
+            let proof = col / max_num_proofs_bound;
+            let col = col * max_num_proofs_bound;
+            if sec != 3 && proof >= num_proofs[inst] {
+              (row, Scalar::zero())
+            } else {
+              let val = &self.M[i].val;
+              if sec == 1 {
+                (row, val * (z.1)[inst][proof][col])
+              }
+              else if sec == 2 {
+                (row, val * (z.2)[inst][proof][col])
+              }
+              else {
+                (row, val * (z.3)[inst][proof][col])
+              }
+            }
+          }
+          _ => panic!("PERM_BLOCK proof failed: unknown Z_section {}!", sec)
+        }
+      })
+      .fold(vec![Scalar::zero(); num_rows], |mut Mz, (r, v)| {
+        Mz[r] += v;
+        Mz
+      })
+  }
+
   pub fn compute_eval_table_sparse(
     &self,
     rx: &[Scalar],

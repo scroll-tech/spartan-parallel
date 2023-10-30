@@ -33,6 +33,7 @@ mod transcript;
 mod unipoly;
 
 use core::cmp::max;
+use dense_mlpoly::{DensePolynomial, PolyCommitment};
 use errors::{ProofVerifyError, R1CSError};
 use itertools::Itertools;
 use merlin::Transcript;
@@ -292,7 +293,8 @@ impl Instance {
 
 /// `SNARKGens` holds public parameters for producing and verifying proofs with the Spartan SNARK
 pub struct SNARKGens {
-  gens_r1cs_sat: R1CSGens,
+  /// Generator for witness commitment
+  pub gens_r1cs_sat: R1CSGens,
   gens_r1cs_eval: R1CSCommitmentGens,
 }
 
@@ -322,11 +324,16 @@ impl SNARKGens {
 /// `SNARK` holds a proof produced by Spartan SNARK
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SNARK {
-  r1cs_sat_proof: R1CSProof,
+  block_comm_vars_list: Vec<PolyCommitment>,
+  block_comm_inputs_list: Vec<PolyCommitment>,
+  exec_comm_inputs: PolyCommitment,
+
+  block_r1cs_sat_proof: R1CSProof,
   block_inst_evals: (Scalar, Scalar, Scalar),
   block_r1cs_eval_proof: R1CSEvalProof,
-  consis_inst_evals: (Scalar, Scalar, Scalar),
-  consis_r1cs_eval_proof: R1CSEvalProof,
+  // consis_r1cs_sat_proof: R1CSProof,
+  // consis_inst_evals: (Scalar, Scalar, Scalar),
+  // consis_r1cs_eval_proof: R1CSEvalProof,
 }
 
 impl SNARK {
@@ -350,6 +357,10 @@ impl SNARK {
 
   /// A method to produce a SNARK proof of the satisfiability of an R1CS instance
   pub fn prove(
+    num_vars: usize,
+    block_num_instances: usize,
+    block_max_num_proofs_bound: usize,
+    block_num_proofs_bound: &Vec<usize>,
     block_max_num_proofs: usize,
     block_num_proofs: &Vec<usize>,
     block_inst: &Instance,
@@ -368,6 +379,7 @@ impl SNARK {
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
     exec_inputs: Vec<InputsAssignment>,
+    vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Self {
     let timer_prove = Timer::new("SNARK::prove");
@@ -380,21 +392,106 @@ impl SNARK {
     block_comm.comm.append_to_transcript(b"block_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
-    let (r1cs_sat_proof, block_challenges, consis_challenges) = {
-      let (proof, block_challenges, consis_challenges) = {
+    // unwrap the assignments
+    let block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
+    let block_inputs_mat = block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
+    let exec_inputs = exec_inputs.into_iter().map(|v| v.assignment).collect_vec();
+
+    // --
+    // WITNESS COMMITMENTS
+    // --
+
+    let (
+      block_poly_vars_list,
+      block_comm_vars_list,
+      block_poly_inputs_list,
+      block_comm_inputs_list,
+      exec_poly_inputs, 
+      exec_comm_inputs
+    ) = {
+      let timer_commit = Timer::new("polycommit");
+
+      // commit the witnesses and inputs separately instance-by-instance
+      let mut block_poly_vars_list = Vec::new();
+      let mut block_comm_vars_list = Vec::new();
+      let mut block_poly_inputs_list = Vec::new();
+      let mut block_comm_inputs_list = Vec::new();
+
+      for p in 0..block_num_instances {
+        let (block_poly_vars, block_comm_vars) = {
+          // Flatten the witnesses into a Q_i * X list
+          let vars_list_p = block_vars_mat[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let block_poly_vars = DensePolynomial::new(vars_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (block_comm_vars, _blinds_vars) = block_poly_vars.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          block_comm_vars.append_to_transcript(b"poly_commitment", transcript);
+          (block_poly_vars, block_comm_vars)
+        };
+        
+        let (block_poly_inputs, block_comm_inputs) = {
+          // Flatten the inputs into a Q_i * X list
+          let inputs_list_p = block_inputs_mat[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let block_poly_inputs = DensePolynomial::new(inputs_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (block_comm_inputs, _blinds_inputs) = block_poly_inputs.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          block_comm_inputs.append_to_transcript(b"poly_commitment", transcript);
+          (block_poly_inputs, block_comm_inputs)
+        };
+        block_poly_vars_list.push(block_poly_vars);
+        block_comm_vars_list.push(block_comm_vars);
+        block_poly_inputs_list.push(block_poly_inputs);
+        block_comm_inputs_list.push(block_comm_inputs);
+      }
+
+      let (exec_poly_inputs, exec_comm_inputs) = {
+        let exec_inputs_list = exec_inputs.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+        // create a multilinear polynomial using the supplied assignment for variables
+        let exec_poly_inputs = DensePolynomial::new(exec_inputs_list);
+
+        // produce a commitment to the satisfying assignment
+        let (exec_comm_inputs, _blinds_inputs) = exec_poly_inputs.commit(&vars_gens.gens_pc, None);
+
+        // add the commitment to the prover's transcript
+        exec_comm_inputs.append_to_transcript(b"poly_commitment", transcript);
+        (exec_poly_inputs, exec_comm_inputs)
+      };
+      timer_commit.stop();
+
+      (
+        block_poly_vars_list,
+        block_comm_vars_list,
+        block_poly_inputs_list,
+        block_comm_inputs_list,
+        exec_poly_inputs, 
+        exec_comm_inputs
+      )
+    };
+    
+    // --
+    // BLOCK CORRECTNESS
+    // --
+
+    let (block_r1cs_sat_proof, block_challenges) = {
+      let (proof, block_challenges) = {
         R1CSProof::prove(
+          block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
+          num_vars,
           &block_inst.inst,
-          &block_gens.gens_r1cs_sat,
-          consis_num_proofs,
-          &consis_inst.inst,
-          &consis_gens.gens_r1cs_sat,
-          &perm_block_inst.inst,
-          &perm_block_gens.gens_r1cs_sat,
-          block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
-          block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec(),
-          exec_inputs.into_iter().map(|v| v.assignment).collect_vec(),
+          &vars_gens,
+          Some(&block_vars_mat),
+          &block_inputs_mat,
+          Some(&block_poly_vars_list),
+          &block_poly_inputs_list,
           transcript,
           &mut random_tape,
         )
@@ -403,7 +500,7 @@ impl SNARK {
       let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
       Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-      (proof, block_challenges, consis_challenges)
+      (proof, block_challenges)
     };
 
     // Final evaluation on BLOCK
@@ -440,6 +537,7 @@ impl SNARK {
       (inst_evals, r1cs_eval_proof)
     };
 
+    /*
     // Final evaluation on CONSIS
     let (consis_inst_evals, consis_r1cs_eval_proof) = {
       let [_, rx, ry] = consis_challenges;
@@ -473,19 +571,24 @@ impl SNARK {
       timer_prove.stop();
       (inst_evals, r1cs_eval_proof)
     };
+    */
 
     SNARK {
-      r1cs_sat_proof,
+      block_comm_vars_list,
+      block_comm_inputs_list,
+      exec_comm_inputs,
+      block_r1cs_sat_proof,
       block_inst_evals,
       block_r1cs_eval_proof,
-      consis_inst_evals,
-      consis_r1cs_eval_proof
+      // consis_inst_evals,
+      // consis_r1cs_eval_proof
     }
   }
 
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
   pub fn verify(
     &self,
+    num_vars: usize,
     block_num_instances: usize,
     block_max_num_proofs: usize,
     block_num_proofs: &Vec<usize>,
@@ -496,6 +599,7 @@ impl SNARK {
     consis_num_cons: usize,
     consis_comm: &ComputationCommitment,
     consis_gens: &SNARKGens,
+    vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
     let timer_verify = Timer::new("SNARK::verify");
@@ -505,19 +609,32 @@ impl SNARK {
     block_comm.comm.append_to_transcript(b"block_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
+    // --
+    // COMMITMENTS
+    // --
+
+    // add the commitment to the verifier's transcript
+    for p in 0..block_num_instances {
+      self.block_comm_vars_list[p].append_to_transcript(b"poly_commitment", transcript);
+      self.block_comm_inputs_list[p].append_to_transcript(b"poly_commitment", transcript);
+    }
+    self.exec_comm_inputs.append_to_transcript(b"poly_commitment", transcript);
+
+    // --
+    // BLOCK CORRECTNESS
+    // --
+
     let timer_sat_proof = Timer::new("verify_sat_proof");
-    let (block_challenges, consis_challenges) = self.r1cs_sat_proof.verify(
-      block_comm.comm.get_num_vars(),
-      block_num_cons,
+    let block_challenges = self.block_r1cs_sat_proof.verify(
       block_num_instances,
       block_max_num_proofs,
       block_num_proofs,
-      &block_gens.gens_r1cs_sat,
+      num_vars,
+      block_num_cons,
+      &vars_gens,
       &self.block_inst_evals,
-      consis_num_cons,
-      consis_num_proofs,
-      &consis_gens.gens_r1cs_sat,
-      &self.consis_inst_evals,
+      Some(&self.block_comm_vars_list),
+      &self.block_comm_inputs_list,
       transcript,
     )?;
     timer_sat_proof.stop();
@@ -538,6 +655,7 @@ impl SNARK {
       transcript,
     )?;
 
+    /*
     // Verify Evaluation on CONSIS
     let (Ar, Br, Cr) = &self.consis_inst_evals;
     Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -552,6 +670,7 @@ impl SNARK {
       &consis_gens.gens_r1cs_eval,
       transcript,
     )?;
+    */
 
     timer_eval_proof.stop();
     timer_verify.stop();

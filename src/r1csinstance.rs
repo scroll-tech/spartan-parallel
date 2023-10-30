@@ -411,6 +411,44 @@ impl R1CSInstance {
     )
   }
 
+  pub fn multiply_vec_perm_block(
+    &self,
+    num_instances: usize,
+    num_proofs: &Vec<usize>,
+    max_num_proofs: usize,
+    num_rows: usize,
+    num_cols: usize,
+    z_mat: &Vec<Vec<Vec<Scalar>>>
+  ) -> (DensePolynomial_PQX, DensePolynomial_PQX, DensePolynomial_PQX) {
+    assert_eq!(num_rows, self.num_cons);
+    assert!(num_cols == self.num_vars);
+    let mut Az = Vec::new();
+    let mut Bz = Vec::new();
+    let mut Cz = Vec::new();
+
+    for p in 0..num_instances {
+      let z_list = &z_mat[p];
+      assert!(num_proofs[p] <= max_num_proofs);
+      Az.push(Vec::new());
+      Bz.push(Vec::new());
+      Cz.push(Vec::new());
+      for q in 0..num_proofs[p] {
+        let z = &z_list[q];
+        assert_eq!(z.len(), num_cols);
+
+        Az[p].push(self.A_list[p].multiply_vec(num_rows, num_cols, z));
+        Bz[p].push(self.B_list[p].multiply_vec(num_rows, num_cols, z));
+        Cz[p].push(self.C_list[p].multiply_vec(num_rows, num_cols, z));
+      }
+    }
+    (
+      DensePolynomial_PQX::new_rev(&Az, num_proofs, max_num_proofs),
+      DensePolynomial_PQX::new_rev(&Bz, num_proofs, max_num_proofs),
+      DensePolynomial_PQX::new_rev(&Cz, num_proofs, max_num_proofs)
+    )
+  }
+
+
   pub fn multiply_vec(
     &self,
     p: usize,
