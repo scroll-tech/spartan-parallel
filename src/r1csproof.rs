@@ -161,24 +161,31 @@ impl R1CSProof {
 
   // A generic R1CS prover that enables data-parallelism
   pub fn prove(
+    // How many sections does each Z vector have?
+    // num_witness secs can be 1, 2, or 4
+    num_witness_secs: usize,
+    
     num_instances: usize,
     max_num_proofs: usize,
     num_proofs: &Vec<usize>,
     num_inputs: usize,
     inst: &R1CSInstance,
     gens: &R1CSGens,
-    // Vars and inputs are simply to parts of the witnesses.
-    // They should not be interpreted at semantics level.
-    // If both vars and inputs exist, they must be of the same size.
-    opt_vars_mat: Option<&Vec<Vec<Vec<Scalar>>>>,
-    inputs_mat: &Vec<Vec<Vec<Scalar>>>,
-    opt_poly_vars_list: Option<&Vec<DensePolynomial>>,
-    poly_inputs_list: &Vec<DensePolynomial>,
+    // Depends on num_witness_secs, witnesses are separated into w[0], w[1], w[2], w[3]
+    // Each committed separately but concacted together to form Z
+    w_mat: Vec<&Vec<Vec<Vec<Scalar>>>>,
+    // The polynomial interpolated from each witness section
+    poly_w_list: Vec<&Vec<DensePolynomial>>,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
   ) -> (R1CSProof, [Vec<Scalar>; 4]) { 
     let timer_prove = Timer::new("R1CSProof::prove");
     transcript.append_protocol_name(R1CSProof::protocol_name());
+
+    // Assert num_witness_secs is valid
+    assert!(num_witness_secs == 1 || num_witness_secs == 2 || num_witness_secs == 4);
+    assert_eq!(num_witness_secs, w_mat.len());
+    assert_eq!(num_witness_secs, poly_w_list.len());
 
     // Assert everything is a power of 2
     assert_eq!(num_instances, num_instances.next_power_of_two());
@@ -190,20 +197,13 @@ impl R1CSProof {
     assert_eq!(num_inputs, num_inputs.next_power_of_two());
 
     // Assert all lengths matches
-    if let Some(vars_mat) = opt_vars_mat {
-      assert_eq!(vars_mat.len(), num_instances);
+    for i in 0..num_witness_secs {
+      assert_eq!(w_mat[i].len(), num_instances);
       for p in 0..num_instances {
-        assert_eq!(vars_mat[p].len(), num_proofs[p]);
+        assert_eq!(w_mat[i][p].len(), num_proofs[p]);
         for q in 0..num_proofs[p] {
-          assert_eq!(vars_mat[p][q].len(), num_inputs);
+          assert_eq!(w_mat[i][p][q].len(), num_inputs);
         }
-      }
-    }
-    assert_eq!(inputs_mat.len(), num_instances);
-    for p in 0..num_instances {
-      assert_eq!(inputs_mat[p].len(), num_proofs[p]);
-      for q in 0..num_proofs[p] {
-        assert_eq!(inputs_mat[p][q].len(), num_inputs);
       }
     }
 
@@ -215,18 +215,16 @@ impl R1CSProof {
 
     // append input to variables to create a single vector z
     let mut z_mat = Vec::new();
-    // if there are no vars, then z is just input
-    if let Some(vars_mat) = opt_vars_mat {
-      for i in 0..num_instances {
-        z_mat.push(Vec::new());
-        for j in 0..vars_mat[i].len() {
-          z_mat[i].push([vars_mat[i][j].clone(), inputs_mat[i][j].clone()].concat());
+    for p in 0..num_instances {
+      z_mat.push(Vec::new());
+      for q in 0..num_proofs[p] {
+        z_mat[p].push(Vec::new());
+        for w in 0..num_witness_secs {
+          z_mat[p][q].extend(w_mat[w][p][q].clone());
         }
       }
-    } else {
-      z_mat = inputs_mat.clone();
     }
-    let z_len = z_mat[0][0].len();
+    let z_len = num_inputs * num_witness_secs;
 
     // derive the verifier's challenge \tau
     let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
@@ -391,28 +389,35 @@ impl R1CSProof {
     let mut proof_eval_vars_at_ry_list = Vec::new();
     let mut comm_vars_at_ry_list = Vec::new();
     let timer_polyeval = Timer::new("polyeval");
+
     for p in 0..num_instances {
       // if poly_vars exists, compute combined_poly as (Scalar::one() - ry[0]) * poly_vars + ry[0] * poly_inputs
       // otherwise combined_poly is just poly_inputs
       let (combined_poly, r) = {
-        let combined_poly = 
-          if let Some(_) = opt_vars_mat {
-            DensePolynomial::new(
-              (0..opt_poly_vars_list.unwrap()[p].len()).map(
-                |i| (Scalar::one() - ry[0]) * opt_poly_vars_list.unwrap()[p][i] + ry[0] * poly_inputs_list[p][i]).collect())
-          } else {
-            poly_inputs_list[p].clone()
-          };
-
         // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
         let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
-        let r = 
-          if let Some(_) = opt_vars_mat {
+        match num_witness_secs {
+          1 => (poly_w_list[0][p].clone(), [rq_short, &ry].concat()),
+          2 => (
+            DensePolynomial::new(
+              (0..poly_w_list[0][p].len()).map(
+                |i| (Scalar::one() - ry[0]) * poly_w_list[0][p][i]
+                         + ry[0] * poly_w_list[1][p][i]
+                ).collect()),
             [rq_short, &ry[1..]].concat()
-          } else {
-            [rq_short, &ry].concat()
-          };
-        (combined_poly, r)
+          ),
+          4 => (
+            DensePolynomial::new(
+              (0..poly_w_list[0][p].len()).map(
+                |i| (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * poly_w_list[0][p][i]
+                         + (Scalar::one() - ry[0]) * ry[1] * poly_w_list[1][p][i]
+                         + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p][i]
+                         + ry[0] * ry[1] * poly_w_list[3][p][i]
+                ).collect()),
+            [rq_short, &ry[2..]].concat()
+          ),
+          _ => panic!("PROOF Failed: Unrecognized num_witness_secs: {}", num_witness_secs)
+        }
       };
 
       let eval_vars_at_ry = combined_poly.evaluate(&r);
@@ -491,6 +496,9 @@ impl R1CSProof {
 
   pub fn verify(
     &self,
+    // num_witness secs can be 1, 2, or 4
+    num_witness_secs: usize,
+
     num_instances: usize,
     max_num_proofs: usize,
     num_proofs: &Vec<usize>,
@@ -498,14 +506,17 @@ impl R1CSProof {
     num_cons: usize,
     gens: &R1CSGens,
     evals: &(Scalar, Scalar, Scalar),
-    // Commitment for vars and inputs, if exist
-    opt_comm_vars_list: Option<&Vec<PolyCommitment>>,
-    comm_inputs_list: &Vec<PolyCommitment>,
+    // Commitment for witnesses
+    comm_w_list: Vec<&Vec<PolyCommitment>>,
     transcript: &mut Transcript,
   ) -> Result<[Vec<Scalar>; 4], ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
-    let z_len = if opt_comm_vars_list.is_none() { num_inputs } else { 2 * num_inputs };
+    // Assert num_witness_secs is valid
+    assert!(num_witness_secs == 1 || num_witness_secs == 2 || num_witness_secs == 4);
+    assert_eq!(num_witness_secs, comm_w_list.len());
+
+    let z_len = num_inputs * num_witness_secs;
     let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), max_num_proofs.log_2(), z_len.log_2());
 
     // derive the verifier's challenge tau
@@ -620,28 +631,35 @@ impl R1CSProof {
       // if comm_vars exists, comm_combined = (Scalar::one() - ry[0]) * comm_vars + ry[0] * comm_inputs
       // otherwise comm_combined is just comm_inputs
       let (comm_combined, r) = {
-        let comm_combined = 
-          if let Some(comm_vars_list) = opt_comm_vars_list {
-            PolyCommitment {
-              C: (0..comm_vars_list[p].C.len()).map(
-                |i| ((Scalar::one() - ry[0]) * comm_vars_list[p].C[i].decompress().unwrap()
-                            + ry[0] * comm_inputs_list[p].C[i].decompress().unwrap()).compress()
-              ).collect()
-            }
-          } else {
-            PolyCommitment { C: comm_inputs_list[p].C.clone() }
-          };
-
         // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
         let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
-        let r =
-          if let Some(_) = opt_comm_vars_list {
+
+        match num_witness_secs {
+          1 => (PolyCommitment { C: comm_w_list[0][p].C.clone() }, [rq_short, &ry].concat()),
+          2 => (
+            PolyCommitment {
+              C: (0..comm_w_list[0][p].C.len()).map(
+                |i| ((Scalar::one() - ry[0]) * comm_w_list[0][p].C[i].decompress().unwrap()
+                            + ry[0] * comm_w_list[1][p].C[i].decompress().unwrap()
+                ).compress()
+              ).collect()
+            },
             [rq_short, &ry[1..]].concat()
-          } else {
-            [rq_short, &ry].concat()
-          };
-        
-        (comm_combined, r)
+          ),
+          4 => (
+            PolyCommitment {
+              C: (0..comm_w_list[0][p].C.len()).map(
+                |i| ((Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * comm_w_list[0][p].C[i].decompress().unwrap()
+                         + (Scalar::one() - ry[0]) * ry[1] * comm_w_list[1][p].C[i].decompress().unwrap()
+                         + (ry[0] * (Scalar::one() - ry[1]) * comm_w_list[2][p].C[i].decompress().unwrap()
+                         + ry[0] * ry[1] * comm_w_list[3][p].C[i].decompress().unwrap())
+                ).compress()
+              ).collect()
+            },
+            [rq_short, &ry[2..]].concat()
+          ),
+          _ => panic!("PROOF Failed: Unrecognized num_witness_secs: {}", num_witness_secs)
+        }
       };
 
       self.proof_eval_vars_at_ry_list[p].verify(

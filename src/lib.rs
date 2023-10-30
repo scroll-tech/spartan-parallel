@@ -501,16 +501,15 @@ impl SNARK {
     let (block_r1cs_sat_proof, block_challenges) = {
       let (proof, block_challenges) = {
         R1CSProof::prove(
+          2,
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
           num_vars,
           &block_inst.inst,
           &vars_gens,
-          Some(&block_vars_mat),
-          &block_inputs_mat,
-          Some(&block_poly_vars_list),
-          &block_poly_inputs_list,
+          vec![&block_vars_mat, &block_inputs_mat],
+          vec![&block_poly_vars_list, &block_poly_inputs_list],
           transcript,
           &mut random_tape,
         )
@@ -662,6 +661,7 @@ impl SNARK {
 
     let timer_sat_proof = Timer::new("verify_sat_proof");
     let block_challenges = self.block_r1cs_sat_proof.verify(
+      2,
       block_num_instances,
       block_max_num_proofs,
       block_num_proofs,
@@ -669,8 +669,7 @@ impl SNARK {
       block_num_cons,
       &vars_gens,
       &self.block_inst_evals,
-      Some(&self.block_comm_vars_list),
-      &self.block_comm_inputs_list,
+      vec![&self.block_comm_vars_list, &self.block_comm_inputs_list],
       transcript,
     )?;
     timer_sat_proof.stop();
