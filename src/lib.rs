@@ -398,9 +398,20 @@ impl SNARK {
     let exec_inputs = exec_inputs.into_iter().map(|v| v.assignment).collect_vec();
 
     // --
-    // WITNESS COMMITMENTS
+    // COMMITMENTS
     // --
 
+    // Commit num_proofs
+    let timer_commit = Timer::new("metacommit");
+    let block_max_num_proofs_64: u64 = block_max_num_proofs.try_into().unwrap();
+    Scalar::from(block_max_num_proofs_64).append_to_transcript(b"block_max_num_proofs", transcript);
+    for n in block_num_proofs {
+      let n_64: u64 = (*n).try_into().unwrap();
+      Scalar::from(n_64).append_to_transcript(b"block_num_proofs", transcript);
+    }
+    timer_commit.stop();
+
+    // Commit witnesses
     let (
       block_poly_vars_list,
       block_comm_vars_list,
@@ -475,6 +486,14 @@ impl SNARK {
       )
     };
     
+    // --
+    // CHALLENGES AND WITNESSES FOR PERMUTATION
+    // --
+
+    let comb_tau = transcript.challenge_scalar(b"challenge_tau");
+    let comb_r = transcript.challenge_scalar(b"challenge_r");
+
+
     // --
     // BLOCK CORRECTNESS
     // --
@@ -613,12 +632,29 @@ impl SNARK {
     // COMMITMENTS
     // --
 
+    // Commit num_proofs
+    let timer_commit = Timer::new("metacommit");
+    let block_max_num_proofs_64: u64 = block_max_num_proofs.try_into().unwrap();
+    Scalar::from(block_max_num_proofs_64).append_to_transcript(b"block_max_num_proofs", transcript);
+    for n in block_num_proofs {
+      let n_64: u64 = (*n).try_into().unwrap();
+      Scalar::from(n_64).append_to_transcript(b"block_num_proofs", transcript);
+    }
+    timer_commit.stop();
+
     // add the commitment to the verifier's transcript
     for p in 0..block_num_instances {
       self.block_comm_vars_list[p].append_to_transcript(b"poly_commitment", transcript);
       self.block_comm_inputs_list[p].append_to_transcript(b"poly_commitment", transcript);
     }
     self.exec_comm_inputs.append_to_transcript(b"poly_commitment", transcript);
+
+    // --
+    // SAMPLE CHALLENGES FOR PERMUTATION
+    // --
+
+    let comb_tau = transcript.challenge_scalar(b"challenge_tau");
+    let comb_r = transcript.challenge_scalar(b"challenge_r");
 
     // --
     // BLOCK CORRECTNESS
