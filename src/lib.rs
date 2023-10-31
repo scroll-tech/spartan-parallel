@@ -328,6 +328,7 @@ pub struct SNARK {
   block_comm_inputs_list: Vec<PolyCommitment>,
   exec_comm_inputs: PolyCommitment,
   perm_comm_w0: PolyCommitment,
+  perm_block_comm_w0_list: Vec<PolyCommitment>,
   perm_block_comm_w2_list: Vec<PolyCommitment>,
   perm_block_comm_w3_list: Vec<PolyCommitment>,
 
@@ -510,84 +511,142 @@ impl SNARK {
     // CHALLENGES AND WITNESSES FOR PERMUTATION
     // --
 
-    let comb_tau = transcript.challenge_scalar(b"challenge_tau");
-    let comb_r = transcript.challenge_scalar(b"challenge_r");
-    
-    // w0 is (tau, r, r^2, ...)
-    // set the first entry to 1 for multiplication and later revert it to tau
-    let mut perm_w0 = Vec::new();
-    perm_w0.push(Scalar::one());
-    let mut r_tmp = comb_r;
-    for _ in 1..num_vars {
-      perm_w0.push(r_tmp);
-      r_tmp *= comb_r;
-    }
-    // w2 is block_inputs * <r>
-    let perm_block_w2: Vec<Vec<Vec<Scalar>>> = block_inputs_mat.iter().map(
-      |i| i.iter().map(
-        |input| (0..input.len()).map(|j| perm_w0[j] * input[j]).collect()
-      ).collect()
-    ).collect();
-    perm_w0[0] = comb_tau;
-    // w3 is [valid, tau - Xi, ...]
-    // TODO: fill in the remaining ones
-    // See accumulator.rs
-    let mut perm_block_w3: Vec<Vec<Vec<Scalar>>> = Vec::new();
-    for p in 0..block_num_instances {
-      perm_block_w3.push(Vec::new());
-      for q in 0..block_num_proofs[p] {
-        perm_block_w3[p].push(vec![Scalar::zero(); num_vars]);
-        perm_block_w3[p][q][0] = block_inputs_mat[p][q][0];
-        perm_block_w3[p][q][1] = comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b);
-      }
-    }
+    // TODO: We can eliminate perm_block_w0 if we change the R1CS proof
 
-    // create a multilinear polynomial using the supplied assignment for variables
-    let perm_poly_w0 = DensePolynomial::new(perm_w0.clone());
-    // produce a commitment to the satisfying assignment
-    let (perm_comm_w0, _blinds_vars) = perm_poly_w0.commit(&vars_gens.gens_pc, None);
-    // add the commitment to the prover's transcript
-    perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
-
-    // commit the witnesses and inputs separately instance-by-instance
-    let mut perm_block_poly_w2_list = Vec::new();
-    let mut perm_block_comm_w2_list = Vec::new();
-    let mut perm_block_poly_w3_list = Vec::new();
-    let mut perm_block_comm_w3_list = Vec::new();
-
-    for p in 0..block_num_instances {
-      let (perm_block_poly_w2, perm_block_comm_w2) = {
-        // Flatten the witnesses into a Q_i * X list
-        let w2_list_p = perm_block_w2[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-        // create a multilinear polynomial using the supplied assignment for variables
-        let perm_block_poly_w2 = DensePolynomial::new(w2_list_p);
-
-        // produce a commitment to the satisfying assignment
-        let (perm_block_comm_w2, _blinds_vars) = perm_block_poly_w2.commit(&vars_gens.gens_pc, None);
-
-        // add the commitment to the prover's transcript
-        perm_block_comm_w2.append_to_transcript(b"poly_commitment", transcript);
-        (perm_block_poly_w2, perm_block_comm_w2)
-      };
+    let (
+      perm_w0,
+      perm_poly_w0,
+      perm_comm_w0,
+      perm_block_w0,
+      perm_block_poly_w0_list,
+      perm_block_comm_w0_list,
+      perm_block_w2,
+      perm_block_poly_w2_list,
+      perm_block_comm_w2_list,
+      perm_block_w3,
+      perm_block_poly_w3_list,
+      perm_block_comm_w3_list
+    ) = {
+      let comb_tau = transcript.challenge_scalar(b"challenge_tau");
+      let comb_r = transcript.challenge_scalar(b"challenge_r");
       
-      let (perm_block_poly_w3, perm_block_comm_w3) = {
-        // Flatten the witnesses into a Q_i * X list
-        let w3_list_p = perm_block_w3[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-        // create a multilinear polynomial using the supplied assignment for variables
-        let perm_block_poly_w3 = DensePolynomial::new(w3_list_p);
+      // w0 is (tau, r, r^2, ...)
+      // set the first entry to 1 for multiplication and later revert it to tau
+      let mut perm_w0 = Vec::new();
+      perm_w0.push(Scalar::one());
+      let mut r_tmp = comb_r;
+      for _ in 1..num_vars {
+        perm_w0.push(r_tmp);
+        r_tmp *= comb_r;
+      }
+      // w2 is block_inputs * <r>
+      let perm_block_w2: Vec<Vec<Vec<Scalar>>> = block_inputs_mat.iter().map(
+        |i| i.iter().map(
+          |input| (0..input.len()).map(|j| perm_w0[j] * input[j]).collect()
+        ).collect()
+      ).collect();
+      perm_w0[0] = comb_tau;
+      // w3 is [valid, tau - Xi, ...]
+      // TODO: fill in the remaining ones
+      // See accumulator.rs
+      let mut perm_block_w3: Vec<Vec<Vec<Scalar>>> = Vec::new();
+      for p in 0..block_num_instances {
+        perm_block_w3.push(Vec::new());
+        for q in 0..block_num_proofs[p] {
+          perm_block_w3[p].push(vec![Scalar::zero(); num_vars]);
+          perm_block_w3[p][q][0] = block_inputs_mat[p][q][0];
+          perm_block_w3[p][q][1] = comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b);
+        }
+      }
+      // perm_block_w0 is perm_w0 copied num_proofs times
+      let mut perm_block_w0 = Vec::new();
+      for p in 0..block_num_instances {
+        perm_block_w0.push(Vec::new());
+        for _ in 0..block_num_proofs[p] {
+          perm_block_w0[p].push(perm_w0.clone());
+        }
+      }
 
-        // produce a commitment to the satisfying assignment
-        let (perm_block_comm_w3, _blinds_vars) = perm_block_poly_w3.commit(&vars_gens.gens_pc, None);
+      // create a multilinear polynomial using the supplied assignment for variables
+      let perm_poly_w0 = DensePolynomial::new(perm_w0.clone());
+      // produce a commitment to the satisfying assignment
+      let (perm_comm_w0, _blinds_vars) = perm_poly_w0.commit(&vars_gens.gens_pc, None);
+      // add the commitment to the prover's transcript
+      perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
 
-        // add the commitment to the prover's transcript
-        perm_block_comm_w3.append_to_transcript(b"poly_commitment", transcript);
-        (perm_block_poly_w3, perm_block_comm_w3)
-      };
-      perm_block_poly_w2_list.push(perm_block_poly_w2);
-      perm_block_comm_w2_list.push(perm_block_comm_w2);
-      perm_block_poly_w3_list.push(perm_block_poly_w3);
-      perm_block_comm_w3_list.push(perm_block_comm_w3);
-    }
+      // commit the witnesses and inputs separately instance-by-instance
+      let mut perm_block_poly_w0_list = Vec::new();
+      let mut perm_block_comm_w0_list = Vec::new();
+      let mut perm_block_poly_w2_list = Vec::new();
+      let mut perm_block_comm_w2_list = Vec::new();
+      let mut perm_block_poly_w3_list = Vec::new();
+      let mut perm_block_comm_w3_list = Vec::new();
+
+      for p in 0..block_num_instances {
+        let (perm_block_poly_w0, perm_block_comm_w0) = {
+          // Flatten the witnesses into a Q_i * X list
+          let w0_list_p = perm_block_w0[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let perm_block_poly_w0 = DensePolynomial::new(w0_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (perm_block_comm_w0, _blinds_vars) = perm_block_poly_w0.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          perm_block_comm_w0.append_to_transcript(b"poly_commitment", transcript);
+          (perm_block_poly_w0, perm_block_comm_w0)
+        };
+        perm_block_poly_w0_list.push(perm_block_poly_w0);
+        perm_block_comm_w0_list.push(perm_block_comm_w0);
+
+        let (perm_block_poly_w2, perm_block_comm_w2) = {
+          // Flatten the witnesses into a Q_i * X list
+          let w2_list_p = perm_block_w2[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let perm_block_poly_w2 = DensePolynomial::new(w2_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (perm_block_comm_w2, _blinds_vars) = perm_block_poly_w2.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          perm_block_comm_w2.append_to_transcript(b"poly_commitment", transcript);
+          (perm_block_poly_w2, perm_block_comm_w2)
+        };
+        perm_block_poly_w2_list.push(perm_block_poly_w2);
+        perm_block_comm_w2_list.push(perm_block_comm_w2);
+        
+        let (perm_block_poly_w3, perm_block_comm_w3) = {
+          // Flatten the witnesses into a Q_i * X list
+          let w3_list_p = perm_block_w3[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let perm_block_poly_w3 = DensePolynomial::new(w3_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (perm_block_comm_w3, _blinds_vars) = perm_block_poly_w3.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          perm_block_comm_w3.append_to_transcript(b"poly_commitment", transcript);
+          (perm_block_poly_w3, perm_block_comm_w3)
+        };
+        perm_block_poly_w3_list.push(perm_block_poly_w3);
+        perm_block_comm_w3_list.push(perm_block_comm_w3);
+      }
+
+      (
+        perm_w0,
+        perm_poly_w0,
+        perm_comm_w0,
+        perm_block_w0,
+        perm_block_poly_w0_list,
+        perm_block_comm_w0_list,
+        perm_block_w2,
+        perm_block_poly_w2_list,
+        perm_block_comm_w2_list,
+        perm_block_w3,
+        perm_block_poly_w3_list,
+        perm_block_comm_w3_list
+      )
+    };
 
     // --
     // BLOCK CORRECTNESS
@@ -714,17 +773,6 @@ impl SNARK {
     // --
     // PERM_BLOCK_ROOT
     // --
-    
-    // num_instances * num_proofs copies for perm_w0
-    let mut perm_block_w0 = Vec::new();
-    let mut perm_block_poly_w0_list = Vec::new();
-    for p in 0..block_num_instances {
-      perm_block_w0.push(Vec::new());
-      perm_block_poly_w0_list.push(perm_poly_w0.clone());
-      for _ in 0..block_num_proofs[p] {
-        perm_block_w0[p].push(perm_w0.clone());
-      }
-    }
 
     let (perm_block_root_r1cs_sat_proof, perm_block_root_challenges) = {
       let (proof, perm_block_root_challenges) = {
@@ -824,6 +872,7 @@ impl SNARK {
       block_comm_inputs_list,
       exec_comm_inputs,
       perm_comm_w0,
+      perm_block_comm_w0_list,
       perm_block_comm_w2_list,
       perm_block_comm_w3_list,
 
@@ -908,6 +957,7 @@ impl SNARK {
 
     self.perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
     for p in 0..block_num_instances {
+      self.perm_block_comm_w0_list[p].append_to_transcript(b"poly_commitment", transcript);
       self.perm_block_comm_w2_list[p].append_to_transcript(b"poly_commitment", transcript);
       self.perm_block_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
     }
@@ -916,111 +966,119 @@ impl SNARK {
     // BLOCK CORRECTNESS
     // --
 
-    let timer_sat_proof = Timer::new("verify_sat_proof");
-    let block_challenges = self.block_r1cs_sat_proof.verify(
-      2,
-      block_num_instances,
-      block_max_num_proofs,
-      block_num_proofs,
-      num_vars,
-      block_num_cons,
-      &vars_gens,
-      &self.block_inst_evals,
-      vec![&self.block_comm_vars_list, &self.block_comm_inputs_list],
-      transcript,
-    )?;
-    timer_sat_proof.stop();
+    {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let block_challenges = self.block_r1cs_sat_proof.verify(
+        2,
+        block_num_instances,
+        block_max_num_proofs,
+        block_num_proofs,
+        num_vars,
+        block_num_cons,
+        &vars_gens,
+        &self.block_inst_evals,
+        vec![&self.block_comm_vars_list, &self.block_comm_inputs_list],
+        transcript,
+      )?;
+      timer_sat_proof.stop();
 
-    let timer_eval_proof = Timer::new("verify_eval_proof");
-    // Verify Evaluation on BLOCK
-    let (Ar, Br, Cr) = &self.block_inst_evals;
-    Ar.append_to_transcript(b"Ar_claim", transcript);
-    Br.append_to_transcript(b"Br_claim", transcript);
-    Cr.append_to_transcript(b"Cr_claim", transcript);
-    let [rp, _, rx, ry] = block_challenges;
-    self.block_r1cs_eval_proof.verify(
-      &block_comm.comm,
-      &[rp, rx].concat(),
-      &ry,
-      &self.block_inst_evals,
-      &block_gens.gens_r1cs_eval,
-      transcript,
-    )?;
-    timer_eval_proof.stop();
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on BLOCK
+      let (Ar, Br, Cr) = &self.block_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [rp, _, rx, ry] = block_challenges;
+      self.block_r1cs_eval_proof.verify(
+        &block_comm.comm,
+        &[rp, rx].concat(),
+        &ry,
+        &self.block_inst_evals,
+        &block_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+    }
 
     // --
     // PERM_PRELIM
     // --
 
-    let timer_sat_proof = Timer::new("verify_sat_proof");
-    let perm_prelim_challenges = self.perm_prelim_r1cs_sat_proof.verify(
-      1,
-      1,
-      1,
-      &vec![1],
-      num_vars,
-      perm_prelim_num_cons,
-      &vars_gens,
-      &self.perm_prelim_inst_evals,
-      vec![&vec![self.perm_comm_w0.clone()]],
-      transcript,
-    )?;
-    timer_sat_proof.stop();
+    {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let perm_prelim_challenges = self.perm_prelim_r1cs_sat_proof.verify(
+        1,
+        1,
+        1,
+        &vec![1],
+        num_vars,
+        perm_prelim_num_cons,
+        &vars_gens,
+        &self.perm_prelim_inst_evals,
+        vec![&vec![self.perm_comm_w0.clone()]],
+        transcript,
+      )?;
+      timer_sat_proof.stop();
 
-    let timer_eval_proof = Timer::new("verify_eval_proof");
-    // Verify Evaluation on BLOCK
-    let (Ar, Br, Cr) = &self.perm_prelim_inst_evals;
-    Ar.append_to_transcript(b"Ar_claim", transcript);
-    Br.append_to_transcript(b"Br_claim", transcript);
-    Cr.append_to_transcript(b"Cr_claim", transcript);
-    let [rp, _, rx, ry] = perm_prelim_challenges;
-    self.perm_prelim_r1cs_eval_proof.verify(
-      &perm_prelim_comm.comm,
-      &[rp, rx].concat(),
-      &ry,
-      &self.perm_prelim_inst_evals,
-      &perm_prelim_gens.gens_r1cs_eval,
-      transcript,
-    )?;
-    timer_eval_proof.stop();
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on BLOCK
+      let (Ar, Br, Cr) = &self.perm_prelim_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [rp, _, rx, ry] = perm_prelim_challenges;
+      self.perm_prelim_r1cs_eval_proof.verify(
+        &perm_prelim_comm.comm,
+        &[rp, rx].concat(),
+        &ry,
+        &self.perm_prelim_inst_evals,
+        &perm_prelim_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+    }
 
-    // TODO: open the first and second entry of perm_prelim to verify they are indeed tau and r
+    // !!!TODO: open the first and second entry of perm_prelim to verify they are indeed tau and r!!!
 
     // --
     // PERM_BLOCK_ROOT
     // --
 
-    let timer_sat_proof = Timer::new("verify_sat_proof");
-    let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
-      4,
-      block_num_instances,
-      block_max_num_proofs,
-      block_num_proofs,
-      num_vars,
-      perm_block_root_num_cons,
-      &vars_gens,
-      &self.perm_block_root_inst_evals,
-      vec![&self.perm_comm_w0, &self.block_comm_inputs_list, &self.perm_block_comm_w2_list, &self.perm_block_comm_w3_list],
-      transcript,
-    )?;
-    timer_sat_proof.stop();
+    {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
+        4,
+        block_num_instances,
+        block_max_num_proofs,
+        block_num_proofs,
+        num_vars,
+        perm_block_root_num_cons,
+        &vars_gens,
+        &self.perm_block_root_inst_evals,
+        vec![&self.perm_block_comm_w0_list, &self.block_comm_inputs_list, &self.perm_block_comm_w2_list, &self.perm_block_comm_w3_list],
+        transcript,
+      )?;
+      timer_sat_proof.stop();
 
-    let timer_eval_proof = Timer::new("verify_eval_proof");
-    // Verify Evaluation on BLOCK
-    let (Ar, Br, Cr) = &self.perm_block_root_inst_evals;
-    Ar.append_to_transcript(b"Ar_claim", transcript);
-    Br.append_to_transcript(b"Br_claim", transcript);
-    Cr.append_to_transcript(b"Cr_claim", transcript);
-    let [rp, _, rx, ry] = perm_block_root_challenges;
-    self.perm_block_root_r1cs_eval_proof.verify(
-      &perm_block_root_comm.comm,
-      &[rp, rx].concat(),
-      &ry,
-      &self.perm_block_root_inst_evals,
-      &perm_block_root_gens.gens_r1cs_eval,
-      transcript,
-    )?;
-    timer_eval_proof.stop();
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on BLOCK
+      let (Ar, Br, Cr) = &self.perm_block_root_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [rp, _, rx, ry] = perm_block_root_challenges;
+      self.perm_block_root_r1cs_eval_proof.verify(
+        &perm_block_root_comm.comm,
+        &[rp, rx].concat(),
+        &ry,
+        &self.perm_block_root_inst_evals,
+        &perm_block_root_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+    }
+
+    // !!!TODO: verify that perm_block_comm_w0_list evaluated on <rp, rq, ry> is perm_comm_w0 evaluated on <ry>!!!
 
     /*
     // Verify Evaluation on CONSIS

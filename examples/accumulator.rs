@@ -393,13 +393,10 @@ fn produce_r1cs() -> (
   let Z_section_size = block_num_instances * block_max_num_proofs_bound * num_vars;
   
   // PERM_BLOCK_ROOT
+  // TODO: We only need one copy of PERM_BLOCK_ROOT
   let perm_block_root_num_cons = num_vars + 2;
   let perm_block_root_num_non_zero_entries = 2 * num_vars + 2;
   let perm_block_root_inst = {
-    let mut A_list = Vec::new();
-    let mut B_list = Vec::new();
-    let mut C_list = Vec::new();
-
     let (A, B, C) = {
       let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -440,11 +437,11 @@ fn produce_r1cs() -> (
       (A, B, C)   
     };
 
-    A_list.push(A);
-    B_list.push(B);
-    C_list.push(C);
+    let A_list = vec![A.clone(); block_num_instances];
+    let B_list = vec![B.clone(); block_num_instances];
+    let C_list = vec![C.clone(); block_num_instances];
 
-    let perm_block_root_inst = Instance::new(1, perm_block_root_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
+    let perm_block_root_inst = Instance::new(block_num_instances, perm_block_root_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
     
     perm_block_root_inst
   };
@@ -736,7 +733,7 @@ fn main() {
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
   let consis_gens = SNARKGens::new(consis_num_cons, num_vars, 1, consis_num_non_zero_entries);
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
-  let perm_block_root_gens = SNARKGens::new(perm_block_root_num_cons, 4 * num_vars, 1, perm_block_root_num_non_zero_entries);
+  let perm_block_root_gens = SNARKGens::new(perm_block_root_num_cons, 4 * num_vars, block_num_instances, perm_block_root_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   let var_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
 
