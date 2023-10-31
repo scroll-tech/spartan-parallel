@@ -33,7 +33,8 @@ mod transcript;
 mod unipoly;
 
 use core::cmp::max;
-use dense_mlpoly::{DensePolynomial, PolyCommitment};
+use curve25519_dalek::ristretto::CompressedRistretto;
+use dense_mlpoly::{DensePolynomial, PolyCommitment, PolyEvalProof};
 use errors::{ProofVerifyError, R1CSError};
 use itertools::Itertools;
 use merlin::Transcript;
@@ -339,6 +340,10 @@ pub struct SNARK {
   perm_prelim_r1cs_sat_proof: R1CSProof,
   perm_prelim_inst_evals: (Scalar, Scalar, Scalar),
   perm_prelim_r1cs_eval_proof: R1CSEvalProof,
+  proof_eval_perm_w0_at_zero: PolyEvalProof,
+  comm_perm_w0_at_zero: CompressedRistretto,
+  proof_eval_perm_w0_at_one: PolyEvalProof,
+  comm_perm_w0_at_one: CompressedRistretto,
 
   perm_block_root_r1cs_sat_proof: R1CSProof,
   perm_block_root_inst_evals: (Scalar, Scalar, Scalar),
@@ -514,6 +519,8 @@ impl SNARK {
     // TODO: We can eliminate perm_block_w0 if we change the R1CS proof
 
     let (
+      comb_tau,
+      comb_r,
       perm_w0,
       perm_poly_w0,
       perm_comm_w0,
@@ -633,6 +640,9 @@ impl SNARK {
       }
 
       (
+        comb_tau,
+        comb_r,
+
         perm_w0,
         perm_poly_w0,
         perm_comm_w0,
@@ -713,7 +723,14 @@ impl SNARK {
     // PERM_PRELIM
     // --
 
-    let (perm_prelim_r1cs_sat_proof, perm_prelim_challenges) = {
+    let (
+      perm_prelim_r1cs_sat_proof, 
+      perm_prelim_challenges,
+      proof_eval_perm_w0_at_zero,
+      comm_perm_w0_at_zero,
+      proof_eval_perm_w0_at_one,
+      comm_perm_w0_at_one,
+    ) = {
       let (proof, perm_prelim_challenges) = {
         R1CSProof::prove(
           1,
@@ -730,10 +747,40 @@ impl SNARK {
         )
       };
 
+      // Proof that first two entries of perm_w0 are tau and r
+      let ry_len = perm_prelim_challenges[3].len();
+      let (proof_eval_perm_w0_at_zero, comm_perm_w0_at_zero) = PolyEvalProof::prove(
+        &perm_poly_w0,
+        None,
+        &vec![Scalar::zero(); ry_len],
+        &comb_tau,
+        None,
+        &vars_gens.gens_pc,
+        transcript,
+        &mut random_tape,
+      );
+      let (proof_eval_perm_w0_at_one, comm_perm_w0_at_one) = PolyEvalProof::prove(
+        &perm_poly_w0,
+        None,
+        &[vec![Scalar::zero(); ry_len - 1], vec![Scalar::one()]].concat(),
+        &comb_r,
+        None,
+        &vars_gens.gens_pc,
+        transcript,
+        &mut random_tape,
+      );
+      
       let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
       Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-      (proof, perm_prelim_challenges)
+      (
+        proof, 
+        perm_prelim_challenges,
+        proof_eval_perm_w0_at_zero,
+        comm_perm_w0_at_zero,
+        proof_eval_perm_w0_at_one,
+        comm_perm_w0_at_one
+      )
     };
 
     // Final evaluation on PERM_PRELIM
@@ -883,6 +930,10 @@ impl SNARK {
       perm_prelim_r1cs_sat_proof,
       perm_prelim_inst_evals,
       perm_prelim_r1cs_eval_proof,
+      proof_eval_perm_w0_at_zero,
+      comm_perm_w0_at_zero,
+      proof_eval_perm_w0_at_one,
+      comm_perm_w0_at_one,
 
       perm_block_root_r1cs_sat_proof,
       perm_block_root_inst_evals,
@@ -1018,10 +1069,26 @@ impl SNARK {
         vec![&vec![self.perm_comm_w0.clone()]],
         transcript,
       )?;
+      // Proof that first two entries of perm_w0 are tau and r
+      let ry_len = perm_prelim_challenges[3].len();
+      self.proof_eval_perm_w0_at_zero.verify_plain(
+        &vars_gens.gens_pc,
+        transcript,
+        &vec![Scalar::zero(); ry_len],
+        &comb_tau,
+        &self.perm_comm_w0,
+      )?;
+      self.proof_eval_perm_w0_at_one.verify_plain(
+        &vars_gens.gens_pc,
+        transcript,
+        &[vec![Scalar::zero(); ry_len - 1], vec![Scalar::one()]].concat(),
+        &comb_r,
+        &self.perm_comm_w0,
+      )?;
       timer_sat_proof.stop();
 
       let timer_eval_proof = Timer::new("verify_eval_proof");
-      // Verify Evaluation on BLOCK
+      // Verify Evaluation on PERM_PRELIM
       let (Ar, Br, Cr) = &self.perm_prelim_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
@@ -1037,8 +1104,6 @@ impl SNARK {
       )?;
       timer_eval_proof.stop();
     }
-
-    // !!!TODO: open the first and second entry of perm_prelim to verify they are indeed tau and r!!!
 
     // --
     // PERM_BLOCK_ROOT
@@ -1061,7 +1126,7 @@ impl SNARK {
       timer_sat_proof.stop();
 
       let timer_eval_proof = Timer::new("verify_eval_proof");
-      // Verify Evaluation on BLOCK
+      // Verify Evaluation on PERM_BLOCK_ROOT
       let (Ar, Br, Cr) = &self.perm_block_root_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
