@@ -60,7 +60,6 @@ fn produce_r1cs() -> (
   Instance,
   usize,
   usize,
-  usize,
   Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
@@ -350,13 +349,49 @@ fn produce_r1cs() -> (
   // --
   // PERM Instances
   // --
-  // PERM is consisted of two instances
-  // PERM_BLOCK computes the polynomial defined by block_inputs
-  // PERM_EXEC computes the polynomial defined by exec_inputs
+  // PERM is consisted of five instances
+  // PERM_PRELIM checks the correctness of (r, r^2, ...)
+  // PERM_BLOCK_ROOT and PERM_BLOCK_PROD compute the polynomial defined by block_inputs
+  // PERM_EXEC_ROOT and PERM_EXEC_PROD compute the polynomial defined by exec_inputs
   // Finally, the verifier checks that the two products are the same
   // The product is defined by PROD = \prod(\tau - (\sum_i a_i * r^{i-1}))
   // There is only one proof
+  
+  // PERM_PRELIM
+  let perm_prelim_num_cons = num_vars - 2;
+  let perm_prelim_num_non_zero_entries = num_vars - 2;
+  // Number of proofs of each R1CS instance
+  let consis_num_proofs: usize = 8;
+  let perm_prelim_inst = {
 
+    let mut A_list = Vec::new();
+    let mut B_list = Vec::new();
+    let mut C_list = Vec::new();
+
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      let V_r = 1;
+
+      for i in 2..num_vars {
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          i - 2, vec![(i - 1, 1)], vec![(V_r, 1)], vec![(i, 1)]);
+      }
+      (A, B, C)
+    };
+
+    A_list.push(A);
+    B_list.push(B);
+    C_list.push(C);
+
+    let perm_block_inst = Instance::new(1, perm_prelim_num_cons, num_vars, &A_list, &B_list, &C_list).unwrap();
+    perm_block_inst
+  };
+
+  let Z_section_size = block_num_instances * block_max_num_proofs_bound * num_vars;
+  
   // PERM_BLOCK takes in a num_vars (V) * (4 * num_instances (P) * max_num_proofs (Qmax)) vector as Z, consisted of
   // Z[0]: \tau, r, r^2, ... r^{V-1}
   // Z[1..V]: Empty
@@ -373,9 +408,7 @@ fn produce_r1cs() -> (
   // NOTE: During actual proving, only the constraints corresponding to valid inputs will be evaluated.
   // As a result, if front-end can provide the number of times each BLOCK INSTANCE will be executed, we can avoid adding unnecessary entries.
   // This value is captured by block_num_proofs_bound
-  
-  let Z_section_size = block_num_instances * block_max_num_proofs_bound * num_vars;
-  
+
   let (perm_block_num_vars, perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries) = {
     let mut constraint_count = 0;
 
@@ -383,7 +416,6 @@ fn produce_r1cs() -> (
     let mut B_list = Vec::new();
     let mut C_list = Vec::new();
     
-    // Check output of the last block is the input of the next block
     let (A, B, C) = {
       let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -597,10 +629,9 @@ fn produce_r1cs() -> (
     consis_num_non_zero_entries,
     consis_num_proofs,
     consis_inst,
-    perm_block_num_vars,
-    perm_block_num_cons,
-    perm_block_num_non_zero_entries,
-    perm_block_inst,
+    perm_prelim_num_cons,
+    perm_prelim_num_non_zero_entries,
+    perm_prelim_inst,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -624,10 +655,9 @@ fn main() {
     consis_num_non_zero_entries,
     consis_num_proofs,
     consis_inst,
-    perm_block_num_vars,
-    perm_block_num_cons,
-    perm_block_num_non_zero_entries,
-    perm_block_inst,
+    perm_prelim_num_cons,
+    perm_prelim_num_non_zero_entries,
+    perm_prelim_inst,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -642,7 +672,7 @@ fn main() {
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
   let consis_gens = SNARKGens::new(consis_num_cons, num_vars, 1, consis_num_non_zero_entries);
-  let perm_block_gens = SNARKGens::new(perm_block_num_cons, perm_block_num_vars, 1, perm_block_num_non_zero_entries);
+  let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   let var_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
 
@@ -650,7 +680,7 @@ fn main() {
   // TODO: change to encoding all r1cs instances
   let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
   let (consis_comm, consis_decomm) = SNARK::encode(&consis_inst, &consis_gens);
-  let (perm_block_comm, perm_block_decomm) = SNARK::encode(&perm_block_inst, &perm_block_gens);
+  let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
@@ -670,10 +700,10 @@ fn main() {
     &consis_comm,
     &consis_decomm,
     &consis_gens,
-    &perm_block_inst,
-    &perm_block_comm,
-    &perm_block_decomm,
-    &perm_block_gens,
+    &perm_prelim_inst,
+    &perm_prelim_comm,
+    &perm_prelim_decomm,
+    &perm_prelim_gens,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -696,6 +726,9 @@ fn main() {
       consis_num_cons, 
       &consis_comm,
       &consis_gens,
+      perm_prelim_num_cons,
+      &perm_prelim_comm,
+      &perm_prelim_gens,
       &var_gens,
       &mut verifier_transcript)
     .is_ok());

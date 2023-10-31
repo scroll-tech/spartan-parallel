@@ -44,7 +44,7 @@ pub struct PolyCommitmentBlinds {
   pub(crate) blinds: Vec<Scalar>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PolyCommitment {
   pub(crate) C: Vec<CompressedGroup>,
 }
