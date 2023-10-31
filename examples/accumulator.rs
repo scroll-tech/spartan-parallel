@@ -393,8 +393,8 @@ fn produce_r1cs() -> (
   let Z_section_size = block_num_instances * block_max_num_proofs_bound * num_vars;
   
   // PERM_BLOCK_ROOT
-  let perm_block_root_num_cons = num_vars + 1;
-  let perm_block_root_num_non_zero_entries = 2 * num_vars + 1;
+  let perm_block_root_num_cons = num_vars + 2;
+  let perm_block_root_num_non_zero_entries = 2 * num_vars + 2;
   let perm_block_root_inst = {
     let mut A_list = Vec::new();
     let mut B_list = Vec::new();
@@ -409,9 +409,9 @@ fn produce_r1cs() -> (
       // w0: tau, r, r^2, ...
       // w1: one block_inputs entry: i0, i1, ...
       // w2: one block_inputs entry dot product <r>: i0, i1 * r, i2 * r^2, i3 * r^3, ...
-      // w3[0]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...))
+      // w3[0]: valid bit, should match block_inputs[0]
+      // w3[1]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...))
       let V_tau = 0;
-      let V_r = 1;
       // The best way to find a CONSTANT ONE is to peak into the constant term of the first input, which is guaranteed to be valid
       let V_cnst = num_vars + input_output_cutoff;
 
@@ -427,10 +427,14 @@ fn produce_r1cs() -> (
         constraint_count += 1;
       }
       // correctness of w3[0]
+      (A, B, C) = gen_constr(A, B, C, V_cnst, 
+        constraint_count, vec![(num_vars, 1)], vec![], vec![(3 * num_vars, 1)]);
+      constraint_count += 1;
+      // correctness of w3[1]
       (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count,
           [vec![(V_tau, 1)], (0..num_vars).map(|i| (2 * num_vars + i, -1)).collect()].concat(), 
           vec![], 
-          vec![(3 * num_vars, 1)]);
+          vec![(3 * num_vars + 1, 1)]);
       constraint_count += 1;
 
       (A, B, C)   
@@ -765,6 +769,10 @@ fn main() {
     &perm_prelim_comm,
     &perm_prelim_decomm,
     &perm_prelim_gens,
+    &perm_block_root_inst,
+    &perm_block_root_comm,
+    &perm_block_root_decomm,
+    &perm_block_root_gens,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -790,6 +798,9 @@ fn main() {
       perm_prelim_num_cons,
       &perm_prelim_comm,
       &perm_prelim_gens,
+      perm_block_root_num_cons,
+      &perm_block_root_comm,
+      &perm_block_root_gens,
       &var_gens,
       &mut verifier_transcript)
     .is_ok());
