@@ -21,9 +21,6 @@ use curve25519_dalek::ristretto::RistrettoPoint;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
-// TODO: Need to check input and output indeed match exec_inputs!
-// TODO: Verifier needs to check tau and r for the permutation witnesses
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct R1CSProof {
   sc_proof_phase1: ZKSumcheckInstanceProof,

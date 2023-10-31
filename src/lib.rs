@@ -3,6 +3,11 @@
 #![deny(missing_docs)]
 #![allow(clippy::assertions_on_result_states)]
 
+// TODO: Proof might be incorrect if a block is never executed
+// TODO: Differentiate between max_num_proofs and max_num_proofs_bound
+// Q: Would it be insecure if an entry has valid = 0 but everything else not 0?
+// Q: Can we trust that the Prover orders all valid = 1 before valid = 0?
+
 extern crate byteorder;
 extern crate core;
 extern crate curve25519_dalek;

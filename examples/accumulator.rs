@@ -390,12 +390,10 @@ fn produce_r1cs() -> (
     perm_block_inst
   };
 
-  let Z_section_size = block_num_instances * block_max_num_proofs_bound * num_vars;
-  
   // PERM_BLOCK_ROOT
   // TODO: We only need one copy of PERM_BLOCK_ROOT
-  let perm_block_root_num_cons = num_vars + 2;
-  let perm_block_root_num_non_zero_entries = 2 * num_vars + 2;
+  let perm_block_root_num_cons = num_vars + 3;
+  let perm_block_root_num_non_zero_entries = 2 * num_vars + 3;
   let perm_block_root_inst = {
     let (A, B, C) = {
       let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -408,6 +406,7 @@ fn produce_r1cs() -> (
       // w2: one block_inputs entry dot product <r>: i0, i1 * r, i2 * r^2, i3 * r^3, ...
       // w3[0]: valid bit, should match block_inputs[0]
       // w3[1]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...))
+      // w3[2]: the constant 1
       let V_tau = 0;
       // The best way to find a CONSTANT ONE is to peak into the constant term of the first input, which is guaranteed to be valid
       let V_cnst = num_vars + input_output_cutoff;
@@ -433,6 +432,10 @@ fn produce_r1cs() -> (
           vec![], 
           vec![(3 * num_vars + 1, 1)]);
       constraint_count += 1;
+      // correctness of w3[2]
+      (A, B, C) = gen_constr(A, B, C, V_cnst, 
+        constraint_count, vec![(V_cnst, 1)], vec![], vec![(3 * num_vars + 2, 1)]);
+      constraint_count += 1;
 
       (A, B, C)   
     };
@@ -446,125 +449,74 @@ fn produce_r1cs() -> (
     perm_block_root_inst
   };
 
-  // PERM_BLOCK takes in a num_vars (V) * (4 * num_instances (P) * max_num_proofs (Qmax)) vector as Z, consisted of
-  // Z[0]: \tau, r, r^2, ... r^{V-1}
-  // Z[1..V]: Empty
-  // Z[V..2*V]: block_inputs, in the order of instances. Some of them might be empty
-  // Z[2*V..3*V]: entry i stores block_inputs[q][i] * r^i
-  // Z[3*V..4*V]: entry 0 stores x_q = block_inputs[q][i] * r^i,
-  //              entry 1 stores the CORRECT cumulative product (tau - x_0) * ... * (tau - x_q) for all VALID x_i
-  //              Z[i][1] = valid ? (tau - Z[i][0]) * Z[prev][1] : Z[prev][1] = Z[prev][1] + (tau - Z[i][0] - 1) * valid * Z[prev][1]
-  //              entry 2 stores (tau - Z[i][0] - 1) * valid
-  //              entry 3 stores (tau - Z[i][0] - 1) * valid * Z[prev][1]
-  //              all other entries are 0
-  // Note: this means that num_vars >= 4, which is almost always the case
-
-  // NOTE: During actual proving, only the constraints corresponding to valid inputs will be evaluated.
-  // As a result, if front-end can provide the number of times each BLOCK INSTANCE will be executed, we can avoid adding unnecessary entries.
-  // This value is captured by block_num_proofs_bound
-
-  let (perm_block_num_vars, perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries) = {
-    let mut constraint_count = 0;
-
-    let mut A_list = Vec::new();
-    let mut B_list = Vec::new();
-    let mut C_list = Vec::new();
-    
+  // PERM_BLOCK_POLY
+  // The strategy is to compute the local polynomials (evaluated on tau) for each block instance
+  // Each w3[p][2] (i.e. w3[p][0][2]) stores the product pi for instance P. The verifier obtains all P of them and multiply them together.
+  // The correct formular is pi = v[k] * x[k] * (v[k+1] * x[k+1] + (1 - v[k+1])))
+  // To do this, think of each entry of w3[k] (w3[p][k]) as a tuple (v, x, 1, pi, D1, D2)
+  // v[k]  <- whether the entry is valid
+  // x[k]  <- \tau - (\sum_i a_i * r^{i-1})
+  // 1[k]  <- 1
+  // pi[k] <- v[k] * D2[k]
+  // D1[k] <- v[k+1] * x[k+1]
+  // D2[k] <- x[k] * (D1[k] + (1 - v[k + 1]))
+  let entry_size = block_max_num_proofs_bound;
+  let perm_block_poly_num_cons = 3 * entry_size;
+  let perm_block_poly_num_non_zero_entries = 5 * entry_size;
+  let perm_block_poly_inst = {
     let (A, B, C) = {
       let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
-      // Where things are defined
-      let V_tau = 0;
-      let V_r = 1;
-      // The best way to find a CONSTANT ONE is to peak into the constant term of the first input, which is guaranteed to be valid
-      let V_cnst = Z_section_size + input_output_cutoff;
+      let V_valid = 0;
+      let V_x = 1;
+      let V_cnst = 2;
+      let V_pi = 3;
+      let V_d1 = 4;
+      let V_d2 = 5;
 
-      // R1CS:
-      // Z0: Correctness of r^2, r^3, ...
-      for i in 2..num_vars {
-        (A, B, C) = gen_constr(A, B, C, V_cnst,
-          constraint_count, vec![(i - 1, 1)], vec![(V_r, 1)], vec![(i, 1)]);
+
+      let mut constraint_count = 0;
+
+      // compute D1
+      (A, B, C) = gen_constr(A, B, C, V_cnst, // last D1 is 0
+        constraint_count, vec![((entry_size - 1) * num_vars + V_d1, 1)], vec![], vec![]);
+      constraint_count += 1;
+      for i in 0..entry_size - 1 {
+        (A, B, C) = gen_constr(A, B, C, V_cnst, // other D1
+          constraint_count, vec![((i + 1) * num_vars + V_valid, 1)], vec![((i + 1) * num_vars + V_x, 1)], vec![(i * num_vars + V_d1, 1)]);
         constraint_count += 1;
       }
-      // Z1: Correctness of block_io * <r^0, r, r^2, ...>
-      for p in 0..block_num_instances {
-        // Only add the constraint if Z[i] might be valid
-        for q in 0..block_num_proofs_bound[p] {
-          let i = p * block_num_instances + q;
-          (A, B, C) = gen_constr(A, B, C, V_cnst,
-            //                                block_io[i][0]                                  1               block_io[i][0] * 1
-            constraint_count, vec![(Z_section_size + i * num_vars, 1)], vec![], vec![(2 * Z_section_size + i * num_vars, 1)]);
-          constraint_count += 1;
-          for j in 1..num_vars {
-            (A, B, C) = gen_constr(A, B, C, V_cnst,
-              //                                block_io[i][j]                                       r^j                   block_io[i][j] * r^j
-              constraint_count, vec![(Z_section_size + i * num_vars + j, 1)], vec![(j, 1)], vec![(2 * Z_section_size + i * num_vars + j, 1)]);
-            constraint_count += 1;
-          }
-        }
-      }
-      // Z2: Correctness of x[i] = sum_j(block_io[i][j] * r^j)
-      for p in 0..block_num_instances {
-        // Only add the constraint if Z[i] might be valid
-        for q in 0..block_num_proofs_bound[p] {
-          let i = p * block_num_instances + q;
-          (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count,
-              (0..num_vars).map(|j| (2 * Z_section_size + i * num_vars + j, 1)).collect(), 
-              vec![], 
-              vec![(3 * Z_section_size + i * num_vars, 1)]);
-          constraint_count += 1;
-        }
-      }
-      // Z3: Correctness of cumulative product
-      // x[0] and tau - x[0]
-      (A, B, C) = gen_constr(A, B, C, V_cnst,
-        constraint_count, vec![(V_tau, 1), (3 * Z_section_size, -1)], vec![], vec![(3 * Z_section_size + 1, 1)]);
+      // compute D2
+      (A, B, C) = gen_constr(A, B, C, V_cnst, // last D2 is x[k] * 1
+        constraint_count, vec![((entry_size - 1) * num_vars + V_x, 1)], vec![], vec![((entry_size - 1) * num_vars + V_d2, 1)]);
       constraint_count += 1;
-      // Note: we are not multiplying consecutive ones together, but rather consecutive VALID ones
-      let mut i_last = 0;
-      for p in 0..block_num_instances {
-        // Only add the constraint if Z[i] might be valid
-        for q in 0..block_num_proofs_bound[p] {
-          let i = p * block_num_instances + q;
-          // (tau - Z[i][0] - 1) * valid, in slot 2
-          let V_valid = Z_section_size + i * num_vars;
-          (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count, 
-            vec![(V_tau, 1), (3 * Z_section_size + i * num_vars, -1), (V_cnst, -1)], 
-            vec![(V_valid, 1)], 
-            vec![(3 * Z_section_size + i * num_vars + 2, 1)]);
-          constraint_count += 1;
-          // (tau - Z[i][0] - 1) * valid * Z[prev][1] in slot 3
-          (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count, 
-            vec![(3 * Z_section_size + i * num_vars + 2, 1)], 
-            vec![(3 * Z_section_size + i_last * num_vars + 1, 1)], 
-            vec![(3 * Z_section_size + i * num_vars + 3, 1)]);
-          constraint_count += 1;
-          // Actual cumulative: Z[prev][1] + (tau - Z[i][0] - 1) * valid * Z[prev][1], in slot 1
-          (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count, 
-            vec![(3 * Z_section_size + i_last * num_vars + 1, 1), (3 * Z_section_size + i * num_vars + 3, 1)], 
-            vec![], 
-            vec![(3 * Z_section_size + i * num_vars + 1, 1)]);
-          constraint_count += 1;
-          i_last = i;
-        }
+      for i in 0..entry_size - 1 {
+        (A, B, C) = gen_constr(A, B, C, V_cnst, // other D2
+          constraint_count, 
+          vec![(i * num_vars + V_x, 1)], 
+          vec![(i * num_vars + V_d1, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
+          vec![(i * num_vars + V_d2, 1)]);
+        constraint_count += 1;
+      }
+      // compute pi
+      for i in 0..entry_size {
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
+        constraint_count += 1;
       }
 
-      (A, B, C)
+      (A, B, C)   
     };
 
-    let perm_block_num_vars = 4 * Z_section_size;
-    let perm_block_num_cons = constraint_count;
-    let perm_block_num_non_zero_entries = num_vars * constraint_count;
+    let A_list = vec![A.clone()];
+    let B_list = vec![B.clone()];
+    let C_list = vec![C.clone()];
 
-    A_list.push(A);
-    B_list.push(B);
-    C_list.push(C);
-
-    let perm_block_inst = Instance::new(1, perm_block_num_cons, perm_block_num_vars, &A_list, &B_list, &C_list).unwrap();
+    let perm_block_poly_inst = Instance::new(1, perm_block_poly_num_cons, entry_size * num_vars, &A_list, &B_list, &C_list).unwrap();
     
-    (perm_block_num_vars, perm_block_inst, perm_block_num_cons, perm_block_num_non_zero_entries)
+    perm_block_poly_inst
   };
 
   // --
