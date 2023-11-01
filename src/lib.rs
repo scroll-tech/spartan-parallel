@@ -407,6 +407,11 @@ impl SNARK {
     perm_block_root_decomm: &ComputationDecommitment,
     perm_block_root_gens: &SNARKGens,
 
+    perm_block_poly_inst: &Instance,
+    perm_block_poly_comm: &ComputationCommitment,
+    perm_block_poly_decomm: &ComputationDecommitment,
+    perm_block_poly_gens: &SNARKGens,
+
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
     exec_inputs: Vec<InputsAssignment>,
@@ -421,6 +426,9 @@ impl SNARK {
 
     transcript.append_protocol_name(SNARK::protocol_name());
     block_comm.comm.append_to_transcript(b"block_comm", transcript);
+    perm_prelim_comm.comm.append_to_transcript(b"block_comm", transcript);
+    perm_block_root_comm.comm.append_to_transcript(b"block_comm", transcript);
+    perm_block_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
     // unwrap the assignments
@@ -558,16 +566,22 @@ impl SNARK {
         ).collect()
       ).collect();
       perm_w0[0] = comb_tau;
-      // w3 is [valid, tau - Xi, ...]
+      // w3 is [valid, tau - Xi, 1, ...]
       // TODO: fill in the remaining ones
       // See accumulator.rs
       let mut perm_block_w3: Vec<Vec<Vec<Scalar>>> = Vec::new();
       for p in 0..block_num_instances {
-        perm_block_w3.push(Vec::new());
-        for q in 0..block_num_proofs[p] {
-          perm_block_w3[p].push(vec![Scalar::zero(); num_vars]);
+        perm_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
+        for q in (0..block_num_proofs[p]).rev() {
+          perm_block_w3[p][q] = vec![Scalar::zero(); num_vars];
           perm_block_w3[p][q][0] = block_inputs_mat[p][q][0];
           perm_block_w3[p][q][1] = comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b);
+          perm_block_w3[p][q][2] = Scalar::one();
+          if q != block_num_proofs[p] - 1 {
+            perm_block_w3[p][q][4] = perm_block_w3[p][q + 1][0] * perm_block_w3[p][q + 1][1];
+            perm_block_w3[p][q][5] = perm_block_w3[p][q][1] * (perm_block_w3[p][q][4] + Scalar::one() - perm_block_w3[p][q + 1][0]);
+            perm_block_w3[p][q][3] = perm_block_w3[p][q][4] * perm_block_w3[p][q][5];
+          }
         }
       }
       // perm_block_w0 is perm_w0 copied num_proofs times
@@ -973,6 +987,10 @@ impl SNARK {
     perm_block_root_comm: &ComputationCommitment,
     perm_block_root_gens: &SNARKGens,
 
+    perm_block_poly_num_cons: usize,
+    perm_block_poly_comm: &ComputationCommitment,
+    perm_block_poly_gens: &SNARKGens,
+
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
@@ -981,6 +999,9 @@ impl SNARK {
 
     // append a commitment to the computation to the transcript
     block_comm.comm.append_to_transcript(b"block_comm", transcript);
+    perm_prelim_comm.comm.append_to_transcript(b"consis_comm", transcript);
+    perm_block_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
+    perm_block_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
     // --

@@ -64,6 +64,9 @@ fn produce_r1cs() -> (
   usize,
   usize,
   Instance,
+  usize,
+  usize,
+  Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
   Vec<InputsAssignment>
@@ -641,6 +644,9 @@ fn produce_r1cs() -> (
     perm_block_root_num_cons,
     perm_block_root_num_non_zero_entries,
     perm_block_root_inst,
+    perm_block_poly_num_cons,
+    perm_block_poly_num_non_zero_entries,
+    perm_block_poly_inst,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -670,6 +676,9 @@ fn main() {
     perm_block_root_num_cons,
     perm_block_root_num_non_zero_entries,
     perm_block_root_inst,
+    perm_block_poly_num_cons,
+    perm_block_poly_num_non_zero_entries,
+    perm_block_poly_inst,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -686,6 +695,7 @@ fn main() {
   let consis_gens = SNARKGens::new(consis_num_cons, num_vars, 1, consis_num_non_zero_entries);
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_block_root_gens = SNARKGens::new(perm_block_root_num_cons, 4 * num_vars, block_num_instances, perm_block_root_num_non_zero_entries);
+  let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   let var_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
 
@@ -695,6 +705,7 @@ fn main() {
   let (consis_comm, consis_decomm) = SNARK::encode(&consis_inst, &consis_gens);
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
   let (perm_block_root_comm, perm_block_root_decomm) = SNARK::encode(&perm_block_root_inst, &perm_block_root_gens);
+  let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_block_poly_inst, &perm_block_poly_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
@@ -722,6 +733,10 @@ fn main() {
     &perm_block_root_comm,
     &perm_block_root_decomm,
     &perm_block_root_gens,
+    &perm_block_poly_inst,
+    &perm_block_poly_comm,
+    &perm_block_poly_decomm,
+    &perm_block_poly_gens,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -750,6 +765,9 @@ fn main() {
       perm_block_root_num_cons,
       &perm_block_root_comm,
       &perm_block_root_gens,
+      perm_block_poly_num_cons,
+      &perm_block_poly_comm,
+      &perm_block_poly_gens,
       &var_gens,
       &mut verifier_transcript)
     .is_ok());
