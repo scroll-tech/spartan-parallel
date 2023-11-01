@@ -544,8 +544,6 @@ impl SNARK {
       perm_w0,
       perm_poly_w0,
       perm_comm_w0,
-      perm_block_w0,
-      perm_block_poly_w0_list,
       perm_block_comm_w0_list,
       perm_block_w2,
       perm_block_poly_w2_list,
@@ -689,8 +687,6 @@ impl SNARK {
         perm_w0,
         perm_poly_w0,
         perm_comm_w0,
-        perm_block_w0,
-        perm_block_poly_w0_list,
         perm_block_comm_w0_list,
         perm_block_w2,
         perm_block_poly_w2_list,
@@ -720,6 +716,7 @@ impl SNARK {
           &vars_gens,
           vec![&block_vars_mat, &block_inputs_mat],
           vec![&block_poly_vars_list, &block_poly_inputs_list],
+          vec![false, false],
           transcript,
           &mut random_tape,
         )
@@ -786,6 +783,7 @@ impl SNARK {
           &vars_gens,
           vec![&vec![vec![perm_w0.clone()]]],
           vec![&vec![perm_poly_w0.clone()]],
+          vec![false],
           transcript,
           &mut random_tape,
         )
@@ -873,8 +871,9 @@ impl SNARK {
           num_vars,
           &perm_root_inst.inst,
           &vars_gens,
-          vec![&perm_block_w0, &block_inputs_mat, &perm_block_w2, &perm_block_w3],
-          vec![&perm_block_poly_w0_list, &block_poly_inputs_list, &perm_block_poly_w2_list, &perm_block_poly_w3_list],
+          vec![&vec![vec![perm_w0]], &block_inputs_mat, &perm_block_w2, &perm_block_w3],
+          vec![&vec![perm_poly_w0], &block_poly_inputs_list, &perm_block_poly_w2_list, &perm_block_poly_w3_list],
+          vec![true, false, false, false],
           transcript,
           &mut random_tape,
         )
@@ -936,6 +935,7 @@ impl SNARK {
           &proof_times_vars_gens,
           vec![&vec![perm_block_w3_concat.clone()]],
           vec![&vec![perm_block_poly_w3_concat.clone()]],
+          vec![false],
           transcript,
           &mut random_tape,
         )
@@ -1174,6 +1174,7 @@ impl SNARK {
         &vars_gens,
         &self.block_inst_evals,
         vec![&self.block_comm_vars_list, &self.block_comm_inputs_list],
+        vec![false, false],
         transcript,
       )?;
       timer_sat_proof.stop();
@@ -1212,6 +1213,7 @@ impl SNARK {
         &vars_gens,
         &self.perm_prelim_inst_evals,
         vec![&vec![self.perm_comm_w0.clone()]],
+        vec![false],
         transcript,
       )?;
       // Proof that first two entries of perm_w0 are tau and r
@@ -1266,6 +1268,7 @@ impl SNARK {
         &vars_gens,
         &self.perm_root_inst_evals,
         vec![&self.perm_block_comm_w0_list, &self.block_comm_inputs_list, &self.perm_block_comm_w2_list, &self.perm_block_comm_w3_list],
+        vec![true, false, false, false],
         transcript,
       )?;
       timer_sat_proof.stop();
@@ -1305,6 +1308,7 @@ impl SNARK {
         &proof_times_vars_gens,
         &self.perm_block_poly_inst_evals,
         vec![&vec![self.perm_block_comm_w3_concat.clone()]],
+        vec![false],
         transcript,
       )?;
       timer_sat_proof.stop();
