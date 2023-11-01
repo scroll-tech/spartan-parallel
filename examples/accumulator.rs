@@ -355,8 +355,8 @@ fn produce_r1cs() -> (
   // --
   // PERM is consisted of five instances
   // PERM_PRELIM checks the correctness of (r, r^2, ...)
-  // PERM_BLOCK_ROOT and PERM_BLOCK_PROD compute the polynomial defined by block_inputs
-  // PERM_EXEC_ROOT and PERM_EXEC_PROD compute the polynomial defined by exec_inputs
+  // PERM_ROOT and PERM_BLOCK_POLY compute the polynomial defined by block_inputs
+  // PERM_ROOT and PERM_EXEC_POLY compute the polynomial defined by exec_inputs
   // Finally, the verifier checks that the two products are the same
   // The product is defined by PROD = \prod(\tau - (\sum_i a_i * r^{i-1}))
   // There is only one proof
@@ -391,16 +391,16 @@ fn produce_r1cs() -> (
     perm_block_inst
   };
 
-  // PERM_BLOCK_ROOT
-  let perm_block_root_num_cons = num_vars + 3;
-  let perm_block_root_num_non_zero_entries = 2 * num_vars + 3;
-  let perm_block_root_inst = {
+  // PERM_ROOT
+  let perm_root_num_cons = num_vars + 3;
+  let perm_root_num_non_zero_entries = 2 * num_vars + 3;
+  let perm_root_inst = {
     let (A, B, C) = {
       let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
-      // Witnesses of PERM_BLOCK_ROOT is consisted of [w0, w1, w2, w3], each of size num_vars
+      // Witnesses of PERM_ROOT is consisted of [w0, w1, w2, w3], each of size num_vars
       // w0: tau, r, r^2, ...
       // w1: one block_inputs entry: i0, i1, ...
       // w2: one block_inputs entry dot product <r>: i0, i1 * r, i2 * r^2, i3 * r^3, ...
@@ -444,9 +444,9 @@ fn produce_r1cs() -> (
     let B_list = vec![B.clone()];
     let C_list = vec![C.clone()];
 
-    let perm_block_root_inst = Instance::new(1, perm_block_root_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
+    let perm_root_inst = Instance::new(1, perm_root_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
     
-    perm_block_root_inst
+    perm_root_inst
   };
 
   // PERM_BLOCK_POLY
@@ -636,9 +636,9 @@ fn produce_r1cs() -> (
     perm_prelim_num_cons,
     perm_prelim_num_non_zero_entries,
     perm_prelim_inst,
-    perm_block_root_num_cons,
-    perm_block_root_num_non_zero_entries,
-    perm_block_root_inst,
+    perm_root_num_cons,
+    perm_root_num_non_zero_entries,
+    perm_root_inst,
     perm_block_poly_num_cons,
     perm_block_poly_num_non_zero_entries,
     perm_block_poly_inst,
@@ -667,9 +667,9 @@ fn main() {
     perm_prelim_num_cons,
     perm_prelim_num_non_zero_entries,
     perm_prelim_inst,
-    perm_block_root_num_cons,
-    perm_block_root_num_non_zero_entries,
-    perm_block_root_inst,
+    perm_root_num_cons,
+    perm_root_num_non_zero_entries,
+    perm_root_inst,
     perm_block_poly_num_cons,
     perm_block_poly_num_non_zero_entries,
     perm_block_poly_inst,
@@ -688,7 +688,7 @@ fn main() {
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
   let consis_gens = SNARKGens::new(consis_num_cons, num_vars, 1, consis_num_non_zero_entries);
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
-  let perm_block_root_gens = SNARKGens::new(perm_block_root_num_cons, 4 * num_vars, 1, perm_block_root_num_non_zero_entries);
+  let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
@@ -701,7 +701,7 @@ fn main() {
   let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
   let (consis_comm, consis_decomm) = SNARK::encode(&consis_inst, &consis_gens);
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
-  let (perm_block_root_comm, perm_block_root_decomm) = SNARK::encode(&perm_block_root_inst, &perm_block_root_gens);
+  let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_block_poly_inst, &perm_block_poly_gens);
 
   // produce a proof of satisfiability
@@ -725,10 +725,10 @@ fn main() {
     &perm_prelim_comm,
     &perm_prelim_decomm,
     &perm_prelim_gens,
-    &perm_block_root_inst,
-    &perm_block_root_comm,
-    &perm_block_root_decomm,
-    &perm_block_root_gens,
+    &perm_root_inst,
+    &perm_root_comm,
+    &perm_root_decomm,
+    &perm_root_gens,
     &perm_block_poly_inst,
     &perm_block_poly_comm,
     &perm_block_poly_decomm,
@@ -760,9 +760,9 @@ fn main() {
       perm_prelim_num_cons,
       &perm_prelim_comm,
       &perm_prelim_gens,
-      perm_block_root_num_cons,
-      &perm_block_root_comm,
-      &perm_block_root_gens,
+      perm_root_num_cons,
+      &perm_root_comm,
+      &perm_root_gens,
       perm_block_poly_num_cons,
       &perm_block_poly_comm,
       &perm_block_poly_gens,

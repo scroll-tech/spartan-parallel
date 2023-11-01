@@ -350,9 +350,9 @@ pub struct SNARK {
   proof_eval_perm_w0_at_zero: PolyEvalProof,
   proof_eval_perm_w0_at_one: PolyEvalProof,
 
-  perm_block_root_r1cs_sat_proof: R1CSProof,
-  perm_block_root_inst_evals: (Scalar, Scalar, Scalar),
-  perm_block_root_r1cs_eval_proof: R1CSEvalProof,
+  perm_root_r1cs_sat_proof: R1CSProof,
+  perm_root_inst_evals: (Scalar, Scalar, Scalar),
+  perm_root_r1cs_eval_proof: R1CSEvalProof,
 
   perm_block_poly_r1cs_sat_proof: R1CSProof,
   perm_block_poly_inst_evals: (Scalar, Scalar, Scalar),
@@ -408,10 +408,10 @@ impl SNARK {
     perm_prelim_decomm: &ComputationDecommitment,
     perm_prelim_gens: &SNARKGens,
 
-    perm_block_root_inst: &Instance,
-    perm_block_root_comm: &ComputationCommitment,
-    perm_block_root_decomm: &ComputationDecommitment,
-    perm_block_root_gens: &SNARKGens,
+    perm_root_inst: &Instance,
+    perm_root_comm: &ComputationCommitment,
+    perm_root_decomm: &ComputationDecommitment,
+    perm_root_gens: &SNARKGens,
 
     perm_block_poly_inst: &Instance,
     perm_block_poly_comm: &ComputationCommitment,
@@ -434,7 +434,7 @@ impl SNARK {
     transcript.append_protocol_name(SNARK::protocol_name());
     block_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_prelim_comm.comm.append_to_transcript(b"block_comm", transcript);
-    perm_block_root_comm.comm.append_to_transcript(b"block_comm", transcript);
+    perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_block_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
@@ -860,18 +860,18 @@ impl SNARK {
     };
 
     // --
-    // PERM_BLOCK_ROOT
+    // PERM_ROOT
     // --
 
-    let (perm_block_root_r1cs_sat_proof, perm_block_root_challenges) = {
-      let (proof, perm_block_root_challenges) = {
+    let (perm_root_r1cs_sat_proof, perm_root_challenges) = {
+      let (proof, perm_root_challenges) = {
         R1CSProof::prove(
           4,
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
           num_vars,
-          &perm_block_root_inst.inst,
+          &perm_root_inst.inst,
           &vars_gens,
           vec![&perm_block_w0, &block_inputs_mat, &perm_block_w2, &perm_block_w3],
           vec![&perm_block_poly_w0_list, &block_poly_inputs_list, &perm_block_poly_w2_list, &perm_block_poly_w3_list],
@@ -883,13 +883,13 @@ impl SNARK {
       let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
       Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-      (proof, perm_block_root_challenges)
+      (proof, perm_root_challenges)
     };
 
-    // Final evaluation on PERM_BLOCK_ROOT
-    let (perm_block_root_inst_evals, perm_block_root_r1cs_eval_proof) = {
-      let [_, _, rx, ry] = perm_block_root_challenges;
-      let inst = perm_block_root_inst;
+    // Final evaluation on PERM_ROOT
+    let (perm_root_inst_evals, perm_root_r1cs_eval_proof) = {
+      let [_, _, rx, ry] = perm_root_challenges;
+      let inst = perm_root_inst;
       let timer_eval = Timer::new("eval_sparse_polys");
       let inst_evals = {
         let (Ar, Br, Cr) = inst.inst.evaluate(&Vec::new(), &rx, &ry);
@@ -902,11 +902,11 @@ impl SNARK {
 
       let r1cs_eval_proof = {
         let proof = R1CSEvalProof::prove(
-          &perm_block_root_decomm.decomm,
+          &perm_root_decomm.decomm,
           &rx,
           &ry,
           &inst_evals,
-          &perm_block_root_gens.gens_r1cs_eval,
+          &perm_root_gens.gens_r1cs_eval,
           transcript,
           &mut random_tape,
         );
@@ -1063,9 +1063,9 @@ impl SNARK {
       proof_eval_perm_w0_at_zero,
       proof_eval_perm_w0_at_one,
 
-      perm_block_root_r1cs_sat_proof,
-      perm_block_root_inst_evals,
-      perm_block_root_r1cs_eval_proof,
+      perm_root_r1cs_sat_proof,
+      perm_root_inst_evals,
+      perm_root_r1cs_eval_proof,
 
       perm_block_poly_r1cs_sat_proof,
       perm_block_poly_inst_evals,
@@ -1100,9 +1100,9 @@ impl SNARK {
     perm_prelim_comm: &ComputationCommitment,
     perm_prelim_gens: &SNARKGens,
 
-    perm_block_root_num_cons: usize,
-    perm_block_root_comm: &ComputationCommitment,
-    perm_block_root_gens: &SNARKGens,
+    perm_root_num_cons: usize,
+    perm_root_comm: &ComputationCommitment,
+    perm_root_gens: &SNARKGens,
 
     perm_block_poly_num_cons: usize,
     perm_block_poly_comm: &ComputationCommitment,
@@ -1118,7 +1118,7 @@ impl SNARK {
     // append a commitment to the computation to the transcript
     block_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_prelim_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    perm_block_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
+    perm_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
     perm_block_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
@@ -1251,38 +1251,38 @@ impl SNARK {
     }
 
     // --
-    // PERM_BLOCK_ROOT
+    // PERM_ROOT
     // --
 
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
-      let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
+      let perm_root_challenges = self.perm_root_r1cs_sat_proof.verify(
         4,
         block_num_instances,
         block_max_num_proofs,
         block_num_proofs,
         num_vars,
-        perm_block_root_num_cons,
+        perm_root_num_cons,
         &vars_gens,
-        &self.perm_block_root_inst_evals,
+        &self.perm_root_inst_evals,
         vec![&self.perm_block_comm_w0_list, &self.block_comm_inputs_list, &self.perm_block_comm_w2_list, &self.perm_block_comm_w3_list],
         transcript,
       )?;
       timer_sat_proof.stop();
 
       let timer_eval_proof = Timer::new("verify_eval_proof");
-      // Verify Evaluation on PERM_BLOCK_ROOT
-      let (Ar, Br, Cr) = &self.perm_block_root_inst_evals;
+      // Verify Evaluation on PERM_ROOT
+      let (Ar, Br, Cr) = &self.perm_root_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);
-      let [_, _, rx, ry] = perm_block_root_challenges;
-      self.perm_block_root_r1cs_eval_proof.verify(
-        &perm_block_root_comm.comm,
+      let [_, _, rx, ry] = perm_root_challenges;
+      self.perm_root_r1cs_eval_proof.verify(
+        &perm_root_comm.comm,
         &rx,
         &ry,
-        &self.perm_block_root_inst_evals,
-        &perm_block_root_gens.gens_r1cs_eval,
+        &self.perm_root_inst_evals,
+        &perm_root_gens.gens_r1cs_eval,
         transcript,
       )?;
       timer_eval_proof.stop();
