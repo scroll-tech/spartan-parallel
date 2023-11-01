@@ -50,7 +50,6 @@ fn produce_r1cs() -> (
   usize,
   usize,
   usize,
-  Vec<usize>,
   usize,
   Vec<usize>,
   Instance,
@@ -176,7 +175,6 @@ fn produce_r1cs() -> (
   // Number of proofs of each R1CS instance
   // OBTAINED DURING COMPILE TIME
   let block_max_num_proofs_bound = 8;
-  let block_num_proofs_bound = vec![8, 1];
   // OBTAINED DURING RUNTIME
   let block_max_num_proofs = 4;
   let block_num_proofs = vec![4, 1];
@@ -479,7 +477,6 @@ fn produce_r1cs() -> (
       let V_d1 = 4;
       let V_d2 = 5;
 
-
       let mut constraint_count = 0;
 
       // compute D1
@@ -630,7 +627,6 @@ fn produce_r1cs() -> (
     block_num_non_zero_entries,
     block_num_instances,
     block_max_num_proofs_bound,
-    block_num_proofs_bound,
     block_max_num_proofs,
     block_num_proofs,
     block_inst,
@@ -662,7 +658,6 @@ fn main() {
     block_num_non_zero_entries,
     block_num_instances,
     block_max_num_proofs_bound,
-    block_num_proofs_bound,
     block_max_num_proofs,
     block_num_proofs,
     block_inst,
@@ -697,7 +692,10 @@ fn main() {
   let perm_block_root_gens = SNARKGens::new(perm_block_root_num_cons, 4 * num_vars, block_num_instances, perm_block_root_num_non_zero_entries);
   let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
+  // for size VAR
   let var_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
+  // for size PROOF * VAR
+  let proof_times_var_gens = SNARKGens::new(block_num_cons, block_max_num_proofs_bound * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
@@ -713,7 +711,6 @@ fn main() {
     num_vars,
     block_num_instances,
     block_max_num_proofs_bound,
-    &block_num_proofs_bound,
     block_max_num_proofs,
     &block_num_proofs,
     &block_inst,
@@ -741,6 +738,7 @@ fn main() {
     block_inputs_matrix,
     exec_inputs,
     &var_gens,
+    &proof_times_var_gens,
     &mut prover_transcript,
   );
 
@@ -750,6 +748,7 @@ fn main() {
     .verify(
       num_vars,
       block_num_instances, 
+      block_max_num_proofs_bound,
       block_max_num_proofs, 
       &block_num_proofs, 
       block_num_cons, 
@@ -769,7 +768,8 @@ fn main() {
       &perm_block_poly_comm,
       &perm_block_poly_gens,
       &var_gens,
-      &mut verifier_transcript)
-    .is_ok());
+      &proof_times_var_gens,
+      &mut verifier_transcript
+    ).is_ok());
   println!("proof verification successful!");
 }
