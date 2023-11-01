@@ -193,7 +193,9 @@ impl R1CSProof {
     }
     assert_eq!(num_inputs, num_inputs.next_power_of_two());
 
-    // Assert all lengths matches
+    // Number of instances is either one or matches num_instances
+    assert!(inst.get_num_instances() == 1 || inst.get_num_instances() == num_instances);
+    // Length matches for all witnesses
     for i in 0..num_witness_secs {
       assert_eq!(w_mat[i].len(), num_instances);
       for p in 0..num_instances {
@@ -341,7 +343,7 @@ impl R1CSProof {
       // compute the initial evaluation table for R(\tau, x)
       let evals_rx = EqPolynomial::new(rx.clone()).evals();
       let (evals_A, evals_B, evals_C) =
-      inst.compute_eval_table_sparse(inst.get_num_cons(), z_len, &evals_rx);
+      inst.compute_eval_table_sparse(num_instances, inst.get_num_cons(), z_len, &evals_rx);
 
       assert_eq!(evals_A.len(), evals_B.len());
       assert_eq!(evals_A.len(), evals_C.len());

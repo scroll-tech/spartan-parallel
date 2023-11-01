@@ -888,11 +888,11 @@ impl SNARK {
 
     // Final evaluation on PERM_BLOCK_ROOT
     let (perm_block_root_inst_evals, perm_block_root_r1cs_eval_proof) = {
-      let [rp, _, rx, ry] = perm_block_root_challenges;
+      let [_, _, rx, ry] = perm_block_root_challenges;
       let inst = perm_block_root_inst;
       let timer_eval = Timer::new("eval_sparse_polys");
       let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(&rp, &rx, &ry);
+        let (Ar, Br, Cr) = inst.inst.evaluate(&Vec::new(), &rx, &ry);
         Ar.append_to_transcript(b"Ar_claim", transcript);
         Br.append_to_transcript(b"Br_claim", transcript);
         Cr.append_to_transcript(b"Cr_claim", transcript);
@@ -903,7 +903,7 @@ impl SNARK {
       let r1cs_eval_proof = {
         let proof = R1CSEvalProof::prove(
           &perm_block_root_decomm.decomm,
-          &[rp, rx].concat(),
+          &rx,
           &ry,
           &inst_evals,
           &perm_block_root_gens.gens_r1cs_eval,
@@ -1276,10 +1276,10 @@ impl SNARK {
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);
-      let [rp, _, rx, ry] = perm_block_root_challenges;
+      let [_, _, rx, ry] = perm_block_root_challenges;
       self.perm_block_root_r1cs_eval_proof.verify(
         &perm_block_root_comm.comm,
-        &[rp, rx].concat(),
+        &rx,
         &ry,
         &self.perm_block_root_inst_evals,
         &perm_block_root_gens.gens_r1cs_eval,

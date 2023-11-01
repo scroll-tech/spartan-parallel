@@ -355,13 +355,16 @@ impl R1CSInstance {
     num_cols: usize,
     z_mat: &Vec<Vec<Vec<Scalar>>>
   ) -> (DensePolynomial_PQX, DensePolynomial_PQX, DensePolynomial_PQX) {
+    assert!(self.num_instances == 1 || self.num_instances == num_instances);
     assert_eq!(num_rows, self.num_cons);
-    assert!(num_cols == self.num_vars);
+    assert_eq!(num_cols, self.num_vars);
     let mut Az = Vec::new();
     let mut Bz = Vec::new();
     let mut Cz = Vec::new();
 
     for p in 0..num_instances {
+      let p_inst = if self.num_instances == 1 { 0 } else { p };
+
       let z_list = &z_mat[p];
       assert!(num_proofs[p] <= max_num_proofs);
       Az.push(Vec::new());
@@ -371,9 +374,9 @@ impl R1CSInstance {
         let z = &z_list[q];
         assert_eq!(z.len(), num_cols);
 
-        Az[p].push(self.A_list[p].multiply_vec(num_rows, num_cols, z));
-        Bz[p].push(self.B_list[p].multiply_vec(num_rows, num_cols, z));
-        Cz[p].push(self.C_list[p].multiply_vec(num_rows, num_cols, z));
+        Az[p].push(self.A_list[p_inst].multiply_vec(num_rows, num_cols, z));
+        Bz[p].push(self.B_list[p_inst].multiply_vec(num_rows, num_cols, z));
+        Cz[p].push(self.C_list[p_inst].multiply_vec(num_rows, num_cols, z));
       }
     }
     (
@@ -468,20 +471,24 @@ impl R1CSInstance {
 
   pub fn compute_eval_table_sparse(
     &self,
+    num_instances: usize,
     num_rows: usize,
     num_cols: usize,
     evals: &[Scalar],
   ) -> (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
+    assert!(self.num_instances == 1 || self.num_instances == num_instances);
     assert_eq!(num_rows, self.num_cons);
-    assert!(num_cols == self.num_vars);
+    assert_eq!(num_cols, self.num_vars);
 
     let mut evals_A_list = Vec::new();
     let mut evals_B_list = Vec::new();
     let mut evals_C_list = Vec::new();
-    for p in 0..self.num_instances {
-      let evals_A = self.A_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
-      let evals_B = self.B_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
-      let evals_C = self.C_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
+    for p in 0..num_instances {
+      let p_inst = if self.num_instances == 1 { 0 } else { p };
+
+      let evals_A = self.A_list[p_inst].compute_eval_table_sparse(evals, num_rows, num_cols);
+      let evals_B = self.B_list[p_inst].compute_eval_table_sparse(evals, num_rows, num_cols);
+      let evals_C = self.C_list[p_inst].compute_eval_table_sparse(evals, num_rows, num_cols);
       evals_A_list.extend(evals_A);
       evals_B_list.extend(evals_B);
       evals_C_list.extend(evals_C);
