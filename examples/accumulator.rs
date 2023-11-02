@@ -711,9 +711,11 @@ fn main() {
   let perm_exec_poly_gens = SNARKGens::new(perm_exec_poly_num_cons, total_num_proofs_bound * num_vars, 1, perm_exec_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
-  let var_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
+  let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
   // for size PROOF * VAR
-  let proof_times_var_gens = SNARKGens::new(block_num_cons, block_max_num_proofs_bound * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
+  let proofs_times_vars_gens = SNARKGens::new(block_num_cons, block_max_num_proofs_bound * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
+  // for size TOTAL_PROOF * VAR
+  let total_proofs_times_vars_gens = SNARKGens::new(block_num_cons, total_num_proofs_bound * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
@@ -761,8 +763,9 @@ fn main() {
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
-    &var_gens,
-    &proof_times_var_gens,
+    &vars_gens,
+    &proofs_times_vars_gens,
+    &total_proofs_times_vars_gens,
     &mut prover_transcript,
   );
 
@@ -795,8 +798,9 @@ fn main() {
       perm_exec_poly_num_cons,
       &perm_exec_poly_comm,
       &perm_exec_poly_gens,
-      &var_gens,
-      &proof_times_var_gens,
+      &vars_gens,
+      &proofs_times_vars_gens,
+      &total_proofs_times_vars_gens,
       &mut verifier_transcript
     ).is_ok());
   println!("proof verification successful!");
