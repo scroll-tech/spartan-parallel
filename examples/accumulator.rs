@@ -51,6 +51,7 @@ fn produce_r1cs() -> (
   usize,
   usize,
   usize,
+  usize,
   Vec<usize>,
   Instance,
   usize,
@@ -174,6 +175,7 @@ fn produce_r1cs() -> (
   let block_num_instances = 2;
   // Number of proofs of each R1CS instance
   // OBTAINED DURING COMPILE TIME
+  let total_num_proofs_bound = 16;
   let block_max_num_proofs_bound = 8;
   // OBTAINED DURING RUNTIME
   let block_max_num_proofs = 4;
@@ -405,8 +407,8 @@ fn produce_r1cs() -> (
       // w1: one block_inputs entry: i0, i1, ...
       // w2: one block_inputs entry dot product <r>: i0, i1 * r, i2 * r^2, i3 * r^3, ...
       // w3[0]: valid bit, should match block_inputs[0]
-      // w3[1]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...))
-      // w3[2]: the constant 1
+      // w3[1]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...)), 0 if invalid
+      // w3[2]: the constant 1, 0 if invalid
       let V_tau = 0;
       // The best way to find a CONSTANT ONE is to peak into the constant term of the first input, which is guaranteed to be valid
       let V_cnst = num_vars + input_output_cutoff;
@@ -429,12 +431,12 @@ fn produce_r1cs() -> (
       // correctness of w3[1]
       (A, B, C) = gen_constr(A, B, C, V_cnst, constraint_count,
           [vec![(V_tau, 1)], (0..num_vars).map(|i| (2 * num_vars + i, -1)).collect()].concat(), 
-          vec![], 
+          vec![(num_vars, 1)], 
           vec![(3 * num_vars + 1, 1)]);
       constraint_count += 1;
-      // correctness of w3[2]
+      // correctness of w3[2]: is the constant 1
       (A, B, C) = gen_constr(A, B, C, V_cnst, 
-        constraint_count, vec![(V_cnst, 1)], vec![], vec![(3 * num_vars + 2, 1)]);
+        constraint_count, vec![(V_cnst, 1)], vec![(num_vars, 1)], vec![(3 * num_vars + 2, 1)]);
       constraint_count += 1;
 
       (A, B, C)   
@@ -622,6 +624,7 @@ fn produce_r1cs() -> (
 
   (
     num_vars,
+    total_num_proofs_bound,
     block_num_cons,
     block_num_non_zero_entries,
     block_num_instances,
@@ -653,6 +656,7 @@ fn main() {
   let (
     // num_inputs == num_vars
     num_vars,
+    total_num_proofs_bound,
     block_num_cons,
     block_num_non_zero_entries,
     block_num_instances,
@@ -708,6 +712,7 @@ fn main() {
   let mut prover_transcript = Transcript::new(b"snark_example");
   let proof = SNARK::prove(
     num_vars,
+    total_num_proofs_bound,
     block_num_instances,
     block_max_num_proofs_bound,
     block_max_num_proofs,
@@ -746,6 +751,7 @@ fn main() {
   assert!(proof
     .verify(
       num_vars,
+      total_num_proofs_bound,
       block_num_instances, 
       block_max_num_proofs_bound,
       block_max_num_proofs, 

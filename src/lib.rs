@@ -339,6 +339,9 @@ pub struct SNARK {
   perm_block_comm_w2_list: Vec<PolyCommitment>,
   perm_block_comm_w3_list: Vec<PolyCommitment>,
   perm_block_comm_w3_concat: PolyCommitment,
+  perm_exec_comm_w0: PolyCommitment,
+  perm_exec_comm_w2: PolyCommitment,
+  perm_exec_comm_w3: PolyCommitment,
 
   block_r1cs_sat_proof: R1CSProof,
   block_inst_evals: (Scalar, Scalar, Scalar),
@@ -350,9 +353,9 @@ pub struct SNARK {
   proof_eval_perm_w0_at_zero: PolyEvalProof,
   proof_eval_perm_w0_at_one: PolyEvalProof,
 
-  perm_root_r1cs_sat_proof: R1CSProof,
-  perm_root_inst_evals: (Scalar, Scalar, Scalar),
-  perm_root_r1cs_eval_proof: R1CSEvalProof,
+  perm_block_root_r1cs_sat_proof: R1CSProof,
+  perm_block_root_inst_evals: (Scalar, Scalar, Scalar),
+  perm_block_root_r1cs_eval_proof: R1CSEvalProof,
 
   perm_block_poly_r1cs_sat_proof: R1CSProof,
   perm_block_poly_inst_evals: (Scalar, Scalar, Scalar),
@@ -361,6 +364,10 @@ pub struct SNARK {
   perm_block_poly_list: Vec<Scalar>,
   proof_eval_perm_block_prod_list: Vec<PolyEvalProof>,
   
+  perm_exec_root_r1cs_sat_proof: R1CSProof,
+  perm_exec_root_inst_evals: (Scalar, Scalar, Scalar),
+  perm_exec_root_r1cs_eval_proof: R1CSEvalProof,
+
   // consis_r1cs_sat_proof: R1CSProof,
   // consis_inst_evals: (Scalar, Scalar, Scalar),
   // consis_r1cs_eval_proof: R1CSEvalProof,
@@ -388,6 +395,7 @@ impl SNARK {
   /// A method to produce a SNARK proof of the satisfiability of an R1CS instance
   pub fn prove(
     num_vars: usize,
+    total_num_proofs_bound: usize,
     block_num_instances: usize,
     block_max_num_proofs_bound: usize,
     block_max_num_proofs: usize,
@@ -420,7 +428,7 @@ impl SNARK {
 
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
-    exec_inputs: Vec<InputsAssignment>,
+    exec_inputs_list: Vec<InputsAssignment>,
     vars_gens: &R1CSGens,
     proof_times_vars_gens: &R1CSGens,
     transcript: &mut Transcript,
@@ -441,7 +449,7 @@ impl SNARK {
     // unwrap the assignments
     let block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let block_inputs_mat = block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
-    let exec_inputs = exec_inputs.into_iter().map(|v| v.assignment).collect_vec();
+    let exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
 
     // --
     // COMMITMENTS
@@ -509,9 +517,9 @@ impl SNARK {
       }
 
       let (exec_poly_inputs, exec_comm_inputs) = {
-        let exec_inputs_list = exec_inputs.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+        let exec_inputs = exec_inputs_list.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
         // create a multilinear polynomial using the supplied assignment for variables
-        let exec_poly_inputs = DensePolynomial::new(exec_inputs_list);
+        let exec_poly_inputs = DensePolynomial::new(exec_inputs);
 
         // produce a commitment to the satisfying assignment
         let (exec_comm_inputs, _blinds_inputs) = exec_poly_inputs.commit(&vars_gens.gens_pc, None);
@@ -536,7 +544,7 @@ impl SNARK {
     // CHALLENGES AND WITNESSES FOR PERMUTATION
     // --
 
-    // TODO: We can eliminate perm_block_w0 if we change the R1CS proof
+    // TODO: We can eliminate perm_block_w0 and perm_exec_w0 if we change the R1CS proof
 
     let (
       comb_tau,
@@ -553,7 +561,15 @@ impl SNARK {
       perm_block_comm_w3_list,
       perm_block_w3_concat,
       perm_block_poly_w3_concat,
-      perm_block_comm_w3_concat
+      perm_block_comm_w3_concat,
+
+      perm_exec_comm_w0,
+      perm_exec_w2,
+      perm_exec_poly_w2,
+      perm_exec_comm_w2,
+      perm_exec_w3,
+      perm_exec_poly_w3,
+      perm_exec_comm_w3,
     ) = {
       let comb_tau = transcript.challenge_scalar(b"challenge_tau");
       let comb_r = transcript.challenge_scalar(b"challenge_r");
@@ -567,13 +583,18 @@ impl SNARK {
         perm_w0.push(r_tmp);
         r_tmp *= comb_r;
       }
+      
       // w2 is block_inputs * <r>
       let perm_block_w2: Vec<Vec<Vec<Scalar>>> = block_inputs_mat.iter().map(
         |i| i.iter().map(
           |input| (0..input.len()).map(|j| perm_w0[j] * input[j]).collect()
         ).collect()
       ).collect();
+      let perm_exec_w2: Vec<Vec<Scalar>> = exec_inputs_list.iter().map(
+        |input| (0..input.len()).map(|j| perm_w0[j] * input[j]).collect()
+      ).collect();
       perm_w0[0] = comb_tau;
+      
       // w3 is [valid, tau - Xi, 1, ...]
       // TODO: fill in the remaining ones
       // See accumulator.rs
@@ -583,8 +604,8 @@ impl SNARK {
         for q in (0..block_num_proofs[p]).rev() {
           perm_block_w3[p][q] = vec![Scalar::zero(); num_vars];
           perm_block_w3[p][q][0] = block_inputs_mat[p][q][0];
-          perm_block_w3[p][q][1] = comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b);
-          perm_block_w3[p][q][2] = Scalar::one();
+          perm_block_w3[p][q][1] = (comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b)) * block_inputs_mat[p][q][0];
+          perm_block_w3[p][q][2] = Scalar::one() * block_inputs_mat[p][q][0];
           if q != block_num_proofs[p] - 1 {
             perm_block_w3[p][q][4] = perm_block_w3[p][q + 1][0] * perm_block_w3[p][q + 1][1];
             perm_block_w3[p][q][5] = perm_block_w3[p][q][1] * (perm_block_w3[p][q][4] + Scalar::one() - perm_block_w3[p][q + 1][0]);
@@ -594,6 +615,21 @@ impl SNARK {
           perm_block_w3[p][q][3] = perm_block_w3[p][q][0] * perm_block_w3[p][q][5];
         }
       }
+      let mut perm_exec_w3 = vec![Vec::new(); consis_num_proofs];
+      for q in (0..consis_num_proofs).rev() {
+        perm_exec_w3[q] = vec![Scalar::zero(); num_vars];
+        perm_exec_w3[q][0] = exec_inputs_list[q][0];
+        perm_exec_w3[q][1] = (comb_tau - perm_exec_w2[q].iter().fold(Scalar::zero(), |a, b| a + b)) * exec_inputs_list[q][0];
+        perm_exec_w3[q][2] = Scalar::one() * exec_inputs_list[q][0];
+        if q != consis_num_proofs - 1 {
+          perm_exec_w3[q][4] = perm_exec_w3[q + 1][0] * perm_exec_w3[q + 1][1];
+          perm_exec_w3[q][5] = perm_exec_w3[q][1] * (perm_exec_w3[q][4] + Scalar::one() - perm_exec_w3[q + 1][0]);
+        } else {
+          perm_exec_w3[q][5] = perm_exec_w3[q][1];
+        }
+        perm_exec_w3[q][3] = perm_exec_w3[q][0] * perm_exec_w3[q][5];
+      }
+      
       // perm_block_w0 is perm_w0 copied num_proofs times
       let mut perm_block_w0 = Vec::new();
       for p in 0..block_num_instances {
@@ -601,6 +637,10 @@ impl SNARK {
         for _ in 0..block_num_proofs[p] {
           perm_block_w0[p].push(perm_w0.clone());
         }
+      }
+      let mut perm_exec_w0 = Vec::new();
+      for _ in 0..consis_num_proofs {
+        perm_exec_w0.push(perm_w0.clone());
       }
 
       // create a multilinear polynomial using the supplied assignment for variables
@@ -611,7 +651,6 @@ impl SNARK {
       perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
 
       // commit the witnesses and inputs separately instance-by-instance
-      let mut perm_block_poly_w0_list = Vec::new();
       let mut perm_block_comm_w0_list = Vec::new();
       let mut perm_block_poly_w2_list = Vec::new();
       let mut perm_block_comm_w2_list = Vec::new();
@@ -619,7 +658,7 @@ impl SNARK {
       let mut perm_block_comm_w3_list = Vec::new();
 
       for p in 0..block_num_instances {
-        let (perm_block_poly_w0, perm_block_comm_w0) = {
+        let (_perm_block_poly_w0, perm_block_comm_w0) = {
           // Flatten the witnesses into a Q_i * X list
           let w0_list_p = perm_block_w0[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
           // create a multilinear polynomial using the supplied assignment for variables
@@ -632,7 +671,6 @@ impl SNARK {
           perm_block_comm_w0.append_to_transcript(b"poly_commitment", transcript);
           (perm_block_poly_w0, perm_block_comm_w0)
         };
-        perm_block_poly_w0_list.push(perm_block_poly_w0);
         perm_block_comm_w0_list.push(perm_block_comm_w0);
 
         let (perm_block_poly_w2, perm_block_comm_w2) = {
@@ -680,6 +718,65 @@ impl SNARK {
       let (perm_block_comm_w3_concat, _blinds_vars) = perm_block_poly_w3_concat.commit(&proof_times_vars_gens.gens_pc, None);
       perm_block_comm_w3_concat.append_to_transcript(b"poly_commitment", transcript);
 
+      let (
+        perm_exec_comm_w0,
+        perm_exec_poly_w2,
+        perm_exec_comm_w2,
+        perm_exec_poly_w3,
+        perm_exec_comm_w3
+      ) = {
+        let (_perm_exec_poly_w0, perm_exec_comm_w0) = {
+          // Flatten the witnesses into a Q_i * X list
+          let w0_list_p = perm_exec_w0.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let perm_exec_poly_w0 = DensePolynomial::new(w0_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (perm_exec_comm_w0, _blinds_vars) = perm_exec_poly_w0.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          perm_exec_comm_w0.append_to_transcript(b"poly_commitment", transcript);
+          (perm_exec_poly_w0, perm_exec_comm_w0)
+        };
+
+        let (perm_exec_poly_w2, perm_exec_comm_w2) = {
+          // Flatten the witnesses into a Q_i * X list
+          let w2_list_p = perm_exec_w2.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let perm_exec_poly_w2 = DensePolynomial::new(w2_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (perm_exec_comm_w2, _blinds_vars) = perm_exec_poly_w2.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          perm_exec_comm_w2.append_to_transcript(b"poly_commitment", transcript);
+          (perm_exec_poly_w2, perm_exec_comm_w2)
+        };
+        
+        let (perm_exec_poly_w3, perm_exec_comm_w3) = {
+          // Flatten the witnesses into a Q_i * X list
+          let w3_list_p = perm_exec_w3.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let perm_exec_poly_w3 = DensePolynomial::new(w3_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (perm_exec_comm_w3, _blinds_vars) = perm_exec_poly_w3.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          perm_exec_comm_w3.append_to_transcript(b"poly_commitment", transcript);
+          (perm_exec_poly_w3, perm_exec_comm_w3)
+        };
+
+        (
+          perm_exec_comm_w0,
+          perm_exec_poly_w2,
+          perm_exec_comm_w2,
+          perm_exec_poly_w3,
+          perm_exec_comm_w3
+        )
+      };
+
+
       (
         comb_tau,
         comb_r,
@@ -696,7 +793,15 @@ impl SNARK {
         perm_block_comm_w3_list,
         perm_block_w3_concat,
         perm_block_poly_w3_concat,
-        perm_block_comm_w3_concat
+        perm_block_comm_w3_concat,
+
+        perm_exec_comm_w0,
+        perm_exec_w2,
+        perm_exec_poly_w2,
+        perm_exec_comm_w2,
+        perm_exec_w3,
+        perm_exec_poly_w3,
+        perm_exec_comm_w3,
       )
     };
 
@@ -858,11 +963,11 @@ impl SNARK {
     };
 
     // --
-    // PERM_ROOT
+    // PERM_BLOCK_ROOT
     // --
 
-    let (perm_root_r1cs_sat_proof, perm_root_challenges) = {
-      let (proof, perm_root_challenges) = {
+    let (perm_block_root_r1cs_sat_proof, perm_block_root_challenges) = {
+      let (proof, perm_block_root_challenges) = {
         R1CSProof::prove(
           4,
           block_num_instances,
@@ -871,8 +976,8 @@ impl SNARK {
           num_vars,
           &perm_root_inst.inst,
           &vars_gens,
-          vec![&vec![vec![perm_w0]], &block_inputs_mat, &perm_block_w2, &perm_block_w3],
-          vec![&vec![perm_poly_w0], &block_poly_inputs_list, &perm_block_poly_w2_list, &perm_block_poly_w3_list],
+          vec![&vec![vec![perm_w0.clone()]], &block_inputs_mat, &perm_block_w2, &perm_block_w3],
+          vec![&vec![perm_poly_w0.clone()], &block_poly_inputs_list, &perm_block_poly_w2_list, &perm_block_poly_w3_list],
           vec![true, false, false, false],
           transcript,
           &mut random_tape,
@@ -882,12 +987,12 @@ impl SNARK {
       let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
       Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-      (proof, perm_root_challenges)
+      (proof, perm_block_root_challenges)
     };
 
-    // Final evaluation on PERM_ROOT
-    let (perm_root_inst_evals, perm_root_r1cs_eval_proof) = {
-      let [_, _, rx, ry] = perm_root_challenges;
+    // Final evaluation on PERM_BLOCK_ROOT
+    let (perm_block_root_inst_evals, perm_block_root_r1cs_eval_proof) = {
+      let [_, _, rx, ry] = perm_block_root_challenges;
       let inst = perm_root_inst;
       let timer_eval = Timer::new("eval_sparse_polys");
       let inst_evals = {
@@ -1007,14 +1112,41 @@ impl SNARK {
       (perm_block_poly_list, proof_eval_perm_block_prod_list)
     };
 
-    /*
-    // Final evaluation on CONSIS
-    let (consis_inst_evals, consis_r1cs_eval_proof) = {
-      let [_, rx, ry] = consis_challenges;
-      let inst = consis_inst;
+    // --
+    // PERM_EXEC_ROOT
+    // --
+
+    let (perm_exec_root_r1cs_sat_proof, perm_exec_root_challenges) = {
+      let (proof, perm_exec_root_challenges) = {
+        R1CSProof::prove(
+          4,
+          1,
+          consis_num_proofs,
+          &vec![consis_num_proofs],
+          num_vars,
+          &perm_root_inst.inst,
+          &vars_gens,
+          vec![&vec![vec![perm_w0]], &vec![exec_inputs_list], &vec![perm_exec_w2], &vec![perm_exec_w3]],
+          vec![&vec![perm_poly_w0], &vec![exec_poly_inputs], &vec![perm_exec_poly_w2], &vec![perm_exec_poly_w3]],
+          vec![true, false, false, false],
+          transcript,
+          &mut random_tape,
+        )
+      };
+
+      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+      (proof, perm_exec_root_challenges)
+    };
+
+    // Final evaluation on PERM_BLOCK_ROOT
+    let (perm_exec_root_inst_evals, perm_exec_root_r1cs_eval_proof) = {
+      let [_, _, rx, ry] = perm_exec_root_challenges;
+      let inst = perm_root_inst;
       let timer_eval = Timer::new("eval_sparse_polys");
       let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(&vec![], &rx, &ry);
+        let (Ar, Br, Cr) = inst.inst.evaluate(&Vec::new(), &rx, &ry);
         Ar.append_to_transcript(b"Ar_claim", transcript);
         Br.append_to_transcript(b"Br_claim", transcript);
         Cr.append_to_transcript(b"Cr_claim", transcript);
@@ -1024,11 +1156,11 @@ impl SNARK {
 
       let r1cs_eval_proof = {
         let proof = R1CSEvalProof::prove(
-          &consis_decomm.decomm,
+          &perm_root_decomm.decomm,
           &rx,
           &ry,
           &inst_evals,
-          &consis_gens.gens_r1cs_eval,
+          &perm_root_gens.gens_r1cs_eval,
           transcript,
           &mut random_tape,
         );
@@ -1041,7 +1173,6 @@ impl SNARK {
       timer_prove.stop();
       (inst_evals, r1cs_eval_proof)
     };
-    */
 
     SNARK {
       block_comm_vars_list,
@@ -1052,6 +1183,9 @@ impl SNARK {
       perm_block_comm_w2_list,
       perm_block_comm_w3_list,
       perm_block_comm_w3_concat,
+      perm_exec_comm_w0,
+      perm_exec_comm_w2,
+      perm_exec_comm_w3,
 
       block_r1cs_sat_proof,
       block_inst_evals,
@@ -1063,9 +1197,9 @@ impl SNARK {
       proof_eval_perm_w0_at_zero,
       proof_eval_perm_w0_at_one,
 
-      perm_root_r1cs_sat_proof,
-      perm_root_inst_evals,
-      perm_root_r1cs_eval_proof,
+      perm_block_root_r1cs_sat_proof,
+      perm_block_root_inst_evals,
+      perm_block_root_r1cs_eval_proof,
 
       perm_block_poly_r1cs_sat_proof,
       perm_block_poly_inst_evals,
@@ -1073,6 +1207,10 @@ impl SNARK {
 
       perm_block_poly_list,
       proof_eval_perm_block_prod_list,
+
+      perm_exec_root_r1cs_sat_proof,
+      perm_exec_root_inst_evals,
+      perm_exec_root_r1cs_eval_proof,
 
       // consis_inst_evals,
       // consis_r1cs_eval_proof
@@ -1083,6 +1221,7 @@ impl SNARK {
   pub fn verify(
     &self,
     num_vars: usize,
+    total_num_proofs_bound: usize,
     block_num_instances: usize,
     block_max_num_proofs_bound: usize,
     block_max_num_proofs: usize,
@@ -1126,22 +1265,24 @@ impl SNARK {
     // COMMITMENTS
     // --
 
-    // Commit num_proofs
-    let timer_commit = Timer::new("metacommit");
-    let block_max_num_proofs_64: u64 = block_max_num_proofs.try_into().unwrap();
-    Scalar::from(block_max_num_proofs_64).append_to_transcript(b"block_max_num_proofs", transcript);
-    for n in block_num_proofs {
-      let n_64: u64 = (*n).try_into().unwrap();
-      Scalar::from(n_64).append_to_transcript(b"block_num_proofs", transcript);
-    }
-    timer_commit.stop();
+    {
+      // Commit num_proofs
+      let timer_commit = Timer::new("metacommit");
+      let block_max_num_proofs_64: u64 = block_max_num_proofs.try_into().unwrap();
+      Scalar::from(block_max_num_proofs_64).append_to_transcript(b"block_max_num_proofs", transcript);
+      for n in block_num_proofs {
+        let n_64: u64 = (*n).try_into().unwrap();
+        Scalar::from(n_64).append_to_transcript(b"block_num_proofs", transcript);
+      }
+      timer_commit.stop();
 
-    // add the commitment to the verifier's transcript
-    for p in 0..block_num_instances {
-      self.block_comm_vars_list[p].append_to_transcript(b"poly_commitment", transcript);
-      self.block_comm_inputs_list[p].append_to_transcript(b"poly_commitment", transcript);
+      // add the commitment to the verifier's transcript
+      for p in 0..block_num_instances {
+        self.block_comm_vars_list[p].append_to_transcript(b"poly_commitment", transcript);
+        self.block_comm_inputs_list[p].append_to_transcript(b"poly_commitment", transcript);
+      }
+      self.exec_comm_inputs.append_to_transcript(b"poly_commitment", transcript);
     }
-    self.exec_comm_inputs.append_to_transcript(b"poly_commitment", transcript);
 
     // --
     // SAMPLE CHALLENGES AND COMMIT WITNESSES FOR PERMUTATION
@@ -1149,14 +1290,18 @@ impl SNARK {
 
     let comb_tau = transcript.challenge_scalar(b"challenge_tau");
     let comb_r = transcript.challenge_scalar(b"challenge_r");
-
-    self.perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
-    for p in 0..block_num_instances {
-      self.perm_block_comm_w0_list[p].append_to_transcript(b"poly_commitment", transcript);
-      self.perm_block_comm_w2_list[p].append_to_transcript(b"poly_commitment", transcript);
-      self.perm_block_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
+    {
+      self.perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
+      for p in 0..block_num_instances {
+        self.perm_block_comm_w0_list[p].append_to_transcript(b"poly_commitment", transcript);
+        self.perm_block_comm_w2_list[p].append_to_transcript(b"poly_commitment", transcript);
+        self.perm_block_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
+      }
+      self.perm_block_comm_w3_concat.append_to_transcript(b"poly_commitment", transcript);
+      self.perm_exec_comm_w0.append_to_transcript(b"poly_commitment", transcript);
+      self.perm_exec_comm_w2.append_to_transcript(b"poly_commitment", transcript);
+      self.perm_exec_comm_w3.append_to_transcript(b"poly_commitment", transcript);
     }
-    self.perm_block_comm_w3_concat.append_to_transcript(b"poly_commitment", transcript);
 
     // --
     // BLOCK CORRECTNESS
@@ -1253,12 +1398,12 @@ impl SNARK {
     }
 
     // --
-    // PERM_ROOT
+    // PERM_BLOCK_ROOT
     // --
 
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
-      let perm_root_challenges = self.perm_root_r1cs_sat_proof.verify(
+      let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
         4,
         block_num_instances,
         block_max_num_proofs,
@@ -1266,7 +1411,7 @@ impl SNARK {
         num_vars,
         perm_root_num_cons,
         &vars_gens,
-        &self.perm_root_inst_evals,
+        &self.perm_block_root_inst_evals,
         vec![&self.perm_block_comm_w0_list, &self.block_comm_inputs_list, &self.perm_block_comm_w2_list, &self.perm_block_comm_w3_list],
         vec![true, false, false, false],
         transcript,
@@ -1274,17 +1419,17 @@ impl SNARK {
       timer_sat_proof.stop();
 
       let timer_eval_proof = Timer::new("verify_eval_proof");
-      // Verify Evaluation on PERM_ROOT
-      let (Ar, Br, Cr) = &self.perm_root_inst_evals;
+      // Verify Evaluation on PERM_BLOCK_ROOT
+      let (Ar, Br, Cr) = &self.perm_block_root_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);
-      let [_, _, rx, ry] = perm_root_challenges;
-      self.perm_root_r1cs_eval_proof.verify(
+      let [_, _, rx, ry] = perm_block_root_challenges;
+      self.perm_block_root_r1cs_eval_proof.verify(
         &perm_root_comm.comm,
         &rx,
         &ry,
-        &self.perm_root_inst_evals,
+        &self.perm_block_root_inst_evals,
         &perm_root_gens.gens_r1cs_eval,
         transcript,
       )?;
@@ -1349,22 +1494,46 @@ impl SNARK {
       perm_block_poly_bound_tau
     };
 
-    /*
-    // Verify Evaluation on CONSIS
-    let (Ar, Br, Cr) = &self.consis_inst_evals;
-    Ar.append_to_transcript(b"Ar_claim", transcript);
-    Br.append_to_transcript(b"Br_claim", transcript);
-    Cr.append_to_transcript(b"Cr_claim", transcript);
-    let [_, rx, ry] = consis_challenges;
-    self.consis_r1cs_eval_proof.verify(
-      &consis_comm.comm,
-      &rx,
-      &ry,
-      &self.consis_inst_evals,
-      &consis_gens.gens_r1cs_eval,
-      transcript,
-    )?;
-    */
+    // --
+    // PERM_EXEC_ROOT
+    // --
+
+    {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let perm_exec_root_challenges = self.perm_exec_root_r1cs_sat_proof.verify(
+        4,
+        1,
+        consis_num_proofs,
+        &vec![consis_num_proofs],
+        num_vars,
+        perm_root_num_cons,
+        &vars_gens,
+        &self.perm_exec_root_inst_evals,
+        vec![&vec![self.perm_exec_comm_w0.clone()], &vec![self.exec_comm_inputs.clone()], &vec![self.perm_exec_comm_w2.clone()], &vec![self.perm_exec_comm_w3.clone()]],
+        vec![true, false, false, false],
+        transcript,
+      )?;
+      timer_sat_proof.stop();
+
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on PERM_BLOCK_ROOT
+      let (Ar, Br, Cr) = &self.perm_exec_root_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [_, _, rx, ry] = perm_exec_root_challenges;
+      self.perm_exec_root_r1cs_eval_proof.verify(
+        &perm_root_comm.comm,
+        &rx,
+        &ry,
+        &self.perm_exec_root_inst_evals,
+        &perm_root_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+      // !!!TODO: verify that perm_block_comm_w0_list evaluated on <rp, rq, ry> is perm_comm_w0 evaluated on <ry>!!!
+    }
+
 
     timer_verify.stop();
     Ok(())

@@ -1016,6 +1016,9 @@ impl ZKSumcheckInstanceProof {
     let mut instance_len = instance_space;
 
     for j in 0..num_rounds {
+      /* For debugging only */
+      /* If the value is not 0, the instance / input is wrong */
+      /*
       let mut expected = Scalar::zero();
       for p in 0..instance_len {
         let step = proof_len / num_proofs[p];
@@ -1025,6 +1028,10 @@ impl ZKSumcheckInstanceProof {
           }
         }
       }
+      if j == 0 {
+        println!("EXPECTED: {:?}", expected);
+      }
+      */
 
       // Use mode to decide which variable we are working with
       // Mode = 1 ==> p
