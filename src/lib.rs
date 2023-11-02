@@ -347,6 +347,10 @@ pub struct SNARK {
   block_inst_evals: (Scalar, Scalar, Scalar),
   block_r1cs_eval_proof: R1CSEvalProof,
 
+  // consis_r1cs_sat_proof: R1CSProof,
+  // consis_inst_evals: (Scalar, Scalar, Scalar),
+  // consis_r1cs_eval_proof: R1CSEvalProof,
+
   perm_prelim_r1cs_sat_proof: R1CSProof,
   perm_prelim_inst_evals: (Scalar, Scalar, Scalar),
   perm_prelim_r1cs_eval_proof: R1CSEvalProof,
@@ -367,10 +371,6 @@ pub struct SNARK {
   perm_exec_root_r1cs_sat_proof: R1CSProof,
   perm_exec_root_inst_evals: (Scalar, Scalar, Scalar),
   perm_exec_root_r1cs_eval_proof: R1CSEvalProof,
-
-  // consis_r1cs_sat_proof: R1CSProof,
-  // consis_inst_evals: (Scalar, Scalar, Scalar),
-  // consis_r1cs_eval_proof: R1CSEvalProof,
 }
 
 impl SNARK {
@@ -426,6 +426,11 @@ impl SNARK {
     perm_block_poly_decomm: &ComputationDecommitment,
     perm_block_poly_gens: &SNARKGens,
 
+    perm_exec_poly_inst: &Instance,
+    perm_exec_poly_comm: &ComputationCommitment,
+    perm_exec_poly_decomm: &ComputationDecommitment,
+    perm_exec_poly_gens: &SNARKGens,
+
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
     exec_inputs_list: Vec<InputsAssignment>,
@@ -445,6 +450,7 @@ impl SNARK {
     perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_block_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
+    perm_exec_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
 
     // unwrap the assignments
     let block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
@@ -1246,6 +1252,11 @@ impl SNARK {
     perm_block_poly_num_cons: usize,
     perm_block_poly_comm: &ComputationCommitment,
     perm_block_poly_gens: &SNARKGens,
+
+    perm_exec_poly_num_cons: usize,
+    perm_exec_poly_comm: &ComputationCommitment,
+    perm_exec_poly_gens: &SNARKGens,
+
     vars_gens: &R1CSGens,
     proof_times_vars_gens: &R1CSGens,
 
@@ -1260,6 +1271,7 @@ impl SNARK {
     perm_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
     perm_block_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
     consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
+    perm_exec_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
     // --
     // COMMITMENTS

@@ -66,7 +66,9 @@ fn produce_r1cs() -> (
   Instance,
   usize,
   usize,
-  Instance,
+  usize,
+  usize,
+  [Instance; 2],
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
   Vec<InputsAssignment>
@@ -451,7 +453,7 @@ fn produce_r1cs() -> (
     perm_root_inst
   };
 
-  // PERM_BLOCK_POLY
+  // PERM_BLOCK_POLY and PERM_EXEC_POLY
   // The strategy is to compute the local polynomials (evaluated on tau) for each block instance
   // Each w3[p][2] (i.e. w3[p][0][2]) stores the product pi for instance P. The verifier obtains all P of them and multiply them together.
   // The correct formular is pi = v[k] * x[k] * (v[k+1] * x[k+1] + (1 - v[k+1])))
@@ -462,63 +464,71 @@ fn produce_r1cs() -> (
   // pi[k] <- v[k] * D2[k]
   // D1[k] <- v[k+1] * x[k+1]
   // D2[k] <- x[k] * (D1[k] + (1 - v[k + 1]))
-  let entry_size = block_max_num_proofs_bound;
-  let perm_block_poly_num_cons = 3 * entry_size;
-  let perm_block_poly_num_non_zero_entries = 5 * entry_size;
-  let perm_block_poly_inst = {
-    let (A, B, C) = {
-      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-
-      let V_valid = 0;
-      let V_x = 1;
-      let V_cnst = 2;
-      let V_pi = 3;
-      let V_d1 = 4;
-      let V_d2 = 5;
-
-      let mut constraint_count = 0;
-
-      // compute D1
-      (A, B, C) = gen_constr(A, B, C, V_cnst, // last D1 is 0
-        constraint_count, vec![((entry_size - 1) * num_vars + V_d1, 1)], vec![], vec![]);
-      constraint_count += 1;
-      for i in 0..entry_size - 1 {
-        (A, B, C) = gen_constr(A, B, C, V_cnst, // other D1
-          constraint_count, vec![((i + 1) * num_vars + V_valid, 1)], vec![((i + 1) * num_vars + V_x, 1)], vec![(i * num_vars + V_d1, 1)]);
+  // PERM_EXEC_POLY looks like PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
+  let perm_block_poly_num_cons = 3 * block_max_num_proofs_bound;
+  let perm_block_poly_num_non_zero_entries = 5 * block_max_num_proofs_bound;
+  let perm_exec_poly_num_cons = 3 * total_num_proofs_bound;
+  let perm_exec_poly_num_non_zero_entries = 5 * total_num_proofs_bound;
+  
+  let perm_poly_inst = [block_max_num_proofs_bound, total_num_proofs_bound].map(|entry_size| {
+    let perm_poly_num_cons = 3 * entry_size;
+    let perm_poly_num_non_zero_entries = 5 * entry_size;
+    let perm_poly_inst = {
+      let (A, B, C) = {
+        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+  
+        let V_valid = 0;
+        let V_x = 1;
+        let V_cnst = 2;
+        let V_pi = 3;
+        let V_d1 = 4;
+        let V_d2 = 5;
+  
+        let mut constraint_count = 0;
+  
+        // compute D1
+        (A, B, C) = gen_constr(A, B, C, V_cnst, // last D1 is 0
+          constraint_count, vec![((entry_size - 1) * num_vars + V_d1, 1)], vec![], vec![]);
         constraint_count += 1;
-      }
-      // compute D2
-      (A, B, C) = gen_constr(A, B, C, V_cnst, // last D2 is x[k] * 1
-        constraint_count, vec![((entry_size - 1) * num_vars + V_x, 1)], vec![], vec![((entry_size - 1) * num_vars + V_d2, 1)]);
-      constraint_count += 1;
-      for i in 0..entry_size - 1 {
-        (A, B, C) = gen_constr(A, B, C, V_cnst, // other D2
-          constraint_count, 
-          vec![(i * num_vars + V_x, 1)], 
-          vec![(i * num_vars + V_d1, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
-          vec![(i * num_vars + V_d2, 1)]);
+        for i in 0..entry_size - 1 {
+          (A, B, C) = gen_constr(A, B, C, V_cnst, // other D1
+            constraint_count, vec![((i + 1) * num_vars + V_valid, 1)], vec![((i + 1) * num_vars + V_x, 1)], vec![(i * num_vars + V_d1, 1)]);
+          constraint_count += 1;
+        }
+        // compute D2
+        (A, B, C) = gen_constr(A, B, C, V_cnst, // last D2 is x[k] * 1
+          constraint_count, vec![((entry_size - 1) * num_vars + V_x, 1)], vec![], vec![((entry_size - 1) * num_vars + V_d2, 1)]);
         constraint_count += 1;
-      }
-      // compute pi
-      for i in 0..entry_size {
-        (A, B, C) = gen_constr(A, B, C, V_cnst,
-          constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
-        constraint_count += 1;
-      }
-
-      (A, B, C)   
+        for i in 0..entry_size - 1 {
+          (A, B, C) = gen_constr(A, B, C, V_cnst, // other D2
+            constraint_count, 
+            vec![(i * num_vars + V_x, 1)], 
+            vec![(i * num_vars + V_d1, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
+            vec![(i * num_vars + V_d2, 1)]);
+          constraint_count += 1;
+        }
+        // compute pi
+        for i in 0..entry_size {
+          (A, B, C) = gen_constr(A, B, C, V_cnst,
+            constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
+          constraint_count += 1;
+        }
+  
+        (A, B, C)   
+      };
+  
+      let A_list = vec![A.clone()];
+      let B_list = vec![B.clone()];
+      let C_list = vec![C.clone()];
+  
+      let perm_poly_inst = Instance::new(1, perm_poly_num_cons, entry_size * num_vars, &A_list, &B_list, &C_list).unwrap();
+      
+      perm_poly_inst
     };
-
-    let A_list = vec![A.clone()];
-    let B_list = vec![B.clone()];
-    let C_list = vec![C.clone()];
-
-    let perm_block_poly_inst = Instance::new(1, perm_block_poly_num_cons, entry_size * num_vars, &A_list, &B_list, &C_list).unwrap();
-    
-    perm_block_poly_inst
-  };
+    perm_poly_inst
+  });
 
   // --
   // End Instances
@@ -644,7 +654,9 @@ fn produce_r1cs() -> (
     perm_root_inst,
     perm_block_poly_num_cons,
     perm_block_poly_num_non_zero_entries,
-    perm_block_poly_inst,
+    perm_exec_poly_num_cons,
+    perm_exec_poly_num_non_zero_entries,
+    perm_poly_inst,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -676,7 +688,9 @@ fn main() {
     perm_root_inst,
     perm_block_poly_num_cons,
     perm_block_poly_num_non_zero_entries,
-    perm_block_poly_inst,
+    perm_exec_poly_num_cons,
+    perm_exec_poly_num_non_zero_entries,
+    perm_poly_inst,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -694,6 +708,7 @@ fn main() {
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
+  let perm_exec_poly_gens = SNARKGens::new(perm_exec_poly_num_cons, total_num_proofs_bound * num_vars, 1, perm_exec_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let var_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
@@ -706,7 +721,8 @@ fn main() {
   let (consis_comm, consis_decomm) = SNARK::encode(&consis_inst, &consis_gens);
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
-  let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_block_poly_inst, &perm_block_poly_gens);
+  let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_poly_inst[0], &perm_block_poly_gens);
+  let (perm_exec_poly_comm, perm_exec_poly_decomm) = SNARK::encode(&perm_poly_inst[1], &perm_exec_poly_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
@@ -734,10 +750,14 @@ fn main() {
     &perm_root_comm,
     &perm_root_decomm,
     &perm_root_gens,
-    &perm_block_poly_inst,
+    &perm_poly_inst[0],
     &perm_block_poly_comm,
     &perm_block_poly_decomm,
     &perm_block_poly_gens,
+    &perm_poly_inst[1],
+    &perm_exec_poly_comm,
+    &perm_exec_poly_decomm,
+    &perm_exec_poly_gens,
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -772,6 +792,9 @@ fn main() {
       perm_block_poly_num_cons,
       &perm_block_poly_comm,
       &perm_block_poly_gens,
+      perm_exec_poly_num_cons,
+      &perm_exec_poly_comm,
+      &perm_exec_poly_gens,
       &var_gens,
       &proof_times_var_gens,
       &mut verifier_transcript
