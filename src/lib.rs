@@ -624,7 +624,7 @@ impl SNARK {
           perm_block_w3[p][q][1] = (comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b)) * block_inputs_mat[p][q][0];
           perm_block_w3[p][q][2] = Scalar::one() * block_inputs_mat[p][q][0];
           if q != block_num_proofs[p] - 1 {
-            perm_block_w3[p][q][4] = perm_block_w3[p][q + 1][0] * perm_block_w3[p][q + 1][1];
+            perm_block_w3[p][q][4] = perm_block_w3[p][q + 1][0] * perm_block_w3[p][q + 1][3];
             perm_block_w3[p][q][5] = perm_block_w3[p][q][1] * (perm_block_w3[p][q][4] + Scalar::one() - perm_block_w3[p][q + 1][0]);
           } else {
             perm_block_w3[p][q][5] = perm_block_w3[p][q][1];
@@ -639,7 +639,7 @@ impl SNARK {
         perm_exec_w3[q][1] = (comb_tau - perm_exec_w2[q].iter().fold(Scalar::zero(), |a, b| a + b)) * exec_inputs_list[q][0];
         perm_exec_w3[q][2] = Scalar::one() * exec_inputs_list[q][0];
         if q != consis_num_proofs - 1 {
-          perm_exec_w3[q][4] = perm_exec_w3[q + 1][0] * perm_exec_w3[q + 1][1];
+          perm_exec_w3[q][4] = perm_exec_w3[q + 1][0] * perm_exec_w3[q + 1][3];
           perm_exec_w3[q][5] = perm_exec_w3[q][1] * (perm_exec_w3[q][4] + Scalar::one() - perm_exec_w3[q + 1][0]);
         } else {
           perm_exec_w3[q][5] = perm_exec_w3[q][1];
@@ -1280,7 +1280,7 @@ impl SNARK {
       );
       (perm_exec_poly, proof_eval_perm_exec_prod)
     };
-
+    
     SNARK {
       block_comm_vars_list,
       block_comm_inputs_list,
