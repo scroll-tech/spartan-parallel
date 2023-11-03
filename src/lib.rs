@@ -911,6 +911,7 @@ impl SNARK {
       let (proof, block_challenges) = {
         R1CSProof::prove(
           2,
+          0,
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
@@ -919,7 +920,6 @@ impl SNARK {
           &vars_gens,
           vec![&block_vars_mat, &block_inputs_mat],
           vec![&block_poly_vars_list, &block_poly_inputs_list],
-          vec![false, false],
           transcript,
           &mut random_tape,
         )
@@ -978,6 +978,7 @@ impl SNARK {
       let (proof, perm_prelim_challenges) = {
         R1CSProof::prove(
           1,
+          0,
           1,
           1,
           &vec![1],
@@ -986,7 +987,6 @@ impl SNARK {
           &vars_gens,
           vec![&vec![vec![perm_w0.clone()]]],
           vec![&vec![perm_poly_w0.clone()]],
-          vec![false],
           transcript,
           &mut random_tape,
         )
@@ -1068,6 +1068,7 @@ impl SNARK {
       let (proof, perm_block_root_challenges) = {
         R1CSProof::prove(
           4,
+          1,
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
@@ -1076,7 +1077,6 @@ impl SNARK {
           &vars_gens,
           vec![&vec![vec![perm_w0.clone()]], &block_inputs_mat, &perm_block_w2, &perm_block_w3],
           vec![&vec![perm_poly_w0.clone()], &block_poly_inputs_list, &perm_block_poly_w2_list, &perm_block_poly_w3_list],
-          vec![true, false, false, false],
           transcript,
           &mut random_tape,
         )
@@ -1130,6 +1130,7 @@ impl SNARK {
       let (proof, perm_block_poly_challenges) = {
         R1CSProof::prove(
           1,
+          0,
           1,
           block_num_instances,
           &vec![block_num_instances],
@@ -1138,7 +1139,6 @@ impl SNARK {
           &proofs_times_vars_gens,
           vec![&vec![perm_block_w3_concat.clone()]],
           vec![&vec![perm_block_poly_w3_concat.clone()]],
-          vec![false],
           transcript,
           &mut random_tape,
         )
@@ -1219,6 +1219,7 @@ impl SNARK {
         R1CSProof::prove(
           4,
           1,
+          1,
           consis_num_proofs,
           &vec![consis_num_proofs],
           num_vars,
@@ -1226,7 +1227,6 @@ impl SNARK {
           &vars_gens,
           vec![&vec![vec![perm_w0]], &vec![exec_inputs_list], &vec![perm_exec_w2], &vec![perm_exec_w3]],
           vec![&vec![perm_poly_w0], &vec![exec_poly_inputs], &vec![perm_exec_poly_w2], &vec![perm_exec_poly_w3]],
-          vec![true, false, false, false],
           transcript,
           &mut random_tape,
         )
@@ -1280,6 +1280,7 @@ impl SNARK {
       let (proof, perm_exec_poly_challenges) = {
         R1CSProof::prove(
           1,
+          0,
           1,
           1,
           &vec![1],
@@ -1288,7 +1289,6 @@ impl SNARK {
           &total_proofs_times_vars_gens,
           vec![&vec![vec![perm_exec_w3_concat.clone()]]],
           vec![&vec![perm_exec_poly_w3_concat.clone()]],
-          vec![false],
           transcript,
           &mut random_tape,
         )
@@ -1508,6 +1508,7 @@ impl SNARK {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let block_challenges = self.block_r1cs_sat_proof.verify(
         2,
+        0,
         block_num_instances,
         block_max_num_proofs,
         block_num_proofs,
@@ -1516,7 +1517,6 @@ impl SNARK {
         &vars_gens,
         &self.block_inst_evals,
         vec![&self.block_comm_vars_list, &self.block_comm_inputs_list],
-        vec![false, false],
         transcript,
       )?;
       timer_sat_proof.stop();
@@ -1547,6 +1547,7 @@ impl SNARK {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_prelim_challenges = self.perm_prelim_r1cs_sat_proof.verify(
         1,
+        0,
         1,
         1,
         &vec![1],
@@ -1555,7 +1556,6 @@ impl SNARK {
         &vars_gens,
         &self.perm_prelim_inst_evals,
         vec![&vec![self.perm_comm_w0.clone()]],
-        vec![false],
         transcript,
       )?;
       // Proof that first two entries of perm_w0 are tau and r
@@ -1602,6 +1602,7 @@ impl SNARK {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
         4,
+        1,
         block_num_instances,
         block_max_num_proofs,
         block_num_proofs,
@@ -1610,7 +1611,6 @@ impl SNARK {
         &vars_gens,
         &self.perm_block_root_inst_evals,
         vec![&self.perm_block_comm_w0_list, &self.block_comm_inputs_list, &self.perm_block_comm_w2_list, &self.perm_block_comm_w3_list],
-        vec![true, false, false, false],
         transcript,
       )?;
       timer_sat_proof.stop();
@@ -1642,6 +1642,7 @@ impl SNARK {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_block_poly_challenges = self.perm_block_poly_r1cs_sat_proof.verify(
         1,
+        0,
         1,
         block_num_instances,
        &vec![block_num_instances],
@@ -1650,7 +1651,6 @@ impl SNARK {
         &proofs_times_vars_gens,
         &self.perm_block_poly_inst_evals,
         vec![&vec![self.perm_block_comm_w3_concat.clone()]],
-        vec![false],
         transcript,
       )?;
       timer_sat_proof.stop();
@@ -1700,6 +1700,7 @@ impl SNARK {
       let perm_exec_root_challenges = self.perm_exec_root_r1cs_sat_proof.verify(
         4,
         1,
+        1,
         consis_num_proofs,
         &vec![consis_num_proofs],
         num_vars,
@@ -1707,7 +1708,6 @@ impl SNARK {
         &vars_gens,
         &self.perm_exec_root_inst_evals,
         vec![&vec![self.perm_exec_comm_w0.clone()], &vec![self.exec_comm_inputs.clone()], &vec![self.perm_exec_comm_w2.clone()], &vec![self.perm_exec_comm_w3.clone()]],
-        vec![true, false, false, false],
         transcript,
       )?;
       timer_sat_proof.stop();
@@ -1739,6 +1739,7 @@ impl SNARK {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_exec_poly_challenges = self.perm_exec_poly_r1cs_sat_proof.verify(
         1,
+        0,
         1,
         1,
        &vec![1],
@@ -1747,7 +1748,6 @@ impl SNARK {
         &total_proofs_times_vars_gens,
         &self.perm_exec_poly_inst_evals,
         vec![&vec![self.perm_exec_comm_w3_concat.clone()]],
-        vec![false],
         transcript,
       )?;
       timer_sat_proof.stop();

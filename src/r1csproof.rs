@@ -161,6 +161,11 @@ impl R1CSProof {
     // How many sections does each Z vector have?
     // num_witness secs can be 1, 2, or 4
     num_witness_secs: usize,
+    // How many of these witnesses secs are short?
+    // A short witness sect has just one copy, versus a long sect which has num_instances * num_proofs different versions
+    // We assume the first num_shorts witness sects are short and the rest are long
+    // There are at least one long witness sects
+    num_shorts: usize,
     
     num_instances: usize,
     max_num_proofs: usize,
@@ -173,8 +178,6 @@ impl R1CSProof {
     w_mat: Vec<&Vec<Vec<Vec<Scalar>>>>,
     // The polynomial interpolated from each witness section
     poly_w_list: Vec<&Vec<DensePolynomial>>,
-    // True if W is in short form (only one copy instead of num_instances * num_proofs copies)
-    w_short: Vec<bool>,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
   ) -> (R1CSProof, [Vec<Scalar>; 4]) { 
@@ -185,7 +188,7 @@ impl R1CSProof {
     assert!(num_witness_secs == 1 || num_witness_secs == 2 || num_witness_secs == 4);
     assert_eq!(num_witness_secs, w_mat.len());
     assert_eq!(num_witness_secs, poly_w_list.len());
-    assert_eq!(num_witness_secs, w_short.len());
+    assert!(num_witness_secs > num_shorts);
 
     // Assert everything is a power of 2
     assert_eq!(num_instances, num_instances.next_power_of_two());
@@ -200,9 +203,9 @@ impl R1CSProof {
     assert!(inst.get_num_instances() == 1 || inst.get_num_instances() == num_instances);
     // Number of each witness is either one or matches num_instances and num_proofs
     for i in 0..num_witness_secs {
-      assert!(w_short[i] && w_mat[i].len() == 1 || !w_short[i] && w_mat[i].len() == num_instances);
+      assert!(i < num_shorts && w_mat[i].len() == 1 || !(i < num_shorts) && w_mat[i].len() == num_instances);
       for p in 0..w_mat[i].len() {
-        assert!(w_short[i] && w_mat[i][p].len() == 1 || !w_short[i] && w_mat[i][p].len() == num_proofs[p]);
+        assert!(i < num_shorts && w_mat[i][p].len() == 1 || !(i < num_shorts) && w_mat[i][p].len() == num_proofs[p]);
         for q in 0..w_mat[i][p].len() {
           assert_eq!(w_mat[i][p][q].len(), num_inputs);
         }
@@ -222,8 +225,8 @@ impl R1CSProof {
       for q in 0..num_proofs[p] {
         z_mat[p].push(Vec::new());
         for w in 0..num_witness_secs {
-          let p_w = if w_short[w] { 0 } else { p };
-          let q_w = if w_short[w] { 0 } else { q };
+          let p_w = if w < num_shorts { 0 } else { p };
+          let q_w = if w < num_shorts { 0 } else { q };
           z_mat[p][q].extend(w_mat[w][p_w][q_w].clone());
         }
       }
@@ -395,7 +398,7 @@ impl R1CSProof {
     let timer_polyeval = Timer::new("polyeval");
 
     for p in 0..num_instances {
-      let p_w: Vec<usize> = (0..num_witness_secs).map(|i| if w_short[i] { 0 } else { p }).collect();
+      let p_w: Vec<usize> = (0..num_witness_secs).map(|i| if i < num_shorts { 0 } else { p }).collect();
       // if poly_vars exists, compute combined_poly as (Scalar::one() - ry[0]) * poly_vars + ry[0] * poly_inputs
       // otherwise combined_poly is just poly_inputs
       let (combined_poly, r) = {
@@ -407,7 +410,7 @@ impl R1CSProof {
             DensePolynomial::new(
               (0..num_proofs[p] * num_inputs).map(
                 |i| {
-                  let i_w: Vec<usize> = (0..num_witness_secs).map(|j| if w_short[j] { i % num_inputs } else { i }).collect();
+                  let i_w: Vec<usize> = (0..num_witness_secs).map(|j| if j < num_shorts { i % num_inputs } else { i }).collect();
                   (Scalar::one() - ry[0]) * poly_w_list[0][p_w[0]][i_w[0]]
                         + ry[0] * poly_w_list[1][p_w[1]][i_w[1]]
                 }
@@ -418,7 +421,7 @@ impl R1CSProof {
             DensePolynomial::new(
               (0..num_proofs[p] * num_inputs).map(
                 |i| {
-                  let i_w: Vec<usize> = (0..num_witness_secs).map(|j| if w_short[j] { i % num_inputs } else { i }).collect();
+                  let i_w: Vec<usize> = (0..num_witness_secs).map(|j| if j < num_shorts { i % num_inputs } else { i }).collect();
                   (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * poly_w_list[0][p_w[0]][i_w[0]]
                         + (Scalar::one() - ry[0]) * ry[1] * poly_w_list[1][p_w[1]][i_w[1]]
                         + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p_w[2]][i_w[2]]
@@ -509,6 +512,7 @@ impl R1CSProof {
     &self,
     // num_witness secs can be 1, 2, or 4
     num_witness_secs: usize,
+    num_shorts: usize,
 
     num_instances: usize,
     max_num_proofs: usize,
@@ -519,8 +523,6 @@ impl R1CSProof {
     evals: &(Scalar, Scalar, Scalar),
     // Commitment for witnesses
     comm_w_list: Vec<&Vec<PolyCommitment>>,
-    // True if W is in short form (only one copy instead of num_instances * num_proofs copies)
-    w_short: Vec<bool>,
     transcript: &mut Transcript,
   ) -> Result<[Vec<Scalar>; 4], ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
