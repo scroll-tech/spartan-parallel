@@ -6,6 +6,7 @@
 // TODO: Proof might be incorrect if a block is never executed
 // TODO: Differentiate between max_num_proofs and max_num_proofs_bound
 // Q: Would it be insecure if an entry has valid = 0 but everything else not 0?
+// Q: What should we do with the constant bit if the entry is invalid?
 // Q: Can we trust that the Prover orders all valid = 1 before valid = 0?
 
 extern crate byteorder;
@@ -343,6 +344,8 @@ pub struct SNARK {
   perm_exec_comm_w2: PolyCommitment,
   perm_exec_comm_w3: PolyCommitment,
   perm_exec_comm_w3_concat: PolyCommitment,
+  consis_comm_w2: PolyCommitment,
+  consis_comm_w3: PolyCommitment,
 
   block_r1cs_sat_proof: R1CSProof,
   block_inst_evals: (Scalar, Scalar, Scalar),
@@ -401,7 +404,9 @@ impl SNARK {
   /// A method to produce a SNARK proof of the satisfiability of an R1CS instance
   pub fn prove(
     num_vars: usize,
+    input_output_cutoff: usize,
     total_num_proofs_bound: usize,
+
     block_num_instances: usize,
     block_max_num_proofs_bound: usize,
     block_max_num_proofs: usize,
@@ -412,10 +417,10 @@ impl SNARK {
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
-    consis_inst: &Instance,
-    consis_comm: &ComputationCommitment,
-    consis_decomm: &ComputationDecommitment,
-    consis_gens: &SNARKGens,
+    consis_comb_inst: &Instance,
+    consis_comb_comm: &ComputationCommitment,
+    consis_comb_decomm: &ComputationDecommitment,
+    consis_comb_gens: &SNARKGens,
 
     perm_prelim_inst: &Instance,
     perm_prelim_comm: &ComputationCommitment,
@@ -457,7 +462,7 @@ impl SNARK {
     perm_prelim_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_block_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
-    consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
+    consis_comb_comm.comm.append_to_transcript(b"consis_comm", transcript);
     perm_exec_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
 
     // unwrap the assignments
@@ -566,6 +571,7 @@ impl SNARK {
       perm_w0,
       perm_poly_w0,
       perm_comm_w0,
+
       perm_block_comm_w0_list,
       perm_block_w2,
       perm_block_poly_w2_list,
@@ -587,6 +593,13 @@ impl SNARK {
       perm_exec_w3_concat,
       perm_exec_poly_w3_concat,
       perm_exec_comm_w3_concat,
+
+      consis_w2,
+      consis_poly_w2,
+      consis_comm_w2,
+      consis_w3,
+      consis_poly_w3,
+      consis_comm_w3,
     ) = {
       let comb_tau = transcript.challenge_scalar(b"challenge_tau");
       let comb_r = transcript.challenge_scalar(b"challenge_r");
@@ -601,6 +614,7 @@ impl SNARK {
         r_tmp *= comb_r;
       }
       
+      // FOR PERM
       // w2 is block_inputs * <r>
       let perm_block_w2: Vec<Vec<Vec<Scalar>>> = block_inputs_mat.iter().map(
         |i| i.iter().map(
@@ -801,6 +815,56 @@ impl SNARK {
       let (perm_exec_comm_w3_concat, _blinds_vars) = perm_exec_poly_w3_concat.commit(&total_proofs_times_vars_gens.gens_pc, None);
       perm_exec_comm_w3_concat.append_to_transcript(b"poly_commitment", transcript);
 
+      // FOR CONSIS
+      // w2 is <0, i0 * r, i1 * r^2, ..., 0, o0 * r, o1 * r^2, ...>
+      // w3 is <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0, 0, ...>
+      let mut consis_w2 = Vec::new();
+      let mut consis_w3 = Vec::new();
+      for q in 0..consis_num_proofs {
+        consis_w2.push(vec![Scalar::zero(); num_vars]);
+        consis_w3.push(vec![Scalar::zero(); num_vars]);
+        
+        consis_w3[q][1] = exec_inputs_list[q][input_output_cutoff];
+        consis_w3[q][2] = exec_inputs_list[q][input_output_cutoff];
+        for i in 1..input_output_cutoff {
+          consis_w2[q][i] = perm_w0[i] * exec_inputs_list[q][i];
+          consis_w2[q][input_output_cutoff + i] = perm_w0[i] * exec_inputs_list[q][input_output_cutoff + i];
+          consis_w3[q][1] += consis_w2[q][i];
+          consis_w3[q][2] += consis_w2[q][input_output_cutoff + i];
+        }
+        consis_w3[q][0] = exec_inputs_list[q][0];
+        consis_w3[q][1] *= exec_inputs_list[q][0];
+        consis_w3[q][2] *= exec_inputs_list[q][0];
+      }
+
+      let (consis_poly_w2, consis_comm_w2) = {
+        // Flatten the witnesses into a Q_i * X list
+        let w2_list_p = consis_w2.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+        // create a multilinear polynomial using the supplied assignment for variables
+        let consis_poly_w2 = DensePolynomial::new(w2_list_p);
+
+        // produce a commitment to the satisfying assignment
+        let (consis_comm_w2, _blinds_vars) = consis_poly_w2.commit(&vars_gens.gens_pc, None);
+
+        // add the commitment to the prover's transcript
+        consis_comm_w2.append_to_transcript(b"poly_commitment", transcript);
+        (consis_poly_w2, consis_comm_w2)
+      };
+      
+      let (consis_poly_w3, consis_comm_w3) = {
+        // Flatten the witnesses into a Q_i * X list
+        let w3_list_p = consis_w3.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+        // create a multilinear polynomial using the supplied assignment for variables
+        let consis_poly_w3 = DensePolynomial::new(w3_list_p.clone());
+
+        // produce a commitment to the satisfying assignment
+        let (consis_comm_w3, _blinds_vars) = consis_poly_w3.commit(&vars_gens.gens_pc, None);
+
+        // add the commitment to the prover's transcript
+        consis_comm_w3.append_to_transcript(b"poly_commitment", transcript);
+        (consis_poly_w3, consis_comm_w3)
+      };
+
       (
         comb_tau,
         comb_r,
@@ -829,6 +893,13 @@ impl SNARK {
         perm_exec_w3_concat,
         perm_exec_poly_w3_concat,
         perm_exec_comm_w3_concat,
+
+        consis_w2,
+        consis_poly_w2,
+        consis_comm_w2,
+        consis_w3,
+        consis_poly_w3,
+        consis_comm_w3,
       )
     };
 
@@ -1295,6 +1366,9 @@ impl SNARK {
       perm_exec_comm_w3,
       perm_exec_comm_w3_concat,
 
+      consis_comm_w2,
+      consis_comm_w3,
+
       block_r1cs_sat_proof,
       block_inst_evals,
       block_r1cs_eval_proof,
@@ -1344,9 +1418,9 @@ impl SNARK {
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
-    consis_num_cons: usize,
-    consis_comm: &ComputationCommitment,
-    consis_gens: &SNARKGens,
+    consis_comb_num_cons: usize,
+    consis_comb_comm: &ComputationCommitment,
+    consis_comb_gens: &SNARKGens,
 
     perm_prelim_num_cons: usize,
     perm_prelim_comm: &ComputationCommitment,
@@ -1378,7 +1452,7 @@ impl SNARK {
     perm_prelim_comm.comm.append_to_transcript(b"consis_comm", transcript);
     perm_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
     perm_block_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    consis_comm.comm.append_to_transcript(b"consis_comm", transcript);
+    consis_comb_comm.comm.append_to_transcript(b"consis_comm", transcript);
     perm_exec_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
     // --
@@ -1422,6 +1496,8 @@ impl SNARK {
       self.perm_exec_comm_w2.append_to_transcript(b"poly_commitment", transcript);
       self.perm_exec_comm_w3.append_to_transcript(b"poly_commitment", transcript);
       self.perm_exec_comm_w3_concat.append_to_transcript(b"poly_commitment", transcript);
+      self.consis_comm_w2.append_to_transcript(b"poly_commitment", transcript);
+      self.consis_comm_w3.append_to_transcript(b"poly_commitment", transcript);
     }
 
     // --

@@ -52,6 +52,7 @@ fn produce_r1cs() -> (
   usize,
   usize,
   usize,
+  usize,
   Vec<usize>,
   Instance,
   usize,
@@ -89,12 +90,6 @@ fn produce_r1cs() -> (
   //
   // Separate vars into three lists
   // BLOCK, CONSIS, PERM
-
-  // num_vars should be consistent accross the instances
-  // everything else is instance-specific
-  // num_vars = num_inputs
-  // Divide inputs into (1, input, 1, output)
-  let num_vars = 16;
 
   let zero = Scalar::zero().to_bytes();
   let one = Scalar::one().to_bytes();
@@ -143,10 +138,33 @@ fn produce_r1cs() -> (
     }
     (A, B, C)
   }
+
+  // --
+  // COMPILE TIME KNOWLEDGE
+  // --
   
+  // num_vars should be consistent accross the instances
+  // everything else is instance-specific
+  // num_vars = num_inputs
+  // Divide inputs into (1, input, 1, output)
+  let num_vars = 16;
+  let input_output_cutoff = 4;
+
+  // Number of proofs of each R1CS instance
+  // OBTAINED DURING COMPILE TIME
+  let total_num_proofs_bound = 16;
+  let block_max_num_proofs_bound = 8;
+
   // --
   // BLOCK Instances
   // --
+
+  // parameters of the BLOCK instance
+  // maximum value among the R1CS instances
+  let block_num_cons = 16;
+  let block_num_non_zero_entries = 19;
+  // Number of R1CS instances
+  let block_num_instances = 2;
 
   //                    0    1    2    3    4    5    6    7    8
   // variable orders:  b0   i0   s0   b1   i1   s1   Z0   Z1   B0 
@@ -168,20 +186,6 @@ fn produce_r1cs() -> (
   let V_bo = num_vars + 5;
   let V_io = num_vars + 6;
   let V_so = num_vars + 7;
-
-  // parameters of the BLOCK instance
-  // maximum value among the R1CS instances
-  let block_num_cons = 16;
-  let block_num_non_zero_entries = 19;
-  // Number of R1CS instances
-  let block_num_instances = 2;
-  // Number of proofs of each R1CS instance
-  // OBTAINED DURING COMPILE TIME
-  let total_num_proofs_bound = 16;
-  let block_max_num_proofs_bound = 8;
-  // OBTAINED DURING RUNTIME
-  let block_max_num_proofs = 4;
-  let block_num_proofs = vec![4, 1];
 
   let block_inst = {
     let mut A_list = Vec::new();
@@ -307,22 +311,27 @@ fn produce_r1cs() -> (
   };
 
   // --
-  // CONSIS Instances
+  // CONSIS INSTANCES
   // --
-  let input_output_cutoff = 4;
+  // CONSIS is consisted of two instances
+  // CONSIS_COMB performs random linear combination on inputs and outputs to a single value
+  // It is parallelized for consis_num_proofs copies
+  // CONSIS_CHECK checks that these values indeed matches
+  // There is only one copy for CONSIS_CHECK
 
-  // parameters of the CONSIS instance
-  // maximum value among the R1CS instances
-  // Each CONSIS proof takes in two input assignments and check their consistency
-  let consis_num_cons = 16;
-  let consis_num_non_zero_entries = 2 * input_output_cutoff;
-  // Number of proofs of each R1CS instance
-  let consis_num_proofs: usize = 8;
+  // CONSIS_COMB
+  // CONSIS_COMB takes in 4 witness lists as inputs:
+  // - perm_w0: <tau, r, r^2, r^3, ...>, see PERM_PRELIM below
+  // - exec_inputs: <v, i0, i1, i2, ..., cnst, o0, o1, o2, ...>
+  // - consis_w2: <0, i0 * r, i1 * r^2, ..., 0, o0 * r, o1 * r^2, ...>
+  // - consis_w3: <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0, 0, ...>
+  let consis_comb_num_cons = 2 * input_output_cutoff + 1;
+  let consis_comb_num_non_zero_entries = 4 * input_output_cutoff - 1;
 
-  let V_cnst = input_output_cutoff;
   let V_valid = num_vars;
+  let V_cnst = num_vars + input_output_cutoff;
 
-  let consis_inst = {
+  let consis_comb_inst = {
     let mut A_list = Vec::new();
     let mut B_list = Vec::new();
     let mut C_list = Vec::new();
@@ -333,15 +342,38 @@ fn produce_r1cs() -> (
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
+      let mut constraint_count = 0;
+
       // R1CS:
-      // Consistency of the constant 1, only if the second part of the input is valid
-      (A, B, C) = gen_constr(A, B, C, input_output_cutoff,
-        0, vec![(V_cnst, 1), (num_vars + V_cnst, -1)], vec![(V_valid, 1)], vec![]);
-      // Consistency of inputs, only if the second part of the input is valid
+      // For w2
       for i in 1..input_output_cutoff {
-        (A, B, C) = gen_constr(A, B, C, input_output_cutoff,
-          i, vec![(input_output_cutoff + i, 1), (num_vars + i, -1)], vec![(V_valid, 1)], vec![]);
+        // Dot product for inputs
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          constraint_count, vec![(i, 1)], vec![(num_vars + i, 1)], vec![(2 * num_vars + i, 1)]);
+        constraint_count += 1;
+        // Dot product for outputs
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          constraint_count, vec![(i, 1)], vec![(num_vars + input_output_cutoff + i, 1)], vec![(2 * num_vars + input_output_cutoff + i, 1)]);
+        constraint_count += 1;
       }
+      // For w3
+      (A, B, C) = gen_constr(A, B, C, V_cnst, // w3[0]
+        constraint_count, vec![(V_valid, 1)], vec![], vec![(3 * num_vars, 1)]);
+      constraint_count += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst, // w3[1]
+        constraint_count, 
+        vec![(V_valid, 1)], 
+        [vec![(V_cnst, 1)], (1..input_output_cutoff).map(|i| (2 * num_vars + i, 1)).collect()].concat(),
+        vec![(3 * num_vars + 1, 1)]
+      );
+      constraint_count += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst, // w3[2]
+        constraint_count, 
+        vec![(V_valid, 1)], 
+        [vec![(V_cnst, 1)], (1..input_output_cutoff).map(|i| (2 * num_vars + input_output_cutoff + i, 1)).collect()].concat(),
+        vec![(3 * num_vars + 2, 1)]
+      );
+      constraint_count += 1;
 
       (A, B, C)
     };
@@ -349,15 +381,19 @@ fn produce_r1cs() -> (
     B_list.push(B);
     C_list.push(C);
 
-    let consis_inst = Instance::new(1, consis_num_cons, 2 * num_vars, &A_list, &B_list, &C_list).unwrap();
+    let consis_comb_inst = Instance::new(1, consis_comb_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
     
-    consis_inst
+    consis_comb_inst
   };
+
+  // CONSIS_CHECK
+  // CONSIS_CHECK takes in consis_w3 = <v, i, o, 0, 0, ...>
+  // and verifies (o[k] - i[k + 1]) * v[k + 1] = 0 for all k
 
   // --
   // PERM Instances
   // --
-  // PERM is consisted of five instances
+  // PERM is consisted of four instances
   // PERM_PRELIM checks the correctness of (r, r^2, ...)
   // PERM_ROOT and PERM_BLOCK_POLY compute the polynomial defined by block_inputs
   // PERM_ROOT and PERM_EXEC_POLY compute the polynomial defined by exec_inputs
@@ -531,6 +567,16 @@ fn produce_r1cs() -> (
 
   // --
   // End Instances
+  // --
+
+  // --
+  // RUNTIME KNOWLEDGE
+  // --
+  let block_max_num_proofs = 4;
+  let block_num_proofs = vec![4, 1];
+  let consis_num_proofs: usize = 8;
+
+  // --
   // Begin Assignments
   // --
 
@@ -633,29 +679,36 @@ fn produce_r1cs() -> (
 
   (
     num_vars,
+    input_output_cutoff,
     total_num_proofs_bound,
+    block_max_num_proofs_bound,
+    
     block_num_cons,
     block_num_non_zero_entries,
     block_num_instances,
-    block_max_num_proofs_bound,
     block_max_num_proofs,
     block_num_proofs,
     block_inst,
-    consis_num_cons,
-    consis_num_non_zero_entries,
+
+    consis_comb_num_cons,
+    consis_comb_num_non_zero_entries,
     consis_num_proofs,
-    consis_inst,
+    consis_comb_inst,
+    
     perm_prelim_num_cons,
     perm_prelim_num_non_zero_entries,
     perm_prelim_inst,
+    
     perm_root_num_cons,
     perm_root_num_non_zero_entries,
     perm_root_inst,
+    
     perm_block_poly_num_cons,
     perm_block_poly_num_non_zero_entries,
     perm_exec_poly_num_cons,
     perm_exec_poly_num_non_zero_entries,
     perm_poly_inst,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -667,29 +720,36 @@ fn main() {
   let (
     // num_inputs == num_vars
     num_vars,
+    input_output_cutoff,
     total_num_proofs_bound,
+    block_max_num_proofs_bound,
+
     block_num_cons,
     block_num_non_zero_entries,
     block_num_instances,
-    block_max_num_proofs_bound,
     block_max_num_proofs,
     block_num_proofs,
     block_inst,
-    consis_num_cons,
-    consis_num_non_zero_entries,
+
+    consis_comb_num_cons,
+    consis_comb_num_non_zero_entries,
     consis_num_proofs,
-    consis_inst,
+    consis_comb_inst,
+    
     perm_prelim_num_cons,
     perm_prelim_num_non_zero_entries,
     perm_prelim_inst,
+    
     perm_root_num_cons,
     perm_root_num_non_zero_entries,
     perm_root_inst,
+    
     perm_block_poly_num_cons,
     perm_block_poly_num_non_zero_entries,
     perm_exec_poly_num_cons,
     perm_exec_poly_num_non_zero_entries,
     perm_poly_inst,
+    
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -703,7 +763,7 @@ fn main() {
 
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
-  let consis_gens = SNARKGens::new(consis_num_cons, num_vars, 1, consis_num_non_zero_entries);
+  let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_vars, 1, consis_comb_num_non_zero_entries);
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
@@ -719,7 +779,7 @@ fn main() {
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
   let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
-  let (consis_comm, consis_decomm) = SNARK::encode(&consis_inst, &consis_gens);
+  let (consis_comb_comm, consis_comb_decomm) = SNARK::encode(&consis_comb_inst, &consis_comb_gens);
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_poly_inst[0], &perm_block_poly_gens);
@@ -729,6 +789,7 @@ fn main() {
   let mut prover_transcript = Transcript::new(b"snark_example");
   let proof = SNARK::prove(
     num_vars,
+    input_output_cutoff,
     total_num_proofs_bound,
     block_num_instances,
     block_max_num_proofs_bound,
@@ -739,10 +800,10 @@ fn main() {
     &block_decomm,
     &block_gens,
     consis_num_proofs,
-    &consis_inst,
-    &consis_comm,
-    &consis_decomm,
-    &consis_gens,
+    &consis_comb_inst,
+    &consis_comb_comm,
+    &consis_comb_decomm,
+    &consis_comb_gens,
     &perm_prelim_inst,
     &perm_prelim_comm,
     &perm_prelim_decomm,
@@ -782,9 +843,9 @@ fn main() {
       &block_comm,
       &block_gens,
       consis_num_proofs, 
-      consis_num_cons, 
-      &consis_comm,
-      &consis_gens,
+      consis_comb_num_cons, 
+      &consis_comb_comm,
+      &consis_comb_gens,
       perm_prelim_num_cons,
       &perm_prelim_comm,
       &perm_prelim_gens,
