@@ -17,7 +17,7 @@ use super::sumcheck::ZKSumcheckInstanceProof;
 use super::timer::Timer;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use core::iter;
-use curve25519_dalek::ristretto::RistrettoPoint;
+use curve25519_dalek::ristretto::{RistrettoPoint, CompressedRistretto};
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
@@ -33,8 +33,12 @@ pub struct R1CSProof {
   pok_claims_phase2: (KnowledgeProof, ProductProof),
   proof_eq_sc_phase1: EqualityProof,
   sc_proof_phase2: ZKSumcheckInstanceProof,
+  // Need to commit vars for short and long witnesses separately
+  // The long version must exist, the short version might not
+  comm_short_vars_at_ry: Option<CompressedGroup>,
   comm_vars_at_ry_list: Vec<CompressedGroup>,
   comm_vars_at_ry: CompressedGroup,
+  proof_eval_short_vars_at_ry: Option<PolyEvalProof>,
   proof_eval_vars_at_ry_list: Vec<PolyEvalProof>,
   proof_eq_sc_phase2: EqualityProof,
 }
@@ -188,7 +192,8 @@ impl R1CSProof {
     assert!(num_witness_secs == 1 || num_witness_secs == 2 || num_witness_secs == 4);
     assert_eq!(num_witness_secs, w_mat.len());
     assert_eq!(num_witness_secs, poly_w_list.len());
-    assert!(num_witness_secs > num_shorts);
+    // Currently, only support the case of num_witness_secs = 4 && num_shorts = 1
+    assert!(num_shorts == 0 || num_shorts == 1 && num_witness_secs == 4);
 
     // Assert everything is a power of 2
     assert_eq!(num_instances, num_instances.next_power_of_two());
@@ -395,47 +400,58 @@ impl R1CSProof {
     let mut eval_vars_at_ry_list = Vec::new();
     let mut proof_eval_vars_at_ry_list = Vec::new();
     let mut comm_vars_at_ry_list = Vec::new();
+    let eval_short_vars_at_ry: Option<Scalar>;
+    let proof_eval_short_vars_at_ry: Option<PolyEvalProof>;
+    let comm_short_vars_at_ry: Option<CompressedRistretto>;
     let timer_polyeval = Timer::new("polyeval");
 
+    // poly_long
     for p in 0..num_instances {
-      let p_w: Vec<usize> = (0..num_witness_secs).map(|i| if i < num_shorts { 0 } else { p }).collect();
       // if poly_vars exists, compute combined_poly as (Scalar::one() - ry[0]) * poly_vars + ry[0] * poly_inputs
       // otherwise combined_poly is just poly_inputs
       let (combined_poly, r) = {
         // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
         let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
-        match num_witness_secs {
-          1 => (poly_w_list[0][p_w[0]].clone(), [rq_short, &ry].concat()),
-          2 => (
+        match (num_witness_secs, num_shorts) {
+          (1, 0) => (poly_w_list[0][p].clone(), [rq_short, &ry].concat()),
+          (2, 0) => (
             DensePolynomial::new(
               (0..num_proofs[p] * num_inputs).map(
                 |i| {
-                  let i_w: Vec<usize> = (0..num_witness_secs).map(|j| if j < num_shorts { i % num_inputs } else { i }).collect();
-                  (Scalar::one() - ry[0]) * poly_w_list[0][p_w[0]][i_w[0]]
-                        + ry[0] * poly_w_list[1][p_w[1]][i_w[1]]
+                  (Scalar::one() - ry[0]) * poly_w_list[0][p][i]
+                        + ry[0] * poly_w_list[1][p][i]
                 }
               ).collect()),
             [rq_short, &ry[1..]].concat()
           ),
-          4 => (
+          (4, 0) => (
             DensePolynomial::new(
               (0..num_proofs[p] * num_inputs).map(
                 |i| {
-                  let i_w: Vec<usize> = (0..num_witness_secs).map(|j| if j < num_shorts { i % num_inputs } else { i }).collect();
-                  (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * poly_w_list[0][p_w[0]][i_w[0]]
-                        + (Scalar::one() - ry[0]) * ry[1] * poly_w_list[1][p_w[1]][i_w[1]]
-                        + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p_w[2]][i_w[2]]
-                        + ry[0] * ry[1] * poly_w_list[3][p_w[3]][i_w[3]]
+                  (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * poly_w_list[0][p][i]
+                        + (Scalar::one() - ry[0]) * ry[1] * poly_w_list[1][p][i]
+                        + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p][i]
+                        + ry[0] * ry[1] * poly_w_list[3][p][i]
                 }
               ).collect()),
             [rq_short, &ry[2..]].concat()
           ),
-          _ => panic!("PROOF Failed: Unrecognized num_witness_secs: {}", num_witness_secs)
+          (4, 1) => (
+            DensePolynomial::new(
+              (0..num_proofs[p] * num_inputs).map(
+                |i| {
+                  (Scalar::one() - ry[0]) * ry[1] * poly_w_list[1][p][i]
+                    + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p][i]
+                    + ry[0] * ry[1] * poly_w_list[3][p][i]
+                }
+              ).collect()),
+            [rq_short, &ry[2..]].concat()
+          ),
+          _ => panic!("PROOF Failed: Unsupported (num_witness_secs, num_shorts) pair: ({}, {})", num_witness_secs, num_shorts)
         }
       };
 
       let eval_vars_at_ry = combined_poly.evaluate(&r);
-
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
         &combined_poly,
         None,
@@ -451,19 +467,48 @@ impl R1CSProof {
       proof_eval_vars_at_ry_list.push(proof_eval_vars_at_ry);
       comm_vars_at_ry_list.push(comm_vars_at_ry);
     }
+    // poly_short
+    match (num_witness_secs, num_shorts) {
+      (_, 0) => {
+        (eval_short_vars_at_ry, proof_eval_short_vars_at_ry, comm_short_vars_at_ry) = (None, None, None);
+      },
+      (4, 1) => {
+        let c = poly_w_list[0][0].clone();
+        let e = c.evaluate(&ry[2..]);
+        let (p, c) = PolyEvalProof::prove(
+          &c,
+          None,
+          &ry[2..],
+          &e,
+          None,
+          &gens.gens_pc,
+          transcript,
+          random_tape,
+        );
+        (eval_short_vars_at_ry, proof_eval_short_vars_at_ry, comm_short_vars_at_ry) = (Some(e), Some(p), Some(c));
+      },
+      _ => panic!("PROOF Failed: Unsupported (num_witness_secs, num_shorts) pair: ({}, {})", num_witness_secs, num_shorts)
+    }
     timer_polyeval.stop();
-
+    
     // Bind the resulting witness list to rp
     // poly_vars stores the result of each witness matrix bounded to (rq_short ++ ry)
     // but we want to bound them to (rq ++ ry)
     // So we need to multiply each entry by (1 - rq0)(1 - rq1)...
     for p in 0..num_instances {
+      if num_shorts > 0 {
+        assert_eq!(num_witness_secs, 4);
+        assert_eq!(num_shorts, 1);
+        eval_vars_at_ry_list[p] += (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * eval_short_vars_at_ry.unwrap();
+      }
       for q in 0..(num_rounds_q - num_proofs[p].log_2()) {
         eval_vars_at_ry_list[p] *= Scalar::one() - rq[q];
       }
     }
+
     let poly_vars = DensePolynomial::new(eval_vars_at_ry_list);
     let eval_vars_at_ry = poly_vars.evaluate(&rp);
+
     let comm_vars_at_ry = eval_vars_at_ry.commit(&Scalar::zero(), &gens.gens_pc.gens.gens_1).compress();
 
     // prove the final step of sum-check #2
@@ -499,8 +544,10 @@ impl R1CSProof {
         pok_claims_phase2,
         proof_eq_sc_phase1,
         sc_proof_phase2,
+        comm_short_vars_at_ry,
         comm_vars_at_ry_list,
         comm_vars_at_ry,
+        proof_eval_short_vars_at_ry,
         proof_eval_vars_at_ry_list,
         proof_eq_sc_phase2
       },
@@ -649,9 +696,9 @@ impl R1CSProof {
         // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
         let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
 
-        match num_witness_secs {
-          1 => (PolyCommitment { C: comm_w_list[0][p].C.clone() }, [rq_short, &ry].concat()),
-          2 => (
+        match (num_witness_secs, num_shorts) {
+          (1, 0) => (PolyCommitment { C: comm_w_list[0][p].C.clone() }, [rq_short, &ry].concat()),
+          (2, 0) => (
             PolyCommitment {
               C: (0..comm_w_list[0][p].C.len()).map(
                 |i| ((Scalar::one() - ry[0]) * comm_w_list[0][p].C[i].decompress().unwrap()
@@ -661,7 +708,7 @@ impl R1CSProof {
             },
             [rq_short, &ry[1..]].concat()
           ),
-          4 => (
+          (4, 0) => (
             PolyCommitment {
               C: (0..comm_w_list[0][p].C.len()).map(
                 |i| ((Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * comm_w_list[0][p].C[i].decompress().unwrap()
@@ -673,7 +720,18 @@ impl R1CSProof {
             },
             [rq_short, &ry[2..]].concat()
           ),
-          _ => panic!("PROOF Failed: Unrecognized num_witness_secs: {}", num_witness_secs)
+          (4, 1) => (
+            PolyCommitment {
+              C: (0..comm_w_list[1][p].C.len()).map(
+                |i| ((Scalar::one() - ry[0]) * ry[1] * comm_w_list[1][p].C[i].decompress().unwrap()
+                         + (ry[0] * (Scalar::one() - ry[1]) * comm_w_list[2][p].C[i].decompress().unwrap()
+                         + ry[0] * ry[1] * comm_w_list[3][p].C[i].decompress().unwrap())
+                ).compress()
+              ).collect()
+            },
+            [rq_short, &ry[2..]].concat()
+          ),
+          _ => panic!("PROOF Failed: Unsupported (num_witness_secs, num_shorts) pair: ({}, {})", num_witness_secs, num_shorts)
         }
       };
 
@@ -686,9 +744,29 @@ impl R1CSProof {
       )?;
     }
 
+    match (num_witness_secs, num_shorts) {
+      (_, 0) => {},
+      (4, 1) => {
+        let comm_combined_short = PolyCommitment { C: comm_w_list[0][0].C.clone() };
+        self.proof_eval_short_vars_at_ry.as_ref().unwrap().verify(
+          &gens.gens_pc,
+          transcript,
+          &ry[2..],
+          &self.comm_short_vars_at_ry.unwrap(),
+          &comm_combined_short,
+        )?;
+      },
+      _ => panic!("PROOF Failed: Unsupported (num_witness_secs, num_shorts) pair: ({}, {})", num_witness_secs, num_shorts)
+    }
+
     // Then on rp
     let mut expected_comm_vars_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
     for p in 0..num_instances {
+      if num_shorts > 0 {
+        assert_eq!(num_witness_secs, 4);
+        assert_eq!(num_shorts, 1);
+        expected_comm_vars_list[p] += (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * self.comm_short_vars_at_ry.unwrap().decompress().unwrap();
+      }
       for q in 0..(num_rounds_q - num_proofs[p].log_2()) {
         expected_comm_vars_list[p] *= Scalar::one() - rq[q];
       }

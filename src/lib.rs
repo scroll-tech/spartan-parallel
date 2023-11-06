@@ -336,11 +336,9 @@ pub struct SNARK {
   block_comm_inputs_list: Vec<PolyCommitment>,
   exec_comm_inputs: PolyCommitment,
   perm_comm_w0: PolyCommitment,
-  perm_block_comm_w0_list: Vec<PolyCommitment>,
   perm_block_comm_w2_list: Vec<PolyCommitment>,
   perm_block_comm_w3_list: Vec<PolyCommitment>,
   perm_block_comm_w3_concat: PolyCommitment,
-  perm_exec_comm_w0: PolyCommitment,
   perm_exec_comm_w2: PolyCommitment,
   perm_exec_comm_w3: PolyCommitment,
   perm_exec_comm_w3_concat: PolyCommitment,
@@ -563,8 +561,6 @@ impl SNARK {
     // CHALLENGES AND WITNESSES FOR PERMUTATION
     // --
 
-    // TODO: We can eliminate perm_block_w0 and perm_exec_w0 if we change the R1CS proof
-
     let (
       comb_tau,
       comb_r,
@@ -572,7 +568,6 @@ impl SNARK {
       perm_poly_w0,
       perm_comm_w0,
 
-      perm_block_comm_w0_list,
       perm_block_w2,
       perm_block_poly_w2_list,
       perm_block_comm_w2_list,
@@ -583,7 +578,6 @@ impl SNARK {
       perm_block_poly_w3_concat,
       perm_block_comm_w3_concat,
 
-      perm_exec_comm_w0,
       perm_exec_w2,
       perm_exec_poly_w2,
       perm_exec_comm_w2,
@@ -627,7 +621,6 @@ impl SNARK {
       perm_w0[0] = comb_tau;
       
       // w3 is [valid, tau - Xi, 1, ...]
-      // TODO: fill in the remaining ones
       // See accumulator.rs
       let mut perm_block_w3: Vec<Vec<Vec<Scalar>>> = Vec::new();
       for p in 0..block_num_instances {
@@ -682,34 +675,17 @@ impl SNARK {
       perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
 
       // commit the witnesses and inputs separately instance-by-instance
-      let mut perm_block_comm_w0_list = Vec::new();
       let mut perm_block_poly_w2_list = Vec::new();
       let mut perm_block_comm_w2_list = Vec::new();
       let mut perm_block_poly_w3_list = Vec::new();
       let mut perm_block_comm_w3_list = Vec::new();
 
       for p in 0..block_num_instances {
-        let (_perm_block_poly_w0, perm_block_comm_w0) = {
-          // Flatten the witnesses into a Q_i * X list
-          let w0_list_p = perm_block_w0[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-          // create a multilinear polynomial using the supplied assignment for variables
-          let perm_block_poly_w0 = DensePolynomial::new(w0_list_p);
-
-          // produce a commitment to the satisfying assignment
-          let (perm_block_comm_w0, _blinds_vars) = perm_block_poly_w0.commit(&vars_gens.gens_pc, None);
-
-          // add the commitment to the prover's transcript
-          perm_block_comm_w0.append_to_transcript(b"poly_commitment", transcript);
-          (perm_block_poly_w0, perm_block_comm_w0)
-        };
-        perm_block_comm_w0_list.push(perm_block_comm_w0);
-
         let (perm_block_poly_w2, perm_block_comm_w2) = {
           // Flatten the witnesses into a Q_i * X list
           let w2_list_p = perm_block_w2[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
           // create a multilinear polynomial using the supplied assignment for variables
           let perm_block_poly_w2 = DensePolynomial::new(w2_list_p);
-
           // produce a commitment to the satisfying assignment
           let (perm_block_comm_w2, _blinds_vars) = perm_block_poly_w2.commit(&vars_gens.gens_pc, None);
 
@@ -750,26 +726,11 @@ impl SNARK {
       perm_block_comm_w3_concat.append_to_transcript(b"poly_commitment", transcript);
 
       let (
-        perm_exec_comm_w0,
         perm_exec_poly_w2,
         perm_exec_comm_w2,
         perm_exec_poly_w3,
         perm_exec_comm_w3,
       ) = {
-        let (_perm_exec_poly_w0, perm_exec_comm_w0) = {
-          // Flatten the witnesses into a Q_i * X list
-          let w0_list_p = perm_exec_w0.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-          // create a multilinear polynomial using the supplied assignment for variables
-          let perm_exec_poly_w0 = DensePolynomial::new(w0_list_p);
-
-          // produce a commitment to the satisfying assignment
-          let (perm_exec_comm_w0, _blinds_vars) = perm_exec_poly_w0.commit(&vars_gens.gens_pc, None);
-
-          // add the commitment to the prover's transcript
-          perm_exec_comm_w0.append_to_transcript(b"poly_commitment", transcript);
-          (perm_exec_poly_w0, perm_exec_comm_w0)
-        };
-
         let (perm_exec_poly_w2, perm_exec_comm_w2) = {
           // Flatten the witnesses into a Q_i * X list
           let w2_list_p = perm_exec_w2.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
@@ -799,7 +760,6 @@ impl SNARK {
         };
 
         (
-          perm_exec_comm_w0,
           perm_exec_poly_w2,
           perm_exec_comm_w2,
           perm_exec_poly_w3,
@@ -872,7 +832,6 @@ impl SNARK {
         perm_w0,
         perm_poly_w0,
         perm_comm_w0,
-        perm_block_comm_w0_list,
         perm_block_w2,
         perm_block_poly_w2_list,
         perm_block_comm_w2_list,
@@ -883,7 +842,6 @@ impl SNARK {
         perm_block_poly_w3_concat,
         perm_block_comm_w3_concat,
 
-        perm_exec_comm_w0,
         perm_exec_w2,
         perm_exec_poly_w2,
         perm_exec_comm_w2,
@@ -1357,11 +1315,9 @@ impl SNARK {
       block_comm_inputs_list,
       exec_comm_inputs,
       perm_comm_w0,
-      perm_block_comm_w0_list,
       perm_block_comm_w2_list,
       perm_block_comm_w3_list,
       perm_block_comm_w3_concat,
-      perm_exec_comm_w0,
       perm_exec_comm_w2,
       perm_exec_comm_w3,
       perm_exec_comm_w3_concat,
@@ -1487,12 +1443,10 @@ impl SNARK {
     {
       self.perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
       for p in 0..block_num_instances {
-        self.perm_block_comm_w0_list[p].append_to_transcript(b"poly_commitment", transcript);
         self.perm_block_comm_w2_list[p].append_to_transcript(b"poly_commitment", transcript);
         self.perm_block_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
       }
       self.perm_block_comm_w3_concat.append_to_transcript(b"poly_commitment", transcript);
-      self.perm_exec_comm_w0.append_to_transcript(b"poly_commitment", transcript);
       self.perm_exec_comm_w2.append_to_transcript(b"poly_commitment", transcript);
       self.perm_exec_comm_w3.append_to_transcript(b"poly_commitment", transcript);
       self.perm_exec_comm_w3_concat.append_to_transcript(b"poly_commitment", transcript);
@@ -1610,7 +1564,7 @@ impl SNARK {
         perm_root_num_cons,
         &vars_gens,
         &self.perm_block_root_inst_evals,
-        vec![&self.perm_block_comm_w0_list, &self.block_comm_inputs_list, &self.perm_block_comm_w2_list, &self.perm_block_comm_w3_list],
+        vec![&vec![self.perm_comm_w0.clone()], &self.block_comm_inputs_list, &self.perm_block_comm_w2_list, &self.perm_block_comm_w3_list],
         transcript,
       )?;
       timer_sat_proof.stop();
@@ -1631,7 +1585,6 @@ impl SNARK {
         transcript,
       )?;
       timer_eval_proof.stop();
-      // !!!TODO: verify that perm_block_comm_w0_list evaluated on <rp, rq, ry> is perm_comm_w0 evaluated on <ry>!!!
     }
 
     // --
@@ -1707,7 +1660,7 @@ impl SNARK {
         perm_root_num_cons,
         &vars_gens,
         &self.perm_exec_root_inst_evals,
-        vec![&vec![self.perm_exec_comm_w0.clone()], &vec![self.exec_comm_inputs.clone()], &vec![self.perm_exec_comm_w2.clone()], &vec![self.perm_exec_comm_w3.clone()]],
+        vec![&vec![self.perm_comm_w0.clone()], &vec![self.exec_comm_inputs.clone()], &vec![self.perm_exec_comm_w2.clone()], &vec![self.perm_exec_comm_w3.clone()]],
         transcript,
       )?;
       timer_sat_proof.stop();
@@ -1728,7 +1681,6 @@ impl SNARK {
         transcript,
       )?;
       timer_eval_proof.stop();
-      // !!!TODO: verify that perm_block_comm_w0_list evaluated on <rp, rq, ry> is perm_comm_w0 evaluated on <ry>!!!
     }
 
     // --

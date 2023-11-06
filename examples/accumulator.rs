@@ -373,7 +373,6 @@ fn produce_r1cs() -> (
         [vec![(V_cnst, 1)], (1..input_output_cutoff).map(|i| (2 * num_vars + input_output_cutoff + i, 1)).collect()].concat(),
         vec![(3 * num_vars + 2, 1)]
       );
-      constraint_count += 1;
 
       (A, B, C)
     };
@@ -475,7 +474,6 @@ fn produce_r1cs() -> (
       // correctness of w3[2]: is the constant 1
       (A, B, C) = gen_constr(A, B, C, V_cnst, 
         constraint_count, vec![(V_cnst, 1)], vec![(num_vars, 1)], vec![(3 * num_vars + 2, 1)]);
-      constraint_count += 1;
 
       (A, B, C)   
     };
