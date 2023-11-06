@@ -471,20 +471,34 @@ impl SparseMatPolynomial {
 
   // Trailing zeros in Z are not recorded
   // So trailing zeros in MZ should also not be recorded
-  pub fn multiply_vec_pad(&self, num_rows: usize, num_cols: usize, z: &[Scalar]) -> Vec<Scalar> {
-    assert!(z.len() <= num_cols);
+  // Return a num_proofs * base_num_rows matrix
+  pub fn multiply_vec_pad(&self,
+    num_proofs: usize,
+    base_num_rows: usize,
+    base_num_cols: usize,
+    z: &[Scalar]
+  ) -> Vec<Vec<Scalar>> {
+    assert!(self.M.len() >= num_proofs * base_num_rows);
+    assert!(z.len() == num_proofs * base_num_cols);
 
-    (0..self.M.len())
-      .map(|i| {
-        let row = self.M[i].row;
-        let col = self.M[i].col;
-        let val = &self.M[i].val;
-        if col < z.len() { (row, val * z[col]) } else { (row, Scalar::zero()) }
-      })
-      .fold(vec![Scalar::zero(); num_rows], |mut Mz, (r, v)| {
-        Mz[r] += v;
-        Mz
-      })
+    let mut Mz_list = Vec::new();
+    for q in 0..num_proofs {
+      Mz_list.push(
+        (0..base_num_rows).map(|x| {
+          let i = q * num_proofs + x;
+          let row = self.M[i].row;
+          assert!(row < num_proofs * base_num_rows);
+          let col = self.M[i].col;
+          let val = &self.M[i].val;
+          if col < z.len() { (row, val * z[col]) } else { (row, Scalar::zero()) }
+        }).fold(vec![Scalar::zero(); num_proofs * base_num_rows], |mut Mz, (r, v)| {
+          Mz[r] += v;
+          Mz
+        })
+      );
+    }
+
+    Mz_list
   }
 
   pub fn compute_eval_table_sparse(

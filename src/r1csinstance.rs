@@ -391,19 +391,34 @@ impl R1CSInstance {
   // in that case need to append the result by 0
   pub fn multiply_vec_single(
     &self,
+    num_instances: usize,
+    num_proofs: &Vec<usize>,
+    max_num_proofs: usize,
     num_rows: usize,
     num_cols: usize,
     z_list: &Vec<Vec<Scalar>>,
-  ) -> (DensePolynomial, DensePolynomial, DensePolynomial) {
-    assert_eq!(num_rows, self.num_cons);
-    assert!(num_cols > self.num_vars);
+  ) -> (DensePolynomial_PQX, DensePolynomial_PQX, DensePolynomial_PQX) {
+    assert_eq!(max_num_proofs * num_rows, self.num_cons);
+    assert!(max_num_proofs * num_cols >= self.num_vars);
+
+    let mut Az = Vec::new();
+    let mut Bz = Vec::new();
+    let mut Cz = Vec::new();
+    
+    for p in 0..num_instances {
+      let z = &z_list[p];
+      assert!(num_proofs[p] <= max_num_proofs);
+      // Each returns a num_proofs[p] * num_rows matrix
+      Az.push(self.A_list[0].multiply_vec_pad(num_proofs[p], num_rows, num_cols, z));
+      Bz.push(self.B_list[0].multiply_vec_pad(num_proofs[p], num_rows, num_cols, z));
+      Cz.push(self.C_list[0].multiply_vec_pad(num_proofs[p], num_rows, num_cols, z));
+    }
     (
-      DensePolynomial::new(self.A_list[0].multiply_vec(num_rows, num_cols, z)),
-      DensePolynomial::new(self.B_list[0].multiply_vec(num_rows, num_cols, z)),
-      DensePolynomial::new(self.C_list[0].multiply_vec(num_rows, num_cols, z)),
+      DensePolynomial_PQX::new_rev(&Az, num_proofs, max_num_proofs),
+      DensePolynomial_PQX::new_rev(&Bz, num_proofs, max_num_proofs),
+      DensePolynomial_PQX::new_rev(&Cz, num_proofs, max_num_proofs)
     )
   }
-
 
   pub fn multiply_vec(
     &self,
