@@ -160,7 +160,7 @@ impl R1CSProof {
     b"R1CS proof"
   }
 
-  // A generic R1CS prover that enables data-parallelism
+  // A generic R1CS prover that enables data-parallelism on instances
   pub fn prove(
     // How many sections does each Z vector have?
     // num_witness secs can be 1, 2, or 4

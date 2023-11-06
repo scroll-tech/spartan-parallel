@@ -5,6 +5,7 @@
 
 // TODO: Proof might be incorrect if a block is never executed
 // TODO: Differentiate between max_num_proofs and max_num_proofs_bound
+// TODO: The verifier needs to check the first block and last block number are correct
 // Q: Would it be insecure if an entry has valid = 0 but everything else not 0?
 // Q: What should we do with the constant bit if the entry is invalid?
 // Q: Can we trust that the Prover orders all valid = 1 before valid = 0?
@@ -349,9 +350,9 @@ pub struct SNARK {
   block_inst_evals: (Scalar, Scalar, Scalar),
   block_r1cs_eval_proof: R1CSEvalProof,
 
-  // consis_r1cs_sat_proof: R1CSProof,
-  // consis_inst_evals: (Scalar, Scalar, Scalar),
-  // consis_r1cs_eval_proof: R1CSEvalProof,
+  consis_comb_r1cs_sat_proof: R1CSProof,
+  consis_comb_inst_evals: (Scalar, Scalar, Scalar),
+  consis_comb_r1cs_eval_proof: R1CSEvalProof,
 
   perm_prelim_r1cs_sat_proof: R1CSProof,
   perm_prelim_inst_evals: (Scalar, Scalar, Scalar),
@@ -924,6 +925,68 @@ impl SNARK {
     };
 
     // --
+    // CONSIS_COMB
+    // --
+
+    let (consis_comb_r1cs_sat_proof, consis_comb_challenges) = {
+      let (proof, consis_comb_challenges) = {
+        R1CSProof::prove(
+          4,
+          1,
+          1,
+          consis_num_proofs,
+          &vec![consis_num_proofs],
+          num_vars,
+          &consis_comb_inst.inst,
+          &vars_gens,
+          vec![&vec![vec![perm_w0.clone()]], &vec![exec_inputs_list.clone()], &vec![consis_w2], &vec![consis_w3]],
+          vec![&vec![perm_poly_w0.clone()], &vec![exec_poly_inputs.clone()], &vec![consis_poly_w2], &vec![consis_poly_w3]],
+          transcript,
+          &mut random_tape,
+        )
+      };
+
+      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+      (proof, consis_comb_challenges)
+    };
+
+    // Final evaluation on PERM_BLOCK_ROOT
+    let (consis_comb_inst_evals, consis_comb_r1cs_eval_proof) = {
+      let [_, _, rx, ry] = consis_comb_challenges;
+      let inst = consis_comb_inst;
+      let timer_eval = Timer::new("eval_sparse_polys");
+      let inst_evals = {
+        let (Ar, Br, Cr) = inst.inst.evaluate(&Vec::new(), &rx, &ry);
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        (Ar, Br, Cr)
+      };
+      timer_eval.stop();
+
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &consis_comb_decomm.decomm,
+          &rx,
+          &ry,
+          &inst_evals,
+          &consis_comb_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
+
+      timer_prove.stop();
+      (inst_evals, r1cs_eval_proof)
+    };
+
+    // --
     // PERM_PRELIM
     // --
 
@@ -1329,6 +1392,10 @@ impl SNARK {
       block_inst_evals,
       block_r1cs_eval_proof,
 
+      consis_comb_r1cs_sat_proof,
+      consis_comb_inst_evals,
+      consis_comb_r1cs_eval_proof,
+
       perm_prelim_r1cs_sat_proof,
       perm_prelim_inst_evals,
       perm_prelim_r1cs_eval_proof,
@@ -1354,9 +1421,6 @@ impl SNARK {
       perm_exec_poly_r1cs_eval_proof,
       perm_exec_poly,
       proof_eval_perm_exec_prod,
-
-      // consis_inst_evals,
-      // consis_r1cs_eval_proof
     }
   }
 
@@ -1492,6 +1556,46 @@ impl SNARK {
       )?;
       timer_eval_proof.stop();
     }
+
+    // --
+    // CONSIS_COMB
+    // --
+
+    {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let consis_comb_challenges = self.consis_comb_r1cs_sat_proof.verify(
+        4,
+        1,
+        1,
+        consis_num_proofs,
+        &vec![consis_num_proofs],
+        num_vars,
+        consis_comb_num_cons,
+        &vars_gens,
+        &self.consis_comb_inst_evals,
+        vec![&vec![self.perm_comm_w0.clone()], &vec![self.exec_comm_inputs.clone()], &vec![self.consis_comm_w2.clone()], &vec![self.consis_comm_w3.clone()]],
+        transcript,
+      )?;
+      timer_sat_proof.stop();
+
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on PERM_BLOCK_ROOT
+      let (Ar, Br, Cr) = &self.consis_comb_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [_, _, rx, ry] = consis_comb_challenges;
+      self.consis_comb_r1cs_eval_proof.verify(
+        &consis_comb_comm.comm,
+        &rx,
+        &ry,
+        &self.consis_comb_inst_evals,
+        &consis_comb_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+    }
+
 
     // --
     // PERM_PRELIM
