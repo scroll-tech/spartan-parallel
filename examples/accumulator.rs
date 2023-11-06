@@ -521,33 +521,38 @@ fn produce_r1cs() -> (
   
         let mut constraint_count = 0;
   
-        // compute D1
-        (A, B, C) = gen_constr(A, B, C, V_cnst, // last D1 is 0
-          constraint_count, vec![((entry_size - 1) * num_vars + V_d1, 1)], vec![], vec![]);
-        constraint_count += 1;
+        // Need to order the constraints so that they solve the inputs in the front first
+        // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
         for i in 0..entry_size - 1 {
-          (A, B, C) = gen_constr(A, B, C, V_cnst, // other D1
+          // D1
+          (A, B, C) = gen_constr(A, B, C, V_cnst,
             constraint_count, vec![((i + 1) * num_vars + V_valid, 1)], vec![((i + 1) * num_vars + V_pi, 1)], vec![(i * num_vars + V_d1, 1)]);
           constraint_count += 1;
-        }
-        // compute D2
-        (A, B, C) = gen_constr(A, B, C, V_cnst, // last D2 is x[k] * 1
-          constraint_count, vec![((entry_size - 1) * num_vars + V_x, 1)], vec![], vec![((entry_size - 1) * num_vars + V_d2, 1)]);
-        constraint_count += 1;
-        for i in 0..entry_size - 1 {
-          (A, B, C) = gen_constr(A, B, C, V_cnst, // other D2
+          // D2
+          (A, B, C) = gen_constr(A, B, C, V_cnst,
             constraint_count, 
             vec![(i * num_vars + V_x, 1)], 
             vec![(i * num_vars + V_d1, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
             vec![(i * num_vars + V_d2, 1)]);
           constraint_count += 1;
-        }
-        // compute pi
-        for i in 0..entry_size {
+          // pi
           (A, B, C) = gen_constr(A, B, C, V_cnst,
             constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
           constraint_count += 1;
         }
+        // Last Entry
+        let i = entry_size - 1;
+        // last D1 is 0
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          constraint_count, vec![(i * num_vars + V_d1, 1)], vec![], vec![]);
+        constraint_count += 1;
+        // last D2 is x[k] * 1
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          constraint_count, vec![(i * num_vars + V_x, 1)], vec![], vec![(i * num_vars + V_d2, 1)]);
+        constraint_count += 1;
+        // last pi is just usual
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
   
         (A, B, C)   
       };

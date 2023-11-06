@@ -1798,7 +1798,7 @@ impl SNARK {
         0,
         1,
         1,
-       &vec![1],
+        &vec![1],
         total_num_proofs_bound * num_vars,
         perm_exec_poly_num_cons,
         &total_proofs_times_vars_gens,
