@@ -500,14 +500,14 @@ fn produce_r1cs() -> (
   // D1[k] <- v[k+1] * pi[k+1]
   // D2[k] <- x[k] * (D1[k] + (1 - v[k + 1]))
   // PERM_EXEC_POLY looks like PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
-  let perm_poly_num_cons_base = 3;
+  let perm_poly_num_cons_base = 4;
   let perm_block_poly_num_copies = block_max_num_proofs_bound;
   let perm_block_poly_num_non_zero_entries = 5 * block_max_num_proofs_bound;
   let perm_exec_poly_num_copies = total_num_proofs_bound;
   let perm_exec_poly_num_non_zero_entries = 5 * total_num_proofs_bound;
   
   let perm_poly_inst = [block_max_num_proofs_bound, total_num_proofs_bound].map(|entry_size| {
-    let perm_poly_num_cons = 3 * entry_size;
+    let perm_poly_num_cons = perm_poly_num_cons_base * entry_size;
     let perm_poly_inst = {
       let (A, B, C) = {
         let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -540,7 +540,8 @@ fn produce_r1cs() -> (
           // pi
           (A, B, C) = gen_constr(A, B, C, V_cnst,
             constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
-          constraint_count += 1;
+          // Pad base constraint size to 4
+          constraint_count += 2;
         }
         // Last Entry
         let i = entry_size - 1;

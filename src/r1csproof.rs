@@ -1,6 +1,8 @@
 #![allow(clippy::too_many_arguments)]
 // use crate::custom_dense_mlpoly::{PolyEvalProof_PQX, PolyCommitment_PQX};
 
+use crate::dense_mlpoly;
+
 use super::commitments::{Commitments, MultiCommitGens};
 use super::dense_mlpoly::{
   DensePolynomial, EqPolynomial, PolyCommitment, PolyCommitmentGens, PolyEvalProof,
@@ -407,8 +409,7 @@ impl R1CSProof {
 
     // poly_long
     for p in 0..num_instances {
-      // if poly_vars exists, compute combined_poly as (Scalar::one() - ry[0]) * poly_vars + ry[0] * poly_inputs
-      // otherwise combined_poly is just poly_inputs
+
       let (combined_poly, r) = {
         // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
         let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
@@ -844,7 +845,7 @@ impl R1CSProof {
     let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
     // append input to variables to create a single vector z
     let z_list = w_mat;
-    let z_len = z_list[0].len();
+    let z_len = max_input_rows * base_input_size;
 
     // derive the verifier's challenge tau
     let (num_rounds_p, num_rounds_q, num_rounds_xb, num_rounds_yb) = 
@@ -960,6 +961,8 @@ impl R1CSProof {
     let claim_phase2 = r_A * Az_claim + r_B * Bz_claim + r_C * Cz_claim;
     let blind_claim_phase2 = r_A * Az_blind + r_B * Bz_blind + r_C * Cz_blind;
 
+    // Here we have 1 qx*qy instance
+    // Unlike the parallel proof where we have p x*y instance
     let evals_ABC = {
       // compute the initial evaluation table for R(\tau, x)
       let evals_rx = EqPolynomial::new([rq.clone(), rx.clone()].concat()).evals();
@@ -974,8 +977,9 @@ impl R1CSProof {
     };
     let mut ABC_poly = DensePolynomial::new(evals_ABC);
 
-    // Construct a p * q * len(z) matrix Z and bound it to r_q
-    // First reconstruct z_list so that it is rp * rq * rxb
+    /*
+    // Here we have p length-q*y Z
+    // instead of p*q length-y Z
     let mut z_mat = Vec::new();
     for p in 0..num_proofs {
       z_mat.push(Vec::new());
@@ -986,21 +990,36 @@ impl R1CSProof {
         }
       }
     }
-    let mut Z = DensePolynomial_PQX::new_rev(&z_mat, &input_rows, max_input_rows);
-    Z.bound_poly_vars_rq(&rq_rev.to_vec());
+    
+    let Z = DensePolynomial_PQX::new_rev(&z_mat, &input_rows, max_input_rows);
+    // Z.bound_poly_vars_rq(&rq_rev.to_vec());
     let mut Z_poly = Z.to_dense_poly();
+    */
+
+    // !!!TODO: Computation of Z_poly exceeds runtime bound!!!
+    // Here we have p length-q*y Z
+    // instead of p*q length-y Z
+    let mut z: Vec<Scalar> = Vec::new();
+    for p in 0..num_proofs {
+      z.extend(&z_list[p]);
+      z.extend(&vec![Scalar::zero(); (max_input_rows - input_rows[p]) * base_input_size])
+    }
+    let mut Z_poly = DensePolynomial::new(z);
+    for r in &rp {
+      Z_poly.bound_poly_var_top(r);
+    }
 
     // An Eq function to match p with rp
-    let mut eq_p_rp_poly = DensePolynomial::new(EqPolynomial::new(rp).evals_front(num_rounds_p + num_rounds_yb));
+    let mut eq_q_rq_poly = DensePolynomial::new(EqPolynomial::new(rq).evals_front(num_rounds_q + num_rounds_yb));
 
     // Sumcheck 2: (rA + rB + rC) * Z * eq(p) = e
     let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::prove_phase_two(
-      num_rounds_p + num_rounds_yb,
+      num_rounds_q + num_rounds_yb,
       &claim_phase2,
       &blind_claim_phase2,
       &mut Z_poly,
       &mut ABC_poly,
-      &mut eq_p_rp_poly,
+      &mut eq_q_rq_poly,
       &gens.gens_sc,
       transcript,
       random_tape,
@@ -1008,8 +1027,8 @@ impl R1CSProof {
     timer_sc_proof_phase2.stop();
 
     // Separate ry into rp and ry
-    let (rp, ry) = ry.split_at(num_rounds_p);
-    let rp = rp.to_vec();
+    let (rq, ry) = ry.split_at(num_rounds_q);
+    let rq = rq.to_vec();
     let ry = ry.to_vec();
 
     assert_eq!(Z_poly.len(), 1);
@@ -1021,11 +1040,10 @@ impl R1CSProof {
     let mut comm_vars_at_ry_list = Vec::new();
     let timer_polyeval = Timer::new("polyeval");
 
-    // poly_long
     for p in 0..num_proofs {
-      // if poly_vars exists, compute combined_poly as (Scalar::one() - ry[0]) * poly_vars + ry[0] * poly_inputs
-      // otherwise combined_poly is just poly_inputs
-      let (combined_poly, r) = (poly_w_list[p].clone(), [rq.clone(), ry.clone()].concat());
+      // Size of poly_w_list[p].clone() decides how many digits of rq will be used
+      let rq_short = &rq[num_rounds_q - input_rows[p].log_2()..];
+      let (combined_poly, r) = (poly_w_list[p].clone(), [rq_short.to_vec(), ry.clone()].concat());
 
       let eval_vars_at_ry = combined_poly.evaluate(&r);
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(

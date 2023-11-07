@@ -365,12 +365,13 @@ pub struct SNARK {
   perm_block_root_r1cs_eval_proof: R1CSEvalProof,
 
   perm_block_poly_r1cs_sat_proof: R1CSProof,
+
+  /*
   perm_block_poly_inst_evals: (Scalar, Scalar, Scalar),
   perm_block_poly_r1cs_eval_proof: R1CSEvalProof,
   perm_block_poly_list: Vec<Scalar>,
   proof_eval_perm_block_prod_list: Vec<PolyEvalProof>,
   
-  /*
   perm_exec_root_r1cs_sat_proof: R1CSProof,
   perm_exec_root_inst_evals: (Scalar, Scalar, Scalar),
   perm_exec_root_r1cs_eval_proof: R1CSEvalProof,
@@ -1159,7 +1160,9 @@ impl SNARK {
           block_num_instances,
           perm_poly_num_cons_base,
           num_vars,
-          block_max_num_proofs,
+          // We need to feed the compile-time bound because that is the size of the constraints
+          // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
+          block_max_num_proofs_bound,
           &block_num_proofs,
           &perm_block_poly_inst.inst,
           &proofs_times_vars_gens,
@@ -1176,6 +1179,7 @@ impl SNARK {
       (proof, perm_block_poly_challenges)
     };
 
+    /*
     // Final evaluation on PERM_BLOCK_POLY
     let (perm_block_poly_inst_evals, perm_block_poly_r1cs_eval_proof) = {
       let [rp, _, rx, ry] = perm_block_poly_challenges.clone();
@@ -1235,6 +1239,7 @@ impl SNARK {
       }
       (perm_block_poly_list, proof_eval_perm_block_prod_list)
     };
+    */
 
     /*
 
@@ -1416,12 +1421,13 @@ impl SNARK {
       perm_block_root_r1cs_eval_proof,
 
       perm_block_poly_r1cs_sat_proof,
+
+      /*
       perm_block_poly_inst_evals,
       perm_block_poly_r1cs_eval_proof,
       perm_block_poly_list,
       proof_eval_perm_block_prod_list,
 
-      /*
       perm_exec_root_r1cs_sat_proof,
       perm_exec_root_inst_evals,
       perm_exec_root_r1cs_eval_proof,
@@ -1706,6 +1712,7 @@ impl SNARK {
     // PERM_BLOCK_POLY
     // --
 
+    /*
     let perm_block_poly_bound_tau = {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_block_poly_challenges = self.perm_block_poly_r1cs_sat_proof.verify(
@@ -1759,7 +1766,6 @@ impl SNARK {
       perm_block_poly_bound_tau
     };
 
-    /*
     // --
     // PERM_EXEC_ROOT
     // --

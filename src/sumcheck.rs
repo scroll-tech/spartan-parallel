@@ -604,6 +604,15 @@ impl ZKSumcheckInstanceProof {
   where
     F: Fn(&Scalar, &Scalar, &Scalar) -> Scalar,
   {
+    /* For debugging only */
+    /* If the value is not 0, the instance / input is wrong */
+    let mut expected = Scalar::zero();
+    for i in 0..poly_A.len() {
+      expected += poly_A[i] * poly_B[i] * poly_C[i];
+    }
+    println!("EXPECTED: {:?}", expected);
+    println!("CLAIM: {:?}", claim);
+
     let (blinds_poly, blinds_evals) = (
       random_tape.random_vector(b"blinds_poly", num_rounds),
       random_tape.random_vector(b"blinds_evals", num_rounds),

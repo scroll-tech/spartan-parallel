@@ -54,8 +54,8 @@ impl DensePolynomial_PQX {
       }
     }
 
-  // Assume z_mat is in its standard form of (p, q, x) as what a reasonable front end would provide
-  // Convert it to (p, q_rev, x)
+  // Assume z_mat is in its standard form of (p, q, x)
+  // Reverse q and convert it to (p, q_rev, x)
   pub fn new_rev(z_mat: &Vec<Vec<Vec<Scalar>>>, num_proofs: &Vec<usize>, max_num_proofs: usize) -> Self {
     let mut Z = Vec::new();
     let num_instances = z_mat.len();
