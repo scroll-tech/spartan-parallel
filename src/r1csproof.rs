@@ -1026,7 +1026,7 @@ impl R1CSProof {
     for p in 0..num_proofs {
       // if poly_vars exists, compute combined_poly as (Scalar::one() - ry[0]) * poly_vars + ry[0] * poly_inputs
       // otherwise combined_poly is just poly_inputs
-      let (combined_poly, r) = (poly_w_list[p].clone(), [rq, ry].concat());
+      let (combined_poly, r) = (poly_w_list[p].clone(), [rq.clone(), ry.clone()].concat());
 
       let eval_vars_at_ry = combined_poly.evaluate(&r);
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
@@ -1105,6 +1105,7 @@ impl R1CSProof {
     )
   }
 
+  /*
   pub fn verify_single(
     &self,
     num_vars: usize,
@@ -1256,6 +1257,7 @@ impl R1CSProof {
 
     Ok((rx, ry))
   }
+  */
 
 }
 

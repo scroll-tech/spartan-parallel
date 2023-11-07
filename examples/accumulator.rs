@@ -69,6 +69,7 @@ fn produce_r1cs() -> (
   usize,
   usize,
   usize,
+  usize,
   [Instance; 2],
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
@@ -499,9 +500,12 @@ fn produce_r1cs() -> (
   // D1[k] <- v[k+1] * pi[k+1]
   // D2[k] <- x[k] * (D1[k] + (1 - v[k + 1]))
   // PERM_EXEC_POLY looks like PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
-  let perm_block_poly_num_cons = 3 * block_max_num_proofs_bound;
+  let perm_poly_num_cons_base = 3;
+  let perm_block_poly_num_copies = block_max_num_proofs_bound;
+  let perm_block_poly_num_cons = perm_poly_num_cons_base * perm_block_poly_num_copies;
   let perm_block_poly_num_non_zero_entries = 5 * block_max_num_proofs_bound;
-  let perm_exec_poly_num_cons = 3 * total_num_proofs_bound;
+  let perm_exec_poly_num_copies = total_num_proofs_bound;
+  let perm_exec_poly_num_cons = perm_poly_num_cons_base * perm_exec_poly_num_copies;
   let perm_exec_poly_num_non_zero_entries = 5 * total_num_proofs_bound;
   
   let perm_poly_inst = [block_max_num_proofs_bound, total_num_proofs_bound].map(|entry_size| {
@@ -706,9 +710,10 @@ fn produce_r1cs() -> (
     perm_root_num_non_zero_entries,
     perm_root_inst,
     
-    perm_block_poly_num_cons,
+    perm_poly_num_cons_base,
+    perm_block_poly_num_copies,
     perm_block_poly_num_non_zero_entries,
-    perm_exec_poly_num_cons,
+    perm_exec_poly_num_copies,
     perm_exec_poly_num_non_zero_entries,
     perm_poly_inst,
 
@@ -747,9 +752,10 @@ fn main() {
     perm_root_num_non_zero_entries,
     perm_root_inst,
     
-    perm_block_poly_num_cons,
+    perm_poly_num_cons_base,
+    perm_block_poly_num_copies,
     perm_block_poly_num_non_zero_entries,
-    perm_exec_poly_num_cons,
+    perm_exec_poly_num_copies,
     perm_exec_poly_num_non_zero_entries,
     perm_poly_inst,
     
@@ -757,6 +763,9 @@ fn main() {
     block_inputs_matrix,
     exec_inputs
   ) = produce_r1cs();
+
+  let perm_block_poly_num_cons = perm_poly_num_cons_base * perm_block_poly_num_copies;
+  let perm_exec_poly_num_cons = perm_poly_num_cons_base * perm_exec_poly_num_copies;
 
   assert_eq!(block_num_instances, block_vars_matrix.len());
   assert_eq!(block_num_instances, block_inputs_matrix.len());

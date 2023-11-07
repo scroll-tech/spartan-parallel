@@ -370,6 +370,7 @@ pub struct SNARK {
   perm_block_poly_list: Vec<Scalar>,
   proof_eval_perm_block_prod_list: Vec<PolyEvalProof>,
   
+  /*
   perm_exec_root_r1cs_sat_proof: R1CSProof,
   perm_exec_root_inst_evals: (Scalar, Scalar, Scalar),
   perm_exec_root_r1cs_eval_proof: R1CSEvalProof,
@@ -379,6 +380,7 @@ pub struct SNARK {
   perm_exec_poly_r1cs_eval_proof: R1CSEvalProof,
   perm_exec_poly: Scalar,
   proof_eval_perm_exec_prod: PolyEvalProof,
+  */
 }
 
 impl SNARK {
@@ -1231,6 +1233,8 @@ impl SNARK {
       (perm_block_poly_list, proof_eval_perm_block_prod_list)
     };
 
+    /*
+
     // --
     // PERM_EXEC_ROOT
     // --
@@ -1373,6 +1377,8 @@ impl SNARK {
       (perm_exec_poly, proof_eval_perm_exec_prod)
     };
     
+    */
+
     SNARK {
       block_comm_vars_list,
       block_comm_inputs_list,
@@ -1412,6 +1418,7 @@ impl SNARK {
       perm_block_poly_list,
       proof_eval_perm_block_prod_list,
 
+      /*
       perm_exec_root_r1cs_sat_proof,
       perm_exec_root_inst_evals,
       perm_exec_root_r1cs_eval_proof,
@@ -1421,6 +1428,7 @@ impl SNARK {
       perm_exec_poly_r1cs_eval_proof,
       perm_exec_poly,
       proof_eval_perm_exec_prod,
+      */
     }
   }
 
@@ -1748,6 +1756,7 @@ impl SNARK {
       perm_block_poly_bound_tau
     };
 
+    /*
     // --
     // PERM_EXEC_ROOT
     // --
@@ -1842,6 +1851,7 @@ impl SNARK {
     // ASSERT_CORRECTNESS_OF_PERMUTATION
     // --
     assert_eq!(perm_block_poly_bound_tau, perm_exec_poly_bound_tau);
+    */
 
     timer_verify.stop();
     Ok(())
