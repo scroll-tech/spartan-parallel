@@ -495,7 +495,7 @@ fn produce_r1cs() -> (
   // To do this, think of each entry of w3[k] (w3[p][k]) as a tuple (v, x, 1, pi, D1, D2)
   // v[k]  <- whether the entry is valid
   // x[k]  <- \tau - (\sum_i a_i * r^{i-1})
-  // 1[k]  <- 1
+  // 1[k]  <- v[k] * 1
   // pi[k] <- v[k] * D2[k]
   // D1[k] <- v[k+1] * pi[k+1]
   // D2[k] <- x[k] * (D1[k] + (1 - v[k + 1]))

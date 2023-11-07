@@ -481,21 +481,18 @@ impl SparseMatPolynomial {
     assert!(self.M.len() >= num_proofs * base_num_rows);
     assert!(z.len() == num_proofs * base_num_cols);
 
-    let mut Mz_list = Vec::new();
-    for q in 0..num_proofs {
-      Mz_list.push(vec![Scalar::zero(); base_num_rows]);
-      let _ = (0..base_num_rows).map(|x| {
-          let i = q * base_num_rows + x;
-          let row = self.M[i].row;
-          assert!(row < num_proofs * base_num_rows);
-          let col = self.M[i].col;
-          let val = &self.M[i].val;
-          let (r, v) = if col < z.len() { (row, val * z[col]) } else { (row, Scalar::zero()) };
-          Mz_list[r / base_num_rows][r % base_num_rows] += v;
-        }
-      );
+    let mut Mz_list = vec![vec![Scalar::zero(); base_num_rows]; num_proofs];
+    for i in 0..self.M.len() {
+      let row = self.M[i].row;
+      // No need to evaluate constraints beyond num_proofs * base_num_rows
+      // As the results are always 0
+      if row < num_proofs * base_num_rows {
+        let col = self.M[i].col;
+        let val = &self.M[i].val;
+        let (r, v) = (row, if col < z.len() { val * z[col] } else { Scalar::zero() });
+        Mz_list[r / base_num_rows][r % base_num_rows] += v;
+      }
     }
-
     Mz_list
   }
 
