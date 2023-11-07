@@ -502,10 +502,8 @@ fn produce_r1cs() -> (
   // PERM_EXEC_POLY looks like PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
   let perm_poly_num_cons_base = 3;
   let perm_block_poly_num_copies = block_max_num_proofs_bound;
-  let perm_block_poly_num_cons = perm_poly_num_cons_base * perm_block_poly_num_copies;
   let perm_block_poly_num_non_zero_entries = 5 * block_max_num_proofs_bound;
   let perm_exec_poly_num_copies = total_num_proofs_bound;
-  let perm_exec_poly_num_cons = perm_poly_num_cons_base * perm_exec_poly_num_copies;
   let perm_exec_poly_num_non_zero_entries = 5 * total_num_proofs_bound;
   
   let perm_poly_inst = [block_max_num_proofs_bound, total_num_proofs_bound].map(|entry_size| {
@@ -824,6 +822,9 @@ fn main() {
     &perm_root_comm,
     &perm_root_decomm,
     &perm_root_gens,
+    perm_poly_num_cons_base,
+    perm_block_poly_num_copies,
+    perm_exec_poly_num_copies,
     &perm_poly_inst[0],
     &perm_block_poly_comm,
     &perm_block_poly_decomm,

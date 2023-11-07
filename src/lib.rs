@@ -433,6 +433,10 @@ impl SNARK {
     perm_root_decomm: &ComputationDecommitment,
     perm_root_gens: &SNARKGens,
 
+    perm_poly_num_cons_base: usize,
+    perm_block_poly_num_copies: usize,
+    perm_exec_poly_num_copies: usize,
+
     perm_block_poly_inst: &Instance,
     perm_block_poly_comm: &ComputationCommitment,
     perm_block_poly_decomm: &ComputationDecommitment,
@@ -1151,17 +1155,16 @@ impl SNARK {
 
     let (perm_block_poly_r1cs_sat_proof, perm_block_poly_challenges) = {
       let (proof, perm_block_poly_challenges) = {
-        R1CSProof::prove(
-          1,
-          0,
-          1,
+        R1CSProof::prove_single(
           block_num_instances,
-          &vec![block_num_instances],
-          block_max_num_proofs_bound * num_vars,
+          perm_poly_num_cons_base,
+          num_vars,
+          block_max_num_proofs,
+          &block_num_proofs,
           &perm_block_poly_inst.inst,
           &proofs_times_vars_gens,
-          vec![&vec![perm_block_w3_concat.clone()]],
-          vec![&vec![perm_block_poly_w3_concat.clone()]],
+          &perm_block_w3.iter().map(|i| i.iter().fold(Vec::new(), |a, b| [a, b.clone()].concat())).collect(),
+          &perm_block_poly_w3_list,
           transcript,
           &mut random_tape,
         )

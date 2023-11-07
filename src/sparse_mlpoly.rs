@@ -485,7 +485,7 @@ impl SparseMatPolynomial {
     for q in 0..num_proofs {
       Mz_list.push(
         (0..base_num_rows).map(|x| {
-          let i = q * num_proofs + x;
+          let i = q * base_num_rows + x;
           let row = self.M[i].row;
           assert!(row < num_proofs * base_num_rows);
           let col = self.M[i].col;

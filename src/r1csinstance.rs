@@ -398,8 +398,8 @@ impl R1CSInstance {
     num_cols: usize,
     z_list: &Vec<Vec<Scalar>>,
   ) -> (DensePolynomial_PQX, DensePolynomial_PQX, DensePolynomial_PQX) {
-    assert_eq!(max_num_proofs * num_rows, self.num_cons);
-    assert!(max_num_proofs * num_cols >= self.num_vars);
+    assert!(max_num_proofs * num_rows <= self.num_cons);
+    assert!(max_num_proofs * num_cols <= self.num_vars);
 
     let mut Az = Vec::new();
     let mut Bz = Vec::new();

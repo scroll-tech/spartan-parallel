@@ -811,9 +811,9 @@ impl R1CSProof {
     input_rows: &Vec<usize>,
 
     inst: &R1CSInstance,
+    gens: &R1CSGens,
     w_mat: &Vec<Vec<Scalar>>,
     poly_w_list: &Vec<DensePolynomial>,
-    gens: &R1CSGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
   ) -> (R1CSProof, [Vec<Scalar>; 4]) {
@@ -827,16 +827,15 @@ impl R1CSProof {
     // Assert meta values are correct
     assert_eq!(num_proofs, input_rows.len());
     assert_eq!(num_proofs, num_proofs.next_power_of_two());
-    assert_eq!(base_constraint_size, base_constraint_size.next_power_of_two());
     assert_eq!(base_input_size, base_input_size.next_power_of_two());
     assert_eq!(max_input_rows, max_input_rows.next_power_of_two());
     assert_eq!(w_mat.len(), num_proofs);
-    assert_eq!(inst.get_num_cons(), max_input_rows * base_constraint_size);
+    assert!(inst.get_num_cons() >= max_input_rows * base_constraint_size);
     for i in 0..input_rows.len() {
       let input = input_rows[i];
       assert!(input <= max_input_rows);
       assert_eq!(input, input.next_power_of_two());
-      assert_eq!(w_mat[i].len(), input);
+      assert_eq!(w_mat[i].len(), input * base_input_size);
     }
 
     // --
