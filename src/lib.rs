@@ -4,8 +4,8 @@
 #![allow(clippy::assertions_on_result_states)]
 
 // TODO: Proof might be incorrect if a block is never executed
-// TODO: Differentiate between max_num_proofs and max_num_proofs_bound
-// TODO: The verifier needs to check the first block and last block number are correct
+// TODO: Array cloning cleanup
+// TODO: prove_single complexity check
 // Q: Would it be insecure if an entry has valid = 0 but everything else not 0?
 // Q: What should we do with the constant bit if the entry is invalid?
 // Q: Can we trust that the Prover orders all valid = 1 before valid = 0?
@@ -39,8 +39,6 @@ mod timer;
 mod transcript;
 mod unipoly;
 
-use core::cmp::max;
-use curve25519_dalek::ristretto::CompressedRistretto;
 use dense_mlpoly::{DensePolynomial, PolyCommitment, PolyEvalProof};
 use errors::{ProofVerifyError, R1CSError};
 use itertools::Itertools;
@@ -330,6 +328,218 @@ impl SNARKGens {
   }
 }
 
+/// IOProofs contains a series of proofs that the committed values match the input and output of the program
+#[derive(Serialize, Deserialize, Debug)]
+struct IOProofs {
+  // The prover needs to prove:
+  // 1. Input and output block are both valid
+  // 2. Block number of the input and output block are correct
+  // 3. Input and outputs are correct
+  // 4. The constant value of the input is 1
+  input_valid_proof: PolyEvalProof,
+  output_valid_proof: PolyEvalProof,
+  input_block_num_proof: PolyEvalProof,
+  output_block_num_proof: PolyEvalProof,
+  constant_proof: PolyEvalProof,
+  input_correctness_proof_list: Vec<PolyEvalProof>,
+  output_correctness_proof_list: Vec<PolyEvalProof>,
+}
+
+impl IOProofs {
+  // Given the polynomial in execution order, generate all proofs
+  fn prove(
+    exec_poly_inputs: &DensePolynomial,
+    num_vars: usize,
+    num_proofs: usize,
+    input_block_num: Scalar,
+    output_block_num: Scalar,
+    input: Vec<Scalar>,
+    output: Vec<Scalar>,
+    output_block_index: usize,
+    input_output_cutoff: usize,
+    vars_gens: &R1CSGens,
+    transcript: &mut Transcript,
+    random_tape: &mut RandomTape
+  ) -> IOProofs {
+    let num_inputs = input_output_cutoff - 2;
+    assert!(2 * num_inputs + 2 <= num_vars);
+    let r_len = (num_proofs * num_vars).log_2();
+    let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
+
+    // input_valid_proof
+    let (input_valid_proof, _comm) = PolyEvalProof::prove(
+      exec_poly_inputs,
+      None,
+      &to_bin_array(0),
+      &Scalar::one(),
+      None,
+      &vars_gens.gens_pc,
+      transcript,
+      random_tape,
+    );
+    // output_valid_proof
+    let (output_valid_proof, _comm) = PolyEvalProof::prove(
+      exec_poly_inputs,
+      None,
+      &to_bin_array(output_block_index * num_vars),
+      &Scalar::one(),
+      None,
+      &vars_gens.gens_pc,
+      transcript,
+      random_tape,
+    );
+    // input_block_num_proof
+    let (input_block_num_proof, _comm) = PolyEvalProof::prove(
+      exec_poly_inputs,
+      None,
+      &to_bin_array(1),
+      &input_block_num,
+      None,
+      &vars_gens.gens_pc,
+      transcript,
+      random_tape,
+    );
+    // output_block_num_proof
+    let (output_block_num_proof, _comm) = PolyEvalProof::prove(
+      exec_poly_inputs,
+      None,
+      &to_bin_array(output_block_index * num_vars + input_output_cutoff + 1),
+      &output_block_num,
+      None,
+      &vars_gens.gens_pc,
+      transcript,
+      random_tape,
+    );
+    // constant_proof
+    let (constant_proof, _comm) = PolyEvalProof::prove(
+      exec_poly_inputs,
+      None,
+      &to_bin_array(input_output_cutoff),
+      &Scalar::one(),
+      None,
+      &vars_gens.gens_pc,
+      transcript,
+      random_tape,
+    );
+    // correctness_proofs
+    let mut input_correctness_proof_list = Vec::new();
+    let mut output_correctness_proof_list = Vec::new();
+    for i in 0..num_inputs {
+      let (input_correctness_proof, _comm) = PolyEvalProof::prove(
+        exec_poly_inputs,
+        None,
+        &to_bin_array(2 + i),
+        &input[i],
+        None,
+        &vars_gens.gens_pc,
+        transcript,
+        random_tape,
+      );
+      input_correctness_proof_list.push(input_correctness_proof);
+      let (output_correctness_proof, _comm) = PolyEvalProof::prove(
+        exec_poly_inputs,
+        None,
+        &to_bin_array(output_block_index * num_vars + input_output_cutoff + 2 + i),
+        &output[i],
+        None,
+        &vars_gens.gens_pc,
+        transcript,
+        random_tape,
+      );
+      output_correctness_proof_list.push(output_correctness_proof);
+    }
+    IOProofs {
+      input_valid_proof,
+      output_valid_proof,
+      input_block_num_proof,
+      output_block_num_proof,
+      constant_proof,
+      input_correctness_proof_list,
+      output_correctness_proof_list,
+    }
+  }
+
+  fn verify(
+    &self,
+    comm_poly_inputs: &PolyCommitment,
+    num_vars: usize,
+    num_proofs: usize,
+    input_block_num: Scalar,
+    output_block_num: Scalar,
+    input: Vec<Scalar>,
+    output: Vec<Scalar>,
+    output_block_index: usize,
+    input_output_cutoff: usize,
+    vars_gens: &R1CSGens,
+    transcript: &mut Transcript,
+  ) -> Result<(), ProofVerifyError> {
+    let num_inputs = input_output_cutoff - 2;
+    assert!(2 * num_inputs + 2 <= num_vars);
+    let r_len = (num_proofs * num_vars).log_2();
+    let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
+    
+    // input_valid_proof
+    self.input_valid_proof.verify_plain(
+      &vars_gens.gens_pc,
+      transcript,
+      &to_bin_array(0),
+      &Scalar::one(),
+      comm_poly_inputs,
+    )?;
+    // output_valid_proof
+    self.output_valid_proof.verify_plain(
+      &vars_gens.gens_pc,
+      transcript,
+      &to_bin_array(output_block_index * num_vars),
+      &Scalar::one(),
+      comm_poly_inputs,
+    )?;
+    // input_block_num_proof
+    self.input_block_num_proof.verify_plain(
+      &vars_gens.gens_pc,
+      transcript,
+      &to_bin_array(1),
+      &input_block_num,
+      comm_poly_inputs,
+    )?;
+    // output_block_num_proof
+    self.output_block_num_proof.verify_plain(
+      &vars_gens.gens_pc,
+      transcript,
+      &to_bin_array(output_block_index * num_vars + input_output_cutoff + 1),
+      &output_block_num,
+      comm_poly_inputs,
+    )?;
+    // constant_proof
+    self.constant_proof.verify_plain(
+      &vars_gens.gens_pc,
+      transcript,
+      &to_bin_array(input_output_cutoff),
+      &Scalar::one(),
+      comm_poly_inputs,
+    )?;
+    // correctness_proofs
+    for i in 0..num_inputs {
+      self.input_correctness_proof_list[i].verify_plain(
+        &vars_gens.gens_pc,
+        transcript,
+        &to_bin_array(2 + i),
+        &input[i],
+        comm_poly_inputs,
+      )?;
+      self.output_correctness_proof_list[i].verify_plain(
+        &vars_gens.gens_pc,
+        transcript,
+        &to_bin_array(output_block_index * num_vars + input_output_cutoff + 2 + i),
+        &output[i],
+        comm_poly_inputs,
+      )?;
+    }
+
+    Ok(())
+  }
+}
+
 /// `SNARK` holds a proof produced by Spartan SNARK
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SNARK {
@@ -382,6 +592,8 @@ pub struct SNARK {
   perm_exec_poly_r1cs_eval_proof: R1CSEvalProof,
   perm_exec_poly: Scalar,
   proof_eval_perm_exec_prod: PolyEvalProof,
+
+  io_proof: IOProofs
 }
 
 impl SNARK {
@@ -405,6 +617,12 @@ impl SNARK {
 
   /// A method to produce a SNARK proof of the satisfiability of an R1CS instance
   pub fn prove(
+    input_block_num: usize,
+    output_block_num: usize,
+    input: &Vec<[u8; 32]>,
+    output: &Vec<[u8; 32]>,
+    output_block_index: usize,
+
     num_vars: usize,
     input_output_cutoff: usize,
     total_num_proofs_bound: usize,
@@ -468,6 +686,12 @@ impl SNARK {
     let mut random_tape = RandomTape::new(b"proof");
 
     transcript.append_protocol_name(SNARK::protocol_name());
+
+    // --
+    // COMMITMENTS
+    // --
+
+    // Commit instances
     block_comm.comm.append_to_transcript(b"block_comm", transcript);
     consis_comb_comm.comm.append_to_transcript(b"consis_comm", transcript);
     consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
@@ -481,17 +705,21 @@ impl SNARK {
     let block_inputs_mat = block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
 
-    // --
-    // COMMITMENTS
-    // --
+    // Commit io
+    let input_block_num = Scalar::from(input_block_num as u64);
+    let output_block_num = Scalar::from(output_block_num as u64);
+    let input: Vec<Scalar> = input.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
+    let output: Vec<Scalar> = output.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
+    input_block_num.append_to_transcript(b"input_block_num", transcript);
+    output_block_num.append_to_transcript(b"output_block_num", transcript);
+    input.append_to_transcript(b"input_list", transcript);
+    output.append_to_transcript(b"output_list", transcript);
 
     // Commit num_proofs
     let timer_commit = Timer::new("metacommit");
-    let block_max_num_proofs_64: u64 = block_max_num_proofs.try_into().unwrap();
-    Scalar::from(block_max_num_proofs_64).append_to_transcript(b"block_max_num_proofs", transcript);
+    Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
     for n in block_num_proofs {
-      let n_64: u64 = (*n).try_into().unwrap();
-      Scalar::from(n_64).append_to_transcript(b"block_num_proofs", transcript);
+      Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
     }
     timer_commit.stop();
 
@@ -1291,7 +1519,7 @@ impl SNARK {
           &perm_root_inst.inst,
           &vars_gens,
           vec![&vec![vec![perm_w0]], &vec![exec_inputs_list], &vec![perm_exec_w2], &vec![perm_exec_w3.clone()]],
-          vec![&vec![perm_poly_w0], &vec![exec_poly_inputs], &vec![perm_exec_poly_w2], &vec![perm_exec_poly_w3.clone()]],
+          vec![&vec![perm_poly_w0], &vec![exec_poly_inputs.clone()], &vec![perm_exec_poly_w2], &vec![perm_exec_poly_w3.clone()]],
           transcript,
           &mut random_tape,
         )
@@ -1418,6 +1646,25 @@ impl SNARK {
       (perm_exec_poly, proof_eval_perm_exec_prod)
     };
 
+    // --
+    // IO_PROOFS
+    // --
+
+    let io_proof = IOProofs::prove(
+      &exec_poly_inputs,
+      num_vars,
+      consis_num_proofs,
+      input_block_num,
+      output_block_num,
+      input,
+      output,
+      output_block_index,
+      input_output_cutoff,
+      vars_gens,
+      transcript,
+      &mut random_tape
+    );
+
     SNARK {
       block_comm_vars_list,
       block_comm_inputs_list,
@@ -1468,13 +1715,22 @@ impl SNARK {
       perm_exec_poly_r1cs_eval_proof,
       perm_exec_poly,
       proof_eval_perm_exec_prod,
+
+      io_proof
     }
   }
 
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
   pub fn verify(
     &self,
+    input_block_num: usize,
+    output_block_num: usize,
+    input: &Vec<[u8; 32]>,
+    output: &Vec<[u8; 32]>,
+    output_block_index: usize,
+
     num_vars: usize,
+    input_output_cutoff: usize,
     total_num_proofs_bound: usize,
     block_num_instances: usize,
     block_max_num_proofs_bound: usize,
@@ -1516,27 +1772,35 @@ impl SNARK {
     let timer_verify = Timer::new("SNARK::verify");
     transcript.append_protocol_name(SNARK::protocol_name());
 
-    // append a commitment to the computation to the transcript
-    block_comm.comm.append_to_transcript(b"block_comm", transcript);
-    consis_comb_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    perm_prelim_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    perm_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    perm_block_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    perm_exec_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
-
     // --
     // COMMITMENTS
     // --
 
+    let input_block_num = Scalar::from(input_block_num as u64);
+    let output_block_num = Scalar::from(output_block_num as u64);
+    let input: Vec<Scalar> = input.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
+    let output: Vec<Scalar> = output.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
     {
+      // append a commitment to the computation to the transcript
+      block_comm.comm.append_to_transcript(b"block_comm", transcript);
+      consis_comb_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      perm_prelim_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      perm_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      perm_block_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      perm_exec_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
+
+      // Commit io
+      input_block_num.append_to_transcript(b"input_block_num", transcript);
+      output_block_num.append_to_transcript(b"output_block_num", transcript);
+      input.append_to_transcript(b"input_list", transcript);
+      output.append_to_transcript(b"output_list", transcript);
+
       // Commit num_proofs
       let timer_commit = Timer::new("metacommit");
-      let block_max_num_proofs_64: u64 = block_max_num_proofs.try_into().unwrap();
-      Scalar::from(block_max_num_proofs_64).append_to_transcript(b"block_max_num_proofs", transcript);
+      Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
       for n in block_num_proofs {
-        let n_64: u64 = (*n).try_into().unwrap();
-        Scalar::from(n_64).append_to_transcript(b"block_num_proofs", transcript);
+        Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
       }
       timer_commit.stop();
 
@@ -1919,6 +2183,23 @@ impl SNARK {
     // --
     assert_eq!(perm_block_poly_bound_tau, perm_exec_poly_bound_tau);
 
+    // --
+    // IO_PROOFS
+    // --
+    self.io_proof.verify(
+      &self.exec_comm_inputs,
+      num_vars,
+      consis_num_proofs,
+      input_block_num,
+      output_block_num,
+      input,
+      output,
+      output_block_index,
+      input_output_cutoff,
+      vars_gens,
+      transcript
+    )?;
+    
     timer_verify.stop();
     Ok(())
   }

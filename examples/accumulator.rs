@@ -47,6 +47,12 @@ use merlin::Transcript;
 fn produce_r1cs() -> (
   usize,
   usize,
+  Vec<[u8; 32]>,
+  Vec<[u8; 32]>,
+  usize,
+
+  usize,
+  usize,
   usize,
   usize,
   usize,
@@ -147,8 +153,8 @@ fn produce_r1cs() -> (
   
   // num_vars should be consistent accross the instances
   // everything else is instance-specific
-  // num_vars = num_inputs
   // Divide inputs into (1, input, 1, output)
+  // So num_inputs = num_outputs = input_output_cutoff - 1
   let num_vars = 16;
   let input_output_cutoff = 4;
 
@@ -156,6 +162,11 @@ fn produce_r1cs() -> (
   // OBTAINED DURING COMPILE TIME
   let total_num_proofs_bound = 16;
   let block_max_num_proofs_bound = 8;
+
+  // What is the input and output block?
+  // Note: the assumption is that during a normal execution, the input block and the output block will only be reached once
+  let input_block_num = 0;
+  let output_block_num = 2;
 
   // --
   // BLOCK Instances
@@ -327,6 +338,7 @@ fn produce_r1cs() -> (
   // - exec_inputs: <v, i0, i1, i2, ..., cnst, o0, o1, o2, ...>
   // - consis_w2: <0, i0 * r, i1 * r^2, ..., 0, o0 * r, o1 * r^2, ...>
   // - consis_w3: <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0, 0, ...>
+  // Note: if v is 1, it is almost impossible to have consis_w3[1] = 0
   let consis_comb_num_cons = 2 * input_output_cutoff + 1;
   let consis_comb_num_non_zero_entries = 4 * input_output_cutoff - 1;
 
@@ -338,7 +350,6 @@ fn produce_r1cs() -> (
     let mut B_list = Vec::new();
     let mut C_list = Vec::new();
     
-    // Check output of the last block is the input of the next block
     let (A, B, C) = {
       let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -409,9 +420,8 @@ fn produce_r1cs() -> (
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
       // R1CS:
-      // For w2
       for i in 0..total_num_proofs_bound - 1 {
-        // Dot product for inputs
+        // Output matches input
         (A, B, C) = gen_constr(A, B, C, 0,
           i, vec![(i * num_vars + V_o, 1), ((i + 1) * num_vars + V_i, -1)], vec![((i + 1) * num_vars + V_valid, 1)], vec![]);
       }
@@ -615,6 +625,11 @@ fn produce_r1cs() -> (
   let block_max_num_proofs = 4;
   let block_num_proofs = vec![4, 1];
   let consis_num_proofs: usize = 8;
+  // What is the input and the output?
+  let input = vec![zero, zero];
+  let output = vec![four, six];
+  // Which block in the execution order is the output block?
+  let output_block_index = 4;
 
   // --
   // Begin Assignments
@@ -663,6 +678,7 @@ fn produce_r1cs() -> (
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
       exec_inputs.push(next_block_assignment_inputs);
+      // Iteration i = 4
       let mut vars = vec![one, three, three, two, four, six, zero, zero, zero];
       let mut inputs = vec![one, one, three, three, one, two, four, six];
       vars.extend(vec![zero; 7]);
@@ -718,6 +734,12 @@ fn produce_r1cs() -> (
   // --
 
   (
+    input_block_num,
+    output_block_num,
+    input,
+    output,
+    output_block_index,
+
     num_vars,
     input_output_cutoff,
     total_num_proofs_bound,
@@ -761,7 +783,12 @@ fn produce_r1cs() -> (
 fn main() {
   // produce an R1CS instance
   let (
-    // num_inputs == num_vars
+    input_block_num,
+    output_block_num,
+    input,
+    output,
+    output_block_index,
+
     num_vars,
     input_output_cutoff,
     total_num_proofs_bound,
@@ -840,6 +867,12 @@ fn main() {
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
   let proof = SNARK::prove(
+    input_block_num,
+    output_block_num,
+    &input,
+    &output,
+    output_block_index,
+    
     num_vars,
     input_output_cutoff,
     total_num_proofs_bound,
@@ -891,7 +924,14 @@ fn main() {
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
     .verify(
+      input_block_num,
+      output_block_num,
+      &input,
+      &output,
+      output_block_index,
+
       num_vars,
+      input_output_cutoff,
       total_num_proofs_bound,
       block_num_instances, 
       block_max_num_proofs_bound,
