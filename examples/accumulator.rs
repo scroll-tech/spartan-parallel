@@ -67,6 +67,9 @@ fn produce_r1cs() -> (
   Instance,
   usize,
   usize,
+  Instance,
+  usize,
+  usize,
   usize,
   [Instance; 2],
   Vec<Vec<VarsAssignment>>,
@@ -387,6 +390,41 @@ fn produce_r1cs() -> (
   // CONSIS_CHECK
   // CONSIS_CHECK takes in consis_w3 = <v, i, o, 0, 0, ...>
   // and verifies (o[k] - i[k + 1]) * v[k + 1] = 0 for all k
+  let consis_check_num_cons_base = 1;
+  let consis_check_num_non_zero_entries = 2 * total_num_proofs_bound;
+  let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
+
+  let V_valid = 0;
+  let V_i = 1;
+  let V_o = 2;
+  let consis_check_inst = {
+    let mut A_list = Vec::new();
+    let mut B_list = Vec::new();
+    let mut C_list = Vec::new();
+    
+    // Check output of the last block is the input of the next block
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      // R1CS:
+      // For w2
+      for i in 0..total_num_proofs_bound - 1 {
+        // Dot product for inputs
+        (A, B, C) = gen_constr(A, B, C, 0,
+          i, vec![(i * num_vars + V_o, 1), ((i + 1) * num_vars + V_i, -1)], vec![((i + 1) * num_vars + V_valid, 1)], vec![]);
+      }
+      (A, B, C)
+    };
+    A_list.push(A);
+    B_list.push(B);
+    C_list.push(C);
+
+    let consis_check_inst = Instance::new(1, consis_check_num_cons, total_num_proofs_bound * num_vars, &A_list, &B_list, &C_list).unwrap();
+    
+    consis_check_inst
+  };
 
   // --
   // PERM Instances
@@ -696,6 +734,10 @@ fn produce_r1cs() -> (
     consis_comb_num_non_zero_entries,
     consis_num_proofs,
     consis_comb_inst,
+
+    consis_check_num_cons_base,
+    consis_check_num_non_zero_entries,
+    consis_check_inst,
     
     perm_prelim_num_cons,
     perm_prelim_num_non_zero_entries,
@@ -736,6 +778,10 @@ fn main() {
     consis_comb_num_non_zero_entries,
     consis_num_proofs,
     consis_comb_inst,
+
+    consis_check_num_cons_base,
+    consis_check_num_non_zero_entries,
+    consis_check_inst,
     
     perm_prelim_num_cons,
     perm_prelim_num_non_zero_entries,
@@ -757,6 +803,7 @@ fn main() {
 
   let perm_block_poly_num_cons = perm_poly_num_cons_base * block_max_num_proofs_bound;
   let perm_exec_poly_num_cons = perm_poly_num_cons_base * total_num_proofs_bound;
+  let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
 
   assert_eq!(block_num_instances, block_vars_matrix.len());
   assert_eq!(block_num_instances, block_inputs_matrix.len());
@@ -767,6 +814,7 @@ fn main() {
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
   let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_vars, 1, consis_comb_num_non_zero_entries);
+  let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * num_vars, 1, consis_check_num_non_zero_entries);
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
@@ -783,6 +831,7 @@ fn main() {
   // TODO: change to encoding all r1cs instances
   let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
   let (consis_comb_comm, consis_comb_decomm) = SNARK::encode(&consis_comb_inst, &consis_comb_gens);
+  let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_poly_inst[0], &perm_block_poly_gens);
@@ -807,6 +856,11 @@ fn main() {
     &consis_comb_comm,
     &consis_comb_decomm,
     &consis_comb_gens,
+    consis_check_num_cons_base,
+    &consis_check_inst,
+    &consis_check_comm,
+    &consis_check_decomm,
+    &consis_check_gens,
     &perm_prelim_inst,
     &perm_prelim_comm,
     &perm_prelim_decomm,
@@ -850,6 +904,9 @@ fn main() {
       consis_comb_num_cons, 
       &consis_comb_comm,
       &consis_comb_gens,
+      consis_check_num_cons_base, 
+      &consis_check_comm,
+      &consis_check_gens,
       perm_prelim_num_cons,
       &perm_prelim_comm,
       &perm_prelim_gens,

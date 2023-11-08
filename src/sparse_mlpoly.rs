@@ -478,7 +478,6 @@ impl SparseMatPolynomial {
     base_num_cols: usize,
     z: &[Scalar]
   ) -> Vec<Vec<Scalar>> {
-    assert!(self.M.len() >= num_proofs * base_num_rows);
     assert!(z.len() == num_proofs * base_num_cols);
 
     let mut Mz_list = vec![vec![Scalar::zero(); base_num_rows]; num_proofs];
