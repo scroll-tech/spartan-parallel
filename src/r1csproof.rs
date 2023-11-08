@@ -1155,11 +1155,10 @@ impl R1CSProof {
     max_input_rows: usize,
     input_rows: &Vec<usize>,
 
-    input: &[Scalar],
     gens: &R1CSGens,
     evals: &(Scalar, Scalar, Scalar),
     // Commitment for witnesses
-    comm_w_list: Vec<&Vec<PolyCommitment>>,
+    comm_w_list: &Vec<PolyCommitment>,
     transcript: &mut Transcript,
   ) -> Result<(Vec<Scalar>, Vec<Scalar>), ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());

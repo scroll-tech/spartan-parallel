@@ -431,8 +431,6 @@ impl SNARK {
     perm_root_gens: &SNARKGens,
 
     perm_poly_num_cons_base: usize,
-    perm_block_poly_num_copies: usize,
-    perm_exec_poly_num_copies: usize,
 
     perm_block_poly_inst: &Instance,
     perm_block_poly_comm: &ComputationCommitment,
@@ -1421,11 +1419,9 @@ impl SNARK {
     perm_root_comm: &ComputationCommitment,
     perm_root_gens: &SNARKGens,
 
-    perm_block_poly_num_cons: usize,
+    perm_poly_num_cons_base: usize,
     perm_block_poly_comm: &ComputationCommitment,
     perm_block_poly_gens: &SNARKGens,
-
-    perm_exec_poly_num_cons: usize,
     perm_exec_poly_comm: &ComputationCommitment,
     perm_exec_poly_gens: &SNARKGens,
 
@@ -1664,24 +1660,22 @@ impl SNARK {
     // PERM_BLOCK_POLY
     // --
 
-    /*
-    let perm_block_poly_bound_tau = {
+    // let perm_block_poly_bound_tau = {
       let timer_sat_proof = Timer::new("verify_sat_proof");
-      let perm_block_poly_challenges = self.perm_block_poly_r1cs_sat_proof.verify(
-        1,
-        0,
-        1,
+      let perm_block_poly_challenges = self.perm_block_poly_r1cs_sat_proof.verify_single(
         block_num_instances,
-       &vec![block_num_instances],
-        block_max_num_proofs_bound * num_vars,
-        perm_block_poly_num_cons,
+        perm_poly_num_cons_base,
+        num_vars,
+        block_max_num_proofs_bound,
+        &block_num_proofs,
         &proofs_times_vars_gens,
         &self.perm_block_poly_inst_evals,
-        vec![&vec![self.perm_block_comm_w3_concat.clone()]],
+        &self.perm_block_comm_w3_list,
         transcript,
       )?;
       timer_sat_proof.stop();
 
+      /*
       let timer_eval_proof = Timer::new("verify_eval_proof");
       // Verify Evaluation on PERM_BLOCK_POLY
       let (Ar, Br, Cr) = &self.perm_block_poly_inst_evals;
