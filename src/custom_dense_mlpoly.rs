@@ -1,15 +1,10 @@
 #![allow(clippy::too_many_arguments)]
-use crate::dense_mlpoly::{DensePolynomial, EqPolynomial, PolyCommitmentGens};
+use crate::dense_mlpoly::DensePolynomial;
 
-use super::commitments::Commitments;
-use super::errors::ProofVerifyError;
-use super::group::{CompressedGroup, GroupElement, VartimeMultiscalarMul};
+use super::group::CompressedGroup;
 use super::math::Math;
-use super::nizk::DotProductProofLog;
-use super::random::RandomTape;
 use super::scalar::Scalar;
 use super::transcript::{AppendToTranscript, ProofTranscript};
-use curve25519_dalek::ristretto::RistrettoPoint;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +14,7 @@ use serde::{Deserialize, Serialize};
 // Dense polynomial with variable order: p, q_rev, x
 // Used by Z_poly in r1csproof
 #[derive(Debug, Clone)]
-pub struct DensePolynomial_PQX {
+pub struct DensePolynomialPqx {
   num_vars_p: usize,
   num_vars_q: usize,
   num_vars_x: usize,
@@ -37,12 +32,12 @@ fn rev_bits(q: usize, max_num_proofs: usize) -> usize {
     (0..max_num_proofs.log_2()).rev().map(|i| q / (i.pow2()) % 2 * (max_num_proofs / i.pow2() / 2)).fold(0, |a, b| a + b)
 }
 
-impl DensePolynomial_PQX {
+impl DensePolynomialPqx {
   // Assume z_mat is of form (p, q_rev, x), construct DensePoly
   pub fn new(z_mat: &Vec<Vec<Vec<Scalar>>>, num_proofs: &Vec<usize>, max_num_proofs: usize) -> Self {
       let num_instances = z_mat.len();
       let num_inputs = z_mat[0][0].len();
-      DensePolynomial_PQX {
+      DensePolynomialPqx {
         num_vars_q: max_num_proofs.log_2(),
         num_vars_p: num_instances.log_2(),
         num_vars_x: num_inputs.log_2(),
@@ -74,7 +69,7 @@ impl DensePolynomial_PQX {
           }
       }
     }
-    DensePolynomial_PQX {
+    DensePolynomialPqx {
       num_vars_q: max_num_proofs.log_2(),
       num_vars_p: num_instances.log_2(),
       num_vars_x: num_inputs.log_2(),
@@ -109,7 +104,7 @@ impl DensePolynomial_PQX {
           1 => { return self.Z[p + self.num_instances / 2][q_rev][x]; }
           2 => { return if self.num_proofs[p] == 1 { Scalar::zero() } else { self.Z[p][q_rev + self.num_proofs[p] / 2][x] }; }
           3 => { return self.Z[p][q_rev][x + self.num_inputs / 2]; }
-          _ => { panic!("DensePolynomial_PQX bound failed: unrecognized mode {}!", mode); }
+          _ => { panic!("DensePolynomialPqx bound failed: unrecognized mode {}!", mode); }
       }
   }
 
@@ -122,7 +117,7 @@ impl DensePolynomial_PQX {
           1 => { self.bound_poly_p(r); }
           2 => { self.bound_poly_q(r); }
           3 => { self.bound_poly_x(r); }
-          _ => { panic!("DensePolynomial_PQX bound failed: unrecognized mode {}!", mode); }
+          _ => { panic!("DensePolynomialPqx bound failed: unrecognized mode {}!", mode); }
       }
   }
 
@@ -215,36 +210,6 @@ impl DensePolynomial_PQX {
     return cl.index(0, 0, 0);
   }
 
-  pub fn commit(
-    &self,
-    gens: &PolyCommitmentGens,
-    random_tape: Option<&mut RandomTape>,
-  ) -> (PolyCommitment_PQX, PolyCommitmentBlinds_PQX) {
-
-    let mut blinds = Vec::new();
-    if let Some(t) = random_tape {
-      for p in 0..self.num_instances {
-        blinds.push(t.random_vector(b"poly_blinds", self.num_proofs[p]));
-      } 
-    } else {
-      for p in 0..self.num_instances {
-        blinds.push(vec![Scalar::zero(); self.num_proofs[p]]);
-      };
-    }
-
-    let blinds = PolyCommitmentBlinds_PQX { blinds };
-
-    let mut C = Vec::new();
-    for p in 0..self.num_instances {
-      C.push(Vec::new());
-      for q in 0..self.num_proofs[p] {
-        C[p].push(self.Z[p][q].commit(&blinds.blinds[p][q], &gens.gens.gens_n).compress());
-      }
-    }
-
-    (PolyCommitment_PQX { C }, blinds)
-  }    
-
   // Convert to a (p, q_rev, x) regular dense poly
   pub fn to_dense_poly(&self) -> DensePolynomial {
       let mut Z_poly = vec![Scalar::zero(); self.num_instances * self.max_num_proofs * self.num_inputs];
@@ -260,16 +225,12 @@ impl DensePolynomial_PQX {
   }
 }
 
-pub struct PolyCommitmentBlinds_PQX {
-    blinds: Vec<Vec<Scalar>>,
-  }
-
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PolyCommitment_PQX {
+pub struct PolyCommitmentPqx {
     C: Vec<Vec<CompressedGroup>>,
 }
 
-impl AppendToTranscript for PolyCommitment_PQX {
+impl AppendToTranscript for PolyCommitmentPqx {
     fn append_to_transcript(&self, label: &'static [u8], transcript: &mut Transcript) {
       transcript.append_message(label, b"poly_commitment_begin");
       for p in 0..self.C.len() {
@@ -280,118 +241,3 @@ impl AppendToTranscript for PolyCommitment_PQX {
       transcript.append_message(label, b"poly_commitment_end");
     }
   }
-  
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PolyEvalProof_PQX {
-  proof: DotProductProofLog,
-}
-
-impl PolyEvalProof_PQX {
-  fn protocol_name() -> &'static [u8] {
-    b"polynomial evaluation proof"
-  }
-
-  pub fn prove(
-    mut poly: DensePolynomial_PQX,
-    num_proofs: &Vec<usize>,
-    blinds_opt: Option<&PolyCommitmentBlinds_PQX>,
-    rp: &[Scalar],                 // point at which the polynomial is evaluated
-    rq: &[Scalar],                 // rq is in reversed order, i.e. the same order as the polynomial
-    rx: &[Scalar],
-    Zr: &Scalar,                   // evaluation of \widetilde{Z}(r)
-    blind_Zr_opt: Option<&Scalar>, // specifies a blind for Zr
-    gens: &PolyCommitmentGens,
-    transcript: &mut Transcript,
-    random_tape: &mut RandomTape,
-  ) -> (PolyEvalProof_PQX, CompressedGroup) {
-    transcript.append_protocol_name(PolyEvalProof_PQX::protocol_name());
-
-    // assert vectors are of the right size
-    assert_eq!(poly.get_num_vars(), rp.len() + rq.len() + rx.len());
-    let num_instances = rp.len().pow2();
-
-    let mut default_blinds = Vec::new();
-    for p in 0..num_instances {
-        default_blinds.push(vec![Scalar::zero(); num_proofs[p]]);
-    }
-
-    let default_blinds = PolyCommitmentBlinds_PQX { blinds: default_blinds };
-    let blinds = blinds_opt.map_or(&default_blinds, |p| p);
-
-    assert_eq!(blinds.blinds.len(), num_instances);
-    for p in 0..num_instances {
-      assert_eq!(blinds.blinds[p].len(), num_proofs[p]);
-    }
-
-    let zero = Scalar::zero();
-    let blind_Zr = blind_Zr_opt.map_or(&zero, |p| p);
-
-    // compute the L and R vectors
-    let L = EqPolynomial::new([rp, rq].concat()).evals_PQ(rp.len(), rq.len(), num_proofs);
-    let R = EqPolynomial::new(rx.to_vec()).evals();
-
-    // compute the vector underneath L*Z and the L*blinds
-    // compute vector-matrix product between L and Z viewed as a matrix
-    poly.bound_poly_vars_rq(&rq.to_vec());
-    poly.bound_poly_vars_rp(&rp.to_vec());
-    let LZ = &poly.Z[0][0];
-    
-    let mut LZ_blind = Scalar::zero();
-    for p in 0..num_instances {
-      for q in 0..num_proofs[p] {
-        LZ_blind += blinds.blinds[p][q] * L[p][q];
-      }
-    }
-
-    // a dot product proof of size R_size
-    let (proof, _C_LR, C_Zr_prime) = DotProductProofLog::prove(
-      &gens.gens,
-      transcript,
-      random_tape,
-      &LZ,
-      &LZ_blind,
-      &R,
-      Zr,
-      blind_Zr,
-    );
-
-    (PolyEvalProof_PQX { proof }, C_Zr_prime)
-  }
-
-
-  pub fn verify(
-    &self,
-    gens: &PolyCommitmentGens,
-    transcript: &mut Transcript,
-    num_proofs: &Vec<usize>,
-    rp: &[Scalar],                 // point at which the polynomial is evaluated
-    rq: &[Scalar],                 // rq is in reversed order, i.e. the same order as the polynomial
-    rx: &[Scalar],
-    C_Zr: &CompressedGroup, // commitment to \widetilde{Z}(r)
-    comm: &PolyCommitment_PQX,
-  ) -> Result<(), ProofVerifyError> {
-    transcript.append_protocol_name(PolyEvalProof_PQX::protocol_name());
-
-    // compute L and R
-    // TODO: Reduce complexity of this
-    let P = EqPolynomial::new(rp.to_vec()).evals();
-    let L = EqPolynomial::new(rq.to_vec()).evals();
-    let R = EqPolynomial::new(rx.to_vec()).evals();
-    let max_num_proofs = rq.len().pow2();
-
-    // compute a weighted sum of commitments and L
-    let mut C_LZ = Vec::new();
-    for p in 0..comm.C.len() {
-      let step = max_num_proofs / num_proofs[p];
-      let C_decompressed = comm.C[p].iter().map(|i| i.decompress().unwrap());
-      let L: Vec<Scalar> = (0..comm.C[p].len()).map(|i| L[i * step]).collect();
-      C_LZ.push(GroupElement::vartime_multiscalar_mul(&L, C_decompressed));
-    }
-    let C_LZ = GroupElement::vartime_multiscalar_mul(&P, C_LZ.iter()).compress();
-
-    self
-      .proof
-      .verify(R.len(), &gens.gens, transcript, &R, &C_LZ, C_Zr)
-  }
-}

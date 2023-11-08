@@ -3,7 +3,7 @@ use core::num;
 use crate::transcript::AppendToTranscript;
 
 use super::dense_mlpoly::DensePolynomial;
-use super::custom_dense_mlpoly::DensePolynomial_PQX;
+use super::custom_dense_mlpoly::DensePolynomialPqx;
 use super::errors::ProofVerifyError;
 use super::math::Math;
 use super::random::RandomTape;
@@ -345,7 +345,7 @@ impl R1CSInstance {
   }
 
   // Az(p, q, x) <- A(p, x) * z(p, q, x), where we require p for A and z are the same
-  // Return Az, Bz, Cz as DensePolynomial_PQX
+  // Return Az, Bz, Cz as DensePolynomialPqx
   pub fn multiply_vec_block(
     &self,
     num_instances: usize,
@@ -354,7 +354,7 @@ impl R1CSInstance {
     num_rows: usize,
     num_cols: usize,
     z_mat: &Vec<Vec<Vec<Scalar>>>
-  ) -> (DensePolynomial_PQX, DensePolynomial_PQX, DensePolynomial_PQX) {
+  ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
     assert!(self.num_instances == 1 || self.num_instances == num_instances);
     assert_eq!(num_rows, self.num_cons);
     assert_eq!(num_cols, self.num_vars);
@@ -380,9 +380,9 @@ impl R1CSInstance {
       }
     }
     (
-      DensePolynomial_PQX::new_rev(&Az, num_proofs, max_num_proofs),
-      DensePolynomial_PQX::new_rev(&Bz, num_proofs, max_num_proofs),
-      DensePolynomial_PQX::new_rev(&Cz, num_proofs, max_num_proofs)
+      DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
+      DensePolynomialPqx::new_rev(&Bz, num_proofs, max_num_proofs),
+      DensePolynomialPqx::new_rev(&Cz, num_proofs, max_num_proofs)
     )
   }
 
@@ -397,7 +397,7 @@ impl R1CSInstance {
     num_rows: usize,
     num_cols: usize,
     z_list: &Vec<Vec<Scalar>>,
-  ) -> (DensePolynomial_PQX, DensePolynomial_PQX, DensePolynomial_PQX) {
+  ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
     assert!(max_num_proofs * num_rows <= self.num_cons);
     assert!(max_num_proofs * num_cols <= self.num_vars);
 
@@ -414,9 +414,9 @@ impl R1CSInstance {
       Cz.push(self.C_list[0].multiply_vec_pad(num_proofs[p], num_rows, num_cols, z));
     }
     (
-      DensePolynomial_PQX::new_rev(&Az, num_proofs, max_num_proofs),
-      DensePolynomial_PQX::new_rev(&Bz, num_proofs, max_num_proofs),
-      DensePolynomial_PQX::new_rev(&Cz, num_proofs, max_num_proofs)
+      DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
+      DensePolynomialPqx::new_rev(&Bz, num_proofs, max_num_proofs),
+      DensePolynomialPqx::new_rev(&Cz, num_proofs, max_num_proofs)
     )
   }
 

@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
-use crate::custom_dense_mlpoly::DensePolynomial_PQX;
+use crate::custom_dense_mlpoly::DensePolynomialPqx;
 use crate::math::Math;
 
 use super::commitments::{Commitments, MultiCommitGens};
@@ -998,9 +998,9 @@ impl ZKSumcheckInstanceProof {
     poly_Ap: &mut DensePolynomial,
     poly_Aq: &mut DensePolynomial,
     poly_Ax: &mut DensePolynomial,
-    poly_B: &mut DensePolynomial_PQX,
-    poly_C: &mut DensePolynomial_PQX,
-    poly_D: &mut DensePolynomial_PQX,
+    poly_B: &mut DensePolynomialPqx,
+    poly_C: &mut DensePolynomialPqx,
+    poly_D: &mut DensePolynomialPqx,
     comb_func: F,
     gens_1: &MultiCommitGens,
     gens_n: &MultiCommitGens,
@@ -1085,7 +1085,7 @@ impl ZKSumcheckInstanceProof {
                 1 => poly_Ap[p + instance_len] * poly_Aq[q * step] * poly_Ax[x],
                 2 => poly_Ap[p] * poly_Aq[q * step + proof_len] * poly_Ax[x],
                 3 => poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x + cons_len],
-                _ => { panic!("DensePolynomial_PQX bound failed: unrecognized mode {}!", mode); }
+                _ => { panic!("DensePolynomialPqx bound failed: unrecognized mode {}!", mode); }
               };
 
               // eval 0: bound_func is A(low)
