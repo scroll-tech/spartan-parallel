@@ -473,6 +473,7 @@ impl SparseMatPolynomial {
   // So trailing zeros in MZ should also not be recorded
   // Return a num_proofs * base_num_rows matrix
   pub fn multiply_vec_pad(&self,
+    max_num_proofs: usize,
     num_proofs: usize,
     base_num_rows: usize,
     base_num_cols: usize,
@@ -481,7 +482,10 @@ impl SparseMatPolynomial {
     assert!(z.len() == num_proofs * base_num_cols);
 
     let mut Mz_list = vec![vec![Scalar::zero(); base_num_rows]; num_proofs];
-    for i in 0..self.M.len() {
+    // Based on the construction of PERM_POLY and CONSIS_CHECK,
+    // We don't need to scan through every non-zero entry of the instance
+    // Only the first (num_proofs / (max_num_proofs - 1)) fraction of entries will correspond to non-zero values in Z
+    for i in 0..self.M.len() * num_proofs / (max_num_proofs - 1) {
       let row = self.M[i].row;
       // No need to evaluate constraints beyond num_proofs * base_num_rows
       // As the results are always 0

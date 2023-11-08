@@ -409,9 +409,9 @@ impl R1CSInstance {
       let z = &z_list[p];
       assert!(num_proofs[p] <= max_num_proofs);
       // Each returns a num_proofs[p] * num_rows matrix
-      Az.push(self.A_list[0].multiply_vec_pad(num_proofs[p], num_rows, num_cols, z));
-      Bz.push(self.B_list[0].multiply_vec_pad(num_proofs[p], num_rows, num_cols, z));
-      Cz.push(self.C_list[0].multiply_vec_pad(num_proofs[p], num_rows, num_cols, z));
+      Az.push(self.A_list[0].multiply_vec_pad(max_num_proofs, num_proofs[p], num_rows, num_cols, z));
+      Bz.push(self.B_list[0].multiply_vec_pad(max_num_proofs, num_proofs[p], num_rows, num_cols, z));
+      Cz.push(self.C_list[0].multiply_vec_pad(max_num_proofs, num_proofs[p], num_rows, num_cols, z));
     }
     (
       DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
