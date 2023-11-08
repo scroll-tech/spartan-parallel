@@ -527,18 +527,18 @@ fn produce_r1cs() -> (
         // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
         for i in 0..entry_size - 1 {
           // D1
-          (A, B, C) = gen_constr(A, B, C, V_cnst,
+          (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
             constraint_count, vec![((i + 1) * num_vars + V_valid, 1)], vec![((i + 1) * num_vars + V_pi, 1)], vec![(i * num_vars + V_d1, 1)]);
           constraint_count += 1;
           // D2
-          (A, B, C) = gen_constr(A, B, C, V_cnst,
+          (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
             constraint_count, 
             vec![(i * num_vars + V_x, 1)], 
             vec![(i * num_vars + V_d1, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
             vec![(i * num_vars + V_d2, 1)]);
           constraint_count += 1;
           // pi
-          (A, B, C) = gen_constr(A, B, C, V_cnst,
+          (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
             constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
           // Pad base constraint size to 4
           constraint_count += 2;
@@ -546,15 +546,15 @@ fn produce_r1cs() -> (
         // Last Entry
         let i = entry_size - 1;
         // last D1 is 0
-        (A, B, C) = gen_constr(A, B, C, V_cnst,
+        (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
           constraint_count, vec![(i * num_vars + V_d1, 1)], vec![], vec![]);
         constraint_count += 1;
         // last D2 is x[k] * 1
-        (A, B, C) = gen_constr(A, B, C, V_cnst,
+        (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
           constraint_count, vec![(i * num_vars + V_x, 1)], vec![], vec![(i * num_vars + V_d2, 1)]);
         constraint_count += 1;
         // last pi is just usual
-        (A, B, C) = gen_constr(A, B, C, V_cnst,
+        (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
           constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
   
         (A, B, C)   

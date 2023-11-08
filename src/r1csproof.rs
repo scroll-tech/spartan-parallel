@@ -158,6 +158,35 @@ impl R1CSProof {
     (sc_proof_phase_two, r, claims, blind_claim_postsc)
   }
 
+  fn prove_phase_two_single(
+    num_rounds: usize,
+    claim: &Scalar,
+    blind_claim: &Scalar,
+    evals_z: &mut DensePolynomial,
+    evals_ABC: &mut DensePolynomial,
+    gens: &R1CSSumcheckGens,
+    transcript: &mut Transcript,
+    random_tape: &mut RandomTape,
+  ) -> (ZKSumcheckInstanceProof, Vec<Scalar>, Vec<Scalar>, Scalar) {
+    let comb_func =
+      |poly_A_comp: &Scalar, poly_B_comp: &Scalar| -> Scalar { poly_A_comp * poly_B_comp };
+    let (sc_proof_phase_two, r, claims, blind_claim_postsc) = ZKSumcheckInstanceProof::prove_quad(
+      claim,
+      blind_claim,
+      num_rounds,
+      evals_z,
+      evals_ABC,
+      comb_func,
+      &gens.gens_1,
+      &gens.gens_3,
+      transcript,
+      random_tape,
+    );
+
+    (sc_proof_phase_two, r, claims, blind_claim_postsc)
+  }
+
+
   fn protocol_name() -> &'static [u8] {
     b"R1CS proof"
   }
@@ -1009,17 +1038,13 @@ impl R1CSProof {
       Z_poly.bound_poly_var_top(r);
     }
 
-    // An Eq function to match p with rp
-    let mut eq_q_rq_poly = DensePolynomial::new(EqPolynomial::new(rq).evals_front(num_rounds_q + num_rounds_yb));
-
-    // Sumcheck 2: (rA + rB + rC) * Z * eq(p) = e
-    let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::prove_phase_two(
+    // Sumcheck 2: (rA + rB + rC) * Z = e
+    let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::prove_phase_two_single(
       num_rounds_q + num_rounds_yb,
       &claim_phase2,
       &blind_claim_phase2,
       &mut Z_poly,
       &mut ABC_poly,
-      &mut eq_q_rq_poly,
       &gens.gens_sc,
       transcript,
       random_tape,
@@ -1080,7 +1105,7 @@ impl R1CSProof {
 
     // prove the final step of sum-check #2
     let blind_expected_claim_postsc2 = Scalar::zero();
-    let claim_post_phase2 = claims_phase2[0] * claims_phase2[1] * claims_phase2[2];
+    let claim_post_phase2 = claims_phase2[0] * claims_phase2[1];
 
     let (proof_eq_sc_phase2, _C1, _C2) = EqualityProof::prove(
       &gens.gens_pc.gens.gens_1,
