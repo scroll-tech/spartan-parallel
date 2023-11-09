@@ -1,5 +1,3 @@
-use core::num;
-
 use crate::transcript::AppendToTranscript;
 
 use super::dense_mlpoly::DensePolynomial;
@@ -15,7 +13,6 @@ use super::sparse_mlpoly::{
 use super::timer::Timer;
 use flate2::{write::ZlibEncoder, Compression};
 use merlin::Transcript;
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]

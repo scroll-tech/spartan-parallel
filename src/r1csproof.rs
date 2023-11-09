@@ -1,6 +1,4 @@
 #![allow(clippy::too_many_arguments)]
-use crate::dense_mlpoly;
-
 use super::commitments::{Commitments, MultiCommitGens};
 use super::dense_mlpoly::{
   DensePolynomial, EqPolynomial, PolyCommitment, PolyCommitmentGens, PolyEvalProof,
@@ -501,10 +499,10 @@ impl R1CSProof {
         (eval_short_vars_at_ry, proof_eval_short_vars_at_ry, comm_short_vars_at_ry) = (None, None, None);
       },
       (4, 1) => {
-        let c = poly_w_list[0][0].clone();
-        let e = c.evaluate(&ry[2..]);
+        let poly = &poly_w_list[0][0];
+        let e = poly_w_list[0][0].evaluate(&ry[2..]);
         let (p, c) = PolyEvalProof::prove(
-          &c,
+          poly,
           None,
           &ry[2..],
           &e,
@@ -775,13 +773,12 @@ impl R1CSProof {
     match (num_witness_secs, num_shorts) {
       (_, 0) => {},
       (4, 1) => {
-        let comm_combined_short = PolyCommitment { C: comm_w_list[0][0].C.clone() };
         self.proof_eval_short_vars_at_ry.as_ref().unwrap().verify(
           &gens.gens_pc,
           transcript,
           &ry[2..],
           &self.comm_short_vars_at_ry.unwrap(),
-          &comm_combined_short,
+          &comm_w_list[0][0],
         )?;
       },
       _ => panic!("PROOF Failed: Unsupported (num_witness_secs, num_shorts) pair: ({}, {})", num_witness_secs, num_shorts)
@@ -844,7 +841,7 @@ impl R1CSProof {
     poly_w_list: &Vec<DensePolynomial>,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
-  ) -> (R1CSProof, [Vec<Scalar>; 5]) {
+  ) -> (R1CSProof, [Vec<Scalar>; 3]) {
     let timer_prove = Timer::new("R1CSProof::prove");
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
@@ -971,9 +968,7 @@ impl R1CSProof {
     // Separate the result rx into rp, rq, and rx
     let (rx, rq_rev) = rx.split_at(num_rounds_xb);
     let (rq_rev, rp) = rq_rev.split_at(num_rounds_q);
-    let rx = rx.to_vec();
-    let rq_rev = rq_rev.to_vec();
-    let rq_rx: Vec<Scalar> = rq_rev.iter().copied().rev().collect();
+    let rx = [rq_rev.iter().copied().rev().collect(), rx.to_vec()].concat();
     let rp = rp.to_vec();
 
     // --
@@ -992,7 +987,7 @@ impl R1CSProof {
     // Unlike the parallel proof where we have p x*y instance
     let evals_ABC = {
       // compute the initial evaluation table for R(\tau, x)
-      let evals_rx = EqPolynomial::new([rq_rx.clone(), rx.clone()].concat()).evals();
+      let evals_rx = EqPolynomial::new(rx.clone()).evals();
       let (evals_A, evals_B, evals_C) =
         inst.compute_eval_table_sparse(1, inst.get_num_cons(), z_len, &evals_rx);
 
@@ -1010,9 +1005,9 @@ impl R1CSProof {
     let rp_len = num_proofs.log_2();
     for p in 0..num_proofs {
       let prod = |i: usize| [Scalar::one() - rp[i], rp[i]];
-      let p_bin = (0..rp_len).rev().map(|i| prod(i)[(p >> i) & 1]);
+      let p_bin = (0..rp_len).rev().map(|i| prod(i)[(p >> i) & 1]).fold(Scalar::one(), |a, b| a * b);
       for x in 0..z_list[p].len() {
-        z[x] += p_bin.clone().fold(z_list[p][x], |a, b| a * b);
+        z[x] += z_list[p][x]* p_bin;
       }
     }
     let mut Z_poly = DensePolynomial::new(z);
@@ -1030,11 +1025,6 @@ impl R1CSProof {
     );
     timer_sc_proof_phase2.stop();
 
-    // Separate ry into rq and ry
-    let (rq_ry, ry) = ry.split_at(num_rounds_q);
-    let rq_ry = rq_ry.to_vec();
-    let ry = ry.to_vec();
-
     assert_eq!(Z_poly.len(), 1);
     assert_eq!(ABC_poly.len(), 1);
 
@@ -1046,12 +1036,12 @@ impl R1CSProof {
 
     for p in 0..num_proofs {
       // Size of poly_w_list[p].clone() decides how many digits of rq will be used
-      let rq_short = &rq_ry[num_rounds_q - input_rows[p].log_2()..];
-      let (combined_poly, r) = (poly_w_list[p].clone(), [rq_short, &ry].concat());
+      let combined_poly = &poly_w_list[p];
+      let r = &ry[num_rounds_q - input_rows[p].log_2()..];
 
       let eval_vars_at_ry = combined_poly.evaluate(&r);
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
-        &combined_poly,
+        combined_poly,
         None,
         &r,
         &eval_vars_at_ry,
@@ -1073,7 +1063,7 @@ impl R1CSProof {
     // So we need to multiply each entry by (1 - rq0)(1 - rq1)...
     for p in 0..num_proofs {
       for q in 0..(num_rounds_q - input_rows[p].log_2()) {
-        eval_vars_at_ry_list[p] *= Scalar::one() - rq_ry[q];
+        eval_vars_at_ry_list[p] *= Scalar::one() - ry[q];
       }
     }
 
@@ -1122,7 +1112,7 @@ impl R1CSProof {
         proof_eval_vars_at_ry_list,
         proof_eq_sc_phase2
       },
-      [rp, rq_rx, rq_ry, rx, ry]
+      [rp, rx, ry]
     )
   }
 
@@ -1139,7 +1129,7 @@ impl R1CSProof {
     // Commitment for witnesses
     comm_w_list: &Vec<PolyCommitment>,
     transcript: &mut Transcript,
-  ) -> Result<[Vec<Scalar>; 5], ProofVerifyError> {
+  ) -> Result<[Vec<Scalar>; 3], ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
     // derive the verifier's challenge tau
@@ -1239,25 +1229,19 @@ impl R1CSProof {
       &gens.gens_sc.gens_3,
       transcript,
     )?;
-
-    // Separate ry into rq and ry
-    let (rq_ry, ry) = ry.split_at(num_rounds_q);
-    let rq_ry = rq_ry.to_vec();
-    let ry = ry.to_vec();
     
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
     for p in 0..num_proofs {
       // Size of poly_w_list[p].clone() decides how many digits of rq will be used
-      let rq_short = &rq_ry[num_rounds_q - input_rows[p].log_2()..];
-      let (comm_combined, r) = (PolyCommitment { C: comm_w_list[p].C.clone() }, [rq_short, &ry].concat());
+      let r = &ry[num_rounds_q - input_rows[p].log_2()..];
 
       self.proof_eval_vars_at_ry_list[p].verify(
         &gens.gens_pc,
         transcript,
         &r,
         &self.comm_vars_at_ry_list[p],
-        &comm_combined,
+        &comm_w_list[p],
       )?;
     }
 
@@ -1265,7 +1249,7 @@ impl R1CSProof {
     let mut expected_comm_vars_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
     for p in 0..num_proofs {
       for q in 0..(num_rounds_q - input_rows[p].log_2()) {
-        expected_comm_vars_list[p] *= Scalar::one() - rq_ry[q];
+        expected_comm_vars_list[p] *= Scalar::one() - ry[q];
       }
     }
     let EQ_p = EqPolynomial::new(rp.clone()).evals();
@@ -1287,7 +1271,7 @@ impl R1CSProof {
       &comm_claim_post_phase2,
     )?;
 
-    Ok([rp, rq_rx, rq_ry, rx, ry])
+    Ok([rp, [rq_rx, rx].concat(), ry])
   }
 }
 

@@ -7,7 +7,6 @@ use super::nizk::{DotProductProofGens, DotProductProofLog};
 use super::random::RandomTape;
 use super::scalar::Scalar;
 use super::transcript::{AppendToTranscript, ProofTranscript};
-use core::num;
 use core::ops::Index;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
@@ -88,106 +87,6 @@ impl EqPolynomial {
     evals
   }
 
-  // Assume the eq_polynomial is in (p, q_rev) form, convert it into a P x Q_rev matrix
-  // The output is similar to the embedded structure of DensePolynomial_PQX, but without the X part
-  // NOTE: ONLY WORKS IF NUM_PROOFS is in decreasing order (and instance 0 has Q_max inputs)!
-  pub fn evals_PQ(&self, num_vars_rp: usize, num_vars_rq: usize, num_proofs: &Vec<usize>) -> Vec<Vec<Scalar>> {
-    let ell = self.r.len();
-    let num_instances = num_vars_rp.pow2();
-    let max_num_proofs = num_vars_rq.pow2();
-
-    assert_eq!(num_vars_rp + num_vars_rq, self.r.len());
-    assert_eq!(num_proofs[0], max_num_proofs);
-    for i in 0..num_proofs.len() - 1 {
-      assert!(num_proofs[i] >= num_proofs[i + 1]);
-    }
-
-    let mut evals = Vec::new();
-    for p in 0..num_instances {
-      evals.push(vec![Scalar::one(); num_proofs[p]]);
-    }
-
-    let mut p_size = 1;
-    let mut q_size = 1;
-    // Evaluate R in reverse
-    // In each round, we copy the first half of the matrix to the second half
-    // Dealing with rq first. In this case p_size is always 1.
-    for j in (num_vars_rp..ell).rev() {
-      for q in q_size..q_size * 2 {
-        evals[0][q] = evals[0][q - q_size] * self.r[j];
-      }
-      for q in 0..q_size {
-        evals[0][q] *= Scalar::one() - self.r[j];
-      }
-      q_size *= 2;
-    }
-    // Then handle rp. In this case q_size is always max_num_proofs.
-    for j in (0..num_vars_rp).rev() {
-      for p in p_size..p_size * 2 {
-        // skip unvalid (p, q_rev) pairs
-        let size_high = num_proofs[p];
-        let size_low = num_proofs[p - p_size];
-        for q in 0..num_proofs[p] {
-          // Note: evals[p][q] actually stores evaluation on (p, q_rev * step)
-          //       so we need to copy it from (p - p_size, q_rev * step)
-          //       but it might not be stored in evals[p - p_size][q]!
-          let cor_q = q * size_low / size_high;
-          evals[p][q] = evals[p - p_size][cor_q] * self.r[j];
-        }
-      }
-      for p in 0..p_size {
-        // skip unvalid (p, q) pairs
-        for q in 0..num_proofs[p] {
-          evals[p][q] *= Scalar::one() - self.r[j];
-        }
-      }
-      p_size *= 2;
-    }
-
-    evals
-  }
- 
-  // Evals to P * Q * X matrix
-  pub fn evals_PQX(&self,
-    num_rounds_p: usize,
-    num_rounds_q: usize,
-    num_rounds_x: usize,
-  ) -> Vec<Vec<Vec<Scalar>>> {
-    let ell = self.r.len();
-
-    let mut evals: Vec<Scalar> = vec![Scalar::one(); ell.pow2()];
-    let mut size = 1;
-    for j in 0..ell {
-      // in each iteration, we double the size of chis
-      size *= 2;
-      for i in (0..size).rev().step_by(2) {
-        // copy each element from the prior iteration twice
-        let scalar = evals[i / 2];
-        evals[i] = scalar * self.r[j];
-        evals[i - 1] = scalar - evals[i];
-      }
-    }
-
-    // Convert evals into P * Q * X matrix
-    let instance_space: usize = num_rounds_p.pow2();
-    let proof_space = num_rounds_q.pow2();
-    let cons_space = num_rounds_x.pow2();
-
-    let mut eval_mat = Vec::new();
-    for p in 0..instance_space {
-      eval_mat.push(Vec::new());
-      for q in 0..proof_space {
-        eval_mat[p].push(Vec::new());
-        for x in 0..cons_space {
-          let i = x * proof_space * instance_space + q * instance_space + p;
-          eval_mat[p][q].push(evals[i]);
-        }
-      }
-    }
-    eval_mat
-  }
-
-
   // Only bound Eq on the first self.r.len() of the total_len variables
   pub fn evals_front(&self, total_len: usize) -> Vec<Scalar> {
     let ell = self.r.len();
@@ -210,33 +109,6 @@ impl EqPolynomial {
       }
     }
     evals
-  }
-
-  // Separate the EqPoly into x + q + p variables, evaluate to 0 if (p, q) is not a valid pair
-  pub fn evals_disjoint_rounds(&self,
-    num_rounds_x: usize,
-    num_rounds_q: usize,
-    num_rounds_p: usize,
-    num_proofs: &Vec<usize>
-  ) -> Vec<Scalar> {
-    let ell = self.r.len();
-    assert_eq!(ell, num_rounds_x + num_rounds_q + num_rounds_p);
-
-    let cons_space = num_rounds_x.pow2();
-    let proof_space = num_rounds_q.pow2();
-    let instance_space: usize = num_rounds_p.pow2();
-
-    let mut preliminary_evals = self.evals();
-    // Set specific values to 0
-    for p in 0..instance_space {
-      for q in num_proofs[p]..proof_space {
-        for x in 0..cons_space {
-          let i = x * proof_space * instance_space + q * instance_space + p;
-          preliminary_evals[i] = Scalar::zero();
-        }
-      }
-    }
-    return preliminary_evals;
   }
 
   pub fn compute_factored_lens(ell: usize) -> (usize, usize) {
