@@ -1004,37 +1004,18 @@ impl R1CSProof {
     };
     let mut ABC_poly = DensePolynomial::new(evals_ABC);
 
-    /*
-    // Here we have p length-q*y Z
-    // instead of p*q length-y Z
-    let mut z_mat = Vec::new();
+    // Construct Z_poly evaluated on rp within runtime bound
+    // Here we have p length-q*y Z, want to bind to rp
+    let mut z = vec![Scalar::zero(); max_input_rows * base_input_size];
+    let rp_len = num_proofs.log_2();
     for p in 0..num_proofs {
-      z_mat.push(Vec::new());
-      for q in 0..input_rows[p] {
-        z_mat[p].push(Vec::new());
-        for y in 0..base_input_size {
-          z_mat[p][q].push(z_list[p][q * base_input_size + y]);
-        }
+      let prod = |i: usize| [Scalar::one() - rp[i], rp[i]];
+      let p_bin = (0..rp_len).rev().map(|i| prod(i)[(p >> i) & 1]);
+      for x in 0..z_list[p].len() {
+        z[x] += p_bin.clone().fold(z_list[p][x], |a, b| a * b);
       }
     }
-    
-    let Z = DensePolynomialPqx::new_rev(&z_mat, &input_rows, max_input_rows);
-    // Z.bound_poly_vars_rq(&rq_rev.to_vec());
-    let mut Z_poly = Z.to_dense_poly();
-    */
-
-    // !!!TODO: Computation of Z_poly exceeds runtime bound!!!
-    // Here we have p length-q*y Z
-    // instead of p*q length-y Z
-    let mut z: Vec<Scalar> = Vec::new();
-    for p in 0..num_proofs {
-      z.extend(&z_list[p]);
-      z.extend(&vec![Scalar::zero(); (max_input_rows - input_rows[p]) * base_input_size])
-    }
     let mut Z_poly = DensePolynomial::new(z);
-    for r in &rp {
-      Z_poly.bound_poly_var_top(r);
-    }
 
     // Sumcheck 2: (rA + rB + rC) * Z = e
     let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::prove_phase_two_single(
