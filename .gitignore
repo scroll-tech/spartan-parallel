@@ -12,5 +12,5 @@ Cargo.lock
 *.txt
 
 writeups/*
-!writeups/*.tex
+!writeups/*/*.tex
 .DS_Store
