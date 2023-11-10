@@ -1,0 +1,251 @@
+\documentclass{article}
+\usepackage[letterpaper, total={6in, 8in}]{geometry}
+\usepackage{xcolor}
+\usepackage{amsfonts}
+
+\newcommand{\red}[1] {\color{red}#1\color{black}}
+\newcommand{\code}{\texttt}
+\newcommand{\Qsum}{Q_{\mathtt{sum}}}
+\newcommand{\Qmax}{Q_{\mathtt{max}}}
+\newcommand{\qmax}{q_{\mathtt{max}}}
+\newcommand{\qrev}{q_{\mathtt{rev}}}
+\renewcommand{\P}{\mathcal{P}}
+\newcommand{\V}{\mathcal{V}}
+\newcommand{\F}{\mathbb{F}}
+\newcommand{\eq}{\widetilde{\mbox{eq}}}
+\newcommand{\valid}{\tilde{\mbox{valid}}}
+\newcommand{\io}{\widetilde{(\mbox{io, 1})}}
+
+\title{Spartan Parallel}
+\author{Kunming Jiang}
+\date{Sep 21, 2023}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}\label{intro}
+
+This document serves as a record for bookkeeping for the implementation of \code{spartan\_parallel}. Its contents stand closer to the Rust code of the repository than to the theory discussed in Srinath's paper.
+
+The original Spartan describes a SNARK on R1CS, which is consisted of three matrices $A, B, C$ of size $X \times Y$ and a length-$Y$ variable (inputs + witnesses) vector $z$. The goal is to prove $Az\cdot Bz = Cz$.
+
+The data-parallel version of the problem is consisted of $P$ R1CS instances of the form $\{A_i, B_i, C_i\}$, where each $A_i, B_i, C_i$ are $X \times Y$ matrices, $X$ represents the number of constraints and $Y$ represents the number of variables (inputs + witnesses). For each instance $\{A_i, B_i, C_i\}$, there are $Q_i$ (input, witnesses) vectors of length $Y$ that claim to be a correct execution of the instance. We call such vector a \textbf{proof}, denoted as $z_{i, 0},\dots z_{i, Q_i}$. The goal is to prove and verify the correctness all proofs and all instances using SNARK: specifically, a modified version of Spartan that can handle data-parallelism.
+
+For simplicity, Spartan makes the following assumption:
+\begin{enumerate}
+    \item All matrices $A_i, B_i, C_i$ are square matrices. This means that for every instance, $X = Y$. However, we can relax this assumption to $X = O(Y)$. \label{ass:square}
+    
+    \emph{This assumption is used to simplify analysis of time and space complexity. There is no mechanical reason to it.}
+
+    \item The number of inputs / outputs in any proof is exactly one less than the number of witnesses (we can always set unused inputs to be 0). This means that any $z$ vector can be separated into two halves, where the first half contains the inputs / outputs plus the constant 1, and the second half contains all the witnesses. \label{ass:num_of_inputs}
+    
+    \emph{One can see that such setup leads to inefficiencies. This is especially wasteful in our context, as one will see later.}
+
+    \item Number of constraints and variables ($X$ and $Y$) are all powers of 2. Again, one can always append dummies. \label{ass:x_y_pow2}
+\end{enumerate}
+
+\noindent We add to the list our own set of assumptions:
+\begin{enumerate}
+    \setcounter{enumi}{4}
+    \item Number of instances and proofs ($P$ and $Q_i$) are also powers of 2. Specifically, values of $Q_i$'s can differ, but all of them must be powers of 2. \label{ass:p_q_pow2}
+    \item Number of proofs for each instance is in decreasing order, i.e. $\forall i\in [0, P), Q_i \geq Q_{i+1}$. \label{ass:q_decreasing}
+\end{enumerate}
+
+Define $\Qmax \leftarrow \max_i Q_i$ and $\Qsum \leftarrow \sum_i Q_i$. We assume $\Qsum = O(\Qmax)$. Let $p = \log P$, $q_i = \log Q_i$, $\qmax = \log \Qmax$, $x = \log X$, and $y = \log Y$. We want the total runtime of the Prover ($\P$) to be $O(\Qsum \cdot X)$, and that of the Verifier ($\V$) to be $O(\log(P \cdot \Qmax \cdot Y))$.
+
+\section{Spartan as a Non-Interactive Argument System}\label{spartan}
+In contrast to how Spartan is presented in the paper, we here illustrate the Spartan procedure as a SNARK to highlight its correspondence to the code. In the following sections, the Prover $\P$ is the party that produces the proof (which simulates both the prover $\P_i$ and the verifier $\V_i$ of the interactive proof) and the Verifier $\V$ is the party verifying that proof. Furthermore, unless specified otherwise, all "polynomials" in the document refers to multilinear polynomials, and are represented as evaluations on a boolean hypercube of all variables. The \textbf{dense} format represents a polynomial of $n$ variables as a length-$2^n$ vector which include every point on the boolean hypercube, while the \textbf{sparse} format only records down the non-zero entries and their indexes. Polynomials are represented in dense form by default.
+
+Spartan as a SNARK can be divided into three stages, each with several steps:
+\subsection{Stage 1: Commitment}
+This is the one-time setup of stage Spartan with only one step:
+\begin{enumerate}
+    \item A third (\red{trusted?}) party converts the matrices $A, B, C$ to multilinear polynomials in sparse format. It then commits to these polynomials.
+\end{enumerate}
+
+\subsection{Stage 2: Proof Generation}
+In this stage, a prover $\P$ is given the instances and the variable list, and needs to generate a proof that the inputs and witnesses satisfy the constraints. It does so by simulating an interactive proof between a prover $\P_i$ and verifier $\V_i$, and needs to perform the following steps:
+\begin{enumerate}
+    \setcounter{enumi}{1}
+    \item $\P$ converts the witnesses into a multilinear polynomial $w(y)$ in dense form and commits.
+    \item $\P$ converts $z$ into a multilinear polynomial in dense form.
+    \item $\P$ simulates $\V_i$ and produces a length-$x$ random vector $\tau$. It computes the polynomial $\eq_\tau(x)$ in dense form.
+    \item $\P$ computes polynomials $Az(x)$, $Bz(x)$, $Cz(x)$ and express them in dense format.
+    \item $\P$ simulates sum-check 1 between $\P_i$ and $\V_i$. The goal is to prove
+    $$\displaystyle0 =\sum_x \eq_\tau(x)\cdot (Az(x)\cdot Bz(x) - Cz(x))$$
+    At the end of the sum-check, $\P$ obtains a length-$x$ random vector $r_x$, as well as $Az(r_x)$, $Bz(r_x)$, $Cz(r_x)$, $\eq_\tau(r_x)$, and
+    $$e_x = \eq_\tau(r_x)\cdot (Az(r_x)\cdot Bz(r_x) - Cz(r_x))$$
+    \item $\P$ generates a proof that $e_x$ is indeed $\eq_\tau(r_x)\cdot (Az(r_x)\cdot Bz(r_x) - Cz(r_x))$, in zero-knowledge if necessary.\label{step_spartan:p_proof_1}
+    \item $\P$ simulates $\V_i$, produces 3 random values $r_A$, $r_B$, and $r_C$, and computes 
+    $$T = r_A\cdot Az(r_x) + r_B\cdot Bz(r_x) + r_C\cdot Cz(r_x)$$
+    \item $\P$ computes polynomial $ABC(y)$ in dense form, defined as
+    $$ABC(y) = r_A\cdot A(r_x, y) + r_B\cdot B(r_x, y) + r_C\cdot C(r_x, y)$$
+    \item $\P$ also converts $z$ into a polynomial $Z(y)$ in dense form.
+    \item $\P$ simulates sum-check 2 between $\P_i$ and $\V_i$. The goal is to prove
+    $$\displaystyle T = \sum_y ABC(y)\cdot Z(y)$$
+    At the end of the sum-check, $\P$ obtains a length-$y$ random vector $r_y$, as well as $ABC(r_y)$, $Z(r_y)$, and
+    $$e_y = ABC(r_y)\cdot Z(r_y)$$
+    \emph{Note: As stated by assumption \ref{ass:num_of_inputs}, the first half of $Z$ are inputs and the second half of $Z$ are witnesses, so $Z(r_y) = (1 - r_y[0])\cdot w(r_y[1..]) + r_y[0]\cdot \io(r_y[1..])$}
+    \item $\P$ computes $w_{r_y} = w(r_y[1..])$ and produces a proof of the computation, presumably in zero-knowledge.\label{step_spartan:p_proof_2}
+    \item $\P$ generates a proof that $e_y$ is indeed $ABC(r_y)\cdot Z(r_y)$, presumably in zero-knowledge.\label{step_spartan:p_proof_3}
+\end{enumerate}
+Finally, $\P$ reveals the commitment for $w$, $e_x$, $e_y$, $w_{r_y}$, as well as proofs in step \ref{step_spartan:p_proof_1}, \ref{step_spartan:p_proof_2}, and \ref{step_spartan:p_proof_3}.
+
+\subsection{Stage 3: Proof Verification}
+In this stage, a verifier $\V$ wants to verify the correctness of the proof generated by $\P$, which is consisted of the following steps:
+\begin{enumerate}
+    \setcounter{enumi}{13}
+    \item $\V$ follows $\P$'s transcript and reproduces the length-$x$ random vector $\tau$.
+    \item $\V$ verifies the correctness of the procedure for sumcheck 1. During the verification, $\V$ reproduces $r_x$.
+    \item $\V$ computes $\eq_\tau(r_x)$ and verifies $e_x = \eq_\tau(r_x)\cdot (Az(r_x)\cdot Bz(r_x) - Cz(r_x))$, potentially in zero-knowledge.
+    \item $\V$ reproduces $r_A$, $r_B$, $r_C$ and verifies the correctness of the procedure for sumcheck 2. During the verification, $\V$ reproduces $r_y$.
+    \item $\V$ verifies $w_{r_y} = w(r_y)$ (in zero-knowledge).\label{step_spartan:w-verification}
+    \item $\V$ converts the input into a multilinear polynomial $\io$ in sparse form and evaluates it on $r_y[1..]$.\label{step_spartan:io-compute}
+    \item $\V$ uses $w_{r_y}$ and $\io(r_y[1..])$ to compute $Z(r_y)$, which is then used to verify the correctness of $e_y$.
+\end{enumerate}
+
+Note that verifications of sum-checks and computations take $O(\log X)$ time (assume $Y = O(X)$). Thus, runtime of $\V$ largely depends on time to open commitment for $w$ (step \ref{step_spartan:w-verification}) and to list the number of non-zero inputs (step \ref{step_spartan:io-compute}). When implementing data-parallelism to Spartan, these two factors become crucial.
+
+
+\section{Implement Spartan Using Data-Parallelism}\label{spartan_parallel}
+
+We begin by modifying Spartan to support data-parallelism. The data-paralleled version very much resembles the original Spartan. We first present a naive implementation, then reason about how to improve the time and space compexity.
+
+The naive \code{spartan\_parallel} protocol is shown below, again in three stages.
+\subsection{Stage 1: Commitment}\label{stage:commitment}
+This is the one-time setup of stage Spartan with only one step:
+\begin{enumerate}
+    \item A third (\red{trusted?}) party converts the matrices $A_i, B_i, C_i$ to $P\times \Qmax \times X\times Y$ multilinear polynomials in sparse format. It then commits to these polynomials.
+\end{enumerate}
+
+\subsection{Stage 2: Proof Generation}\label{stage:prover}
+In this stage, a prover $\P$ is given the instances and the variable list, and needs to generate a proof that the inputs and witnesses satisfy the constraints. It does so by simulating an interactive proof between a prover $\P_i$ and verifier $\V_i$, and needs to perform the following steps:
+\begin{enumerate}
+    \setcounter{enumi}{1}
+    \item $\P$ converts the witnesses into a multilinear polynomial $w(p, q, y)$ in dense form and commits.\label{step:witness-commit}
+    \item $\P$ converts $z_i$ into a multilinear polynomial $Z(p, q, y)$ in dense form.
+    \item $\P$ simulates $\V_i$ and produces a length-$(p + q + x)$ random vector $\tau$. It computes the polynomial $\eq_{\tau}(p, q, x)$ in dense form.\label{step:produce-eq-tau}
+    \item $\P$ computes polynomials $Az(p, q, x)$, $Bz(p, q, x)$, $Cz(p, q, x)$ and express them in dense format.\label{step:mat-product}
+    \item $\P$ simulates sum-check 1 between $\P_i$ and $\V_i$. The goal is to prove
+    $$\displaystyle0 =\sum_{p, q, x} \eq_\tau(p, q, x)\cdot (Az(p, q, x)\cdot Bz(p, q, x) - Cz(p, q, x))$$
+    At the end of the sum-check, $\P$ obtains a length-$(p + q + x)$ random vector $(r_p, r_q, r_x)$, as well as $Az(r_p, r_q, r_x)$, $Bz(r_p, r_q, r_x)$, $Cz(r_p, r_q, r_x)$, $\eq_\tau(r_p, r_q, r_x)$, and
+    $$e_x = \eq_\tau(r_p, r_q, r_x)\cdot (Az(r_p, r_q, r_x)\cdot Bz(r_p, r_q, r_x) - Cz(r_p, r_q, r_x))$$\label{step:sumcheck-1}
+    \item $\P$ generates a proof that $e_x$ is indeed $\eq_\tau(r_p, r_q, r_x)\cdot (Az(r_p, r_q, r_x)\cdot Bz(r_p, r_q, r_x) - Cz(r_p, r_q, r_x))$, in zero-knowledge if necessary.\label{step:p_proof_1}
+    \item $\P$ simulates $\V_i$, produces 3 random values $r_A$, $r_B$, and $r_C$, and computes 
+    $$T = r_A\cdot Az(r_p, r_q, r_x) + r_B\cdot Bz(r_p, r_q, r_x) + r_C\cdot Cz(r_p, r_q, r_x)$$
+    \item $\P$ computes polynomial $ABC_{r_x}(p, y)$ in dense form, defined as
+    $$ABC_{r_x}(p, y) = r_A\cdot A_{r_x}(p, y) + r_B\cdot B_{r_x}(p, y) + r_C\cdot C_{r_x}(p, y)$$
+    \item $\P$ also converts $z$ into a polynomial $Z_{r_q}(p, y)$ in dense form.\label{step:compute-z-poly}
+    \item Note that $f(y) = ABC_{r_x}(r_p, y)\cdot z_{r_q}(r_p, y)$ is not a multilinear polynomial, since it is quadratic to $r_p$. Instead, $\P$ computes $\eq_{r_p}(p)$ in dense form.
+    \item $\P$ simulates sum-check 2 between $\P_i$ and $\V_i$. The goal is to prove
+    $$\displaystyle T = \sum_{p^*, y} ABC_{r_x}(p^*, y)\cdot Z_{r_q}(p^*, y) \cdot \eq_{r_p}(p^*)$$
+    At the end of the sum-check, $\P$ obtains a length-($p + y$) random vector $(r_p^*, r_y)$, as well as $ABC_{r_x}(r_p^*, r_y)$, $Z_{r_q}(r_p^*, r_y)$, $\eq_{r_p}(r_p^*)$, and
+    $$e_y = ABC_{r_x}(r_p^*, r_y)\cdot Z_{r_q}(r_p^*, r_y)\cdot \eq_{r_p}(r_p^*)$$
+    \emph{Note: Similary, as stated by assumption \ref{ass:num_of_inputs}, the first half of $z_i$ are inputs and the second half of $z_i$ are witnesses, so $Z_{r_q}(r_p^*, r_y) = (1 - r_y[0])\cdot w_{r_q}(r_p^*, r_y[1..]) + r_y[0]\cdot \io_{r_q}(r_p^*, r_y[1..])$}
+    \item $\P$ computes $w_{r_y} = w_{r_q}(r_p^*, r_y[1..])$ and produces a proof of the computation, presumably in zero-knowledge.\label{step:p_proof_2}
+    \item $\P$ generates a proof that $e_y$ is indeed $ABC_{r_x}(r_p^*, r_y)\cdot Z_{r_q}(r_p^*, r_y)$, presumably in zero-knowledge.\label{step:p_proof_3}
+\end{enumerate}
+Finally, $\P$ reveals the commitment for $w$, $e_x$, $e_y$, $w_{r_y}$, as well as proofs in step \ref{step_spartan:p_proof_1}, \ref{step_spartan:p_proof_2}, and \ref{step_spartan:p_proof_3}.
+
+\subsection{Stage 3: Proof Verification}\label{stage:verifier}
+In this stage, a verifier $\V$ wants to verify the correctness of the proof generated by $\P$, which is consisted of the following steps:
+\begin{enumerate}
+    \setcounter{enumi}{13}
+    \item $\V$ follows $\P$'s transcript and reproduces the length-($p + q + x$) random vector $\tau$.
+    \item $\V$ verifies the correctness of the procedure for sumcheck 1. During the verification, $\V$ reproduces $r_p, r_q, r_x$.
+    \item $\V$ computes $\eq_\tau(r_p, r_q, r_x)$ and verifies $e_x = \eq_\tau(r_p, r_q, r_x)\cdot (Az(r_p, r_q, r_x)\cdot Bz(r_p, r_q, r_x) - Cz(r_p, r_q, r_x))$, potentially in zero-knowledge.
+    \item $\V$ reproduces $r_A$, $r_B$, $r_C$ and verifies the correctness of the procedure for sumcheck 2. During the verification, $\V$ reproduces $r_p^*, r_y$.
+    \item $\V$ computes $\eq_{r_p}(r_p^*)$
+    \item $\V$ verifies $w_{r_y} = w(r_p^*, r_q, r_y)$ (in zero-knowledge).\label{step:w-verification}
+    \item $\V$ converts the input into a multilinear polynomial $\io$ in sparse form and evaluates it on $(r_p^*, r_q, r_y[1..])$.\label{step:io-compute}
+    \item $\V$ uses $w_{r_y}$ and $\io(r_p^*, r_q, r_y[1..])$ to compute $Z_{r_q}(r_y)$, which is then used to verify the correctness of $e_y$.
+\end{enumerate}
+
+Note that the runtime of the entire protocol is dominated by steps related to sum-check 1. This will be the focus of improvements later.
+
+The proof of this protocol largely follows that of Spartan.
+
+\section{Identifying Runtime Overhead}\label{identify}
+Ideally, we want the time and space complexity for $\P$ to be $O(\Qsum \cdot X)$, where $\Qsum = \sum_i Q_i$ and $Y = O(X)$ by assumption \ref{ass:square}. The time and space complexity for $\V$ should be on a logarithmic scale. We relax the constraints slightly so that $\V$ can run in $O(P\cdot \Qmax \cdot X)$.
+
+However, the naive protocol above fails to achieve the target runtime for $\P$. It also does not satisfy our ideal runtime for $\V$, albeit for a different reason. Below we analyze in detail overheads in the naive protocol that needs to be overcome.
+
+\subsection{Verifier Cost}
+The protocol largely achieves the verifier runtime of $O(\log(P \cdot \Qmax \cdot Y))$. However, the two factors in Spartan are still in play here:
+\begin{itemize}
+    \item In step \ref{step:w-verification}: in Spartan, verifying the witness commitment takes $O(\sqrt{X})$. In \code{spartan\_parallel}, this cost is $O(\sqrt{P\cdot \Qmax\cdot X})$, which is considerably worse than our expectation. We later show how to improve this to $O(\Qsum)$.
+    \item In step \ref{step:io-compute}: in Spartan, cost to compute $\io$ is linear to the number non-zero inputs. This means that in \code{spartan\_parallel}, even if every proof has $O(1)$ non-zero inputs, verifier cost will be at least $O(\Qsum)$. However, this complexity is by design since $\V$ needs to be able to process every input anyways. We later show improve for the special case of \code{circ\_blocks}.
+\end{itemize}
+
+\subsection{Prover Cost}
+The prover's cost for naive \code{spartan\_parallel} is $O(P\cdot\Qmax\cdot X)$, and we want to reduce it to $O(\Qsum \cdot X)$. Here's all the steps that exceeds the target complexity:
+\begin{itemize}
+    \item In step \ref{step:witness-commit}: the prover converts the witnesses into a polynomial whose dense format is represented as a $P\cdot \Qmax \cdot X$ array. This exceeds the target time and space complexity. However, only $\Qsum \cdot X$ entries are non-zero, which provides ground for improvement.
+    \item In step \ref{step:produce-eq-tau}: producing $\eq_\tau$ also takes $O(P\cdot\Qmax\cdot X)$ time and space. However, note that: a) $\eq_\tau$ is not sparse at all, although the $Az$, $Bz$, and $Cz$ are, and b) any modification that breaks the pattern of $\eq$ polynomials (i.e. inserting or replacing zero-entries) would result in $\V$ unable to verify it in logarithmic time.
+    \item In step \ref{step:mat-product}: $Az$, $Bz$, $Cz$ are $P\cdot \Qmax \cdot X$ sparse polynomials.
+    \item In step \ref{step:sumcheck-1}: Sum-check 1 takes $p + \qmax + x$ rounds, which naively also requires $O(P\cdot\Qmax\cdot X)$ runtime for $\P$.
+    \item In step \ref{step:compute-z-poly}: compute $Z_{r_q}$ requires computing $Z$ and then binding it to $r_q$. $Z$ is a $P\cdot \Qmax \cdot X$ sparse polynomial and naive binding takes $O(P\cdot \Qmax \cdot X)$ time. 
+\end{itemize}
+\emph{Note: when calculating runtime complexity, what counts as an operation matters. These are the ways to define an operation: a change in iterator, any multiplication operation, or any array access. In general, the three measurements match, but we will in certain cases reason about each individual measurement.}
+
+\section{A Compact Polynomial Representation}\label{reduce-time}
+We start our improvement by redesigning the dense representation of multilinear polynomials. As described earlier, the dense form expresses a polynomial as its evaluation on the boolean hypercube of all its variables. In \code{spartan\_parallel}, however, such form is excessive:
+\begin{itemize}
+    \item As discussed earlier, polynomials like $w$, $Az$, $Bz$, $Cz$, and $Z$ contains $p + \qmax + x$ variables. The dense form takes in an array of size $P\cdot \Qmax \cdot X$ but only $\Qsum\cdot X$ non-zero entries.
+    \item Furthermore, the non-zero entries are concentrated together. In particular, for any given instance $i$, all entries between proof $Q_i$ to $\Qmax$ are going to be zero. This makes the sparse representation, which records down indices of non-zero entries, also undesirable.
+\end{itemize}
+The solution is to introduce the \emph{compact form} to represent multilinear polynomial. Compact form is similar to dense form, but instead of listing the evaluations on the boolean hypercube in a single array, we store the values in a three-dimensional array with pointer redirection, with each dimension representing $P$, $Q_i$, and $X$. Pointer redirection allows us to have varying length across the same dimension, so we only need to allocate $\Qsum\cdot X$ space.
+
+\subsection{Operations on Compact Polynomial}
+Matrix multiplication on compact polynomial is simple: since every $Q_i$ is known, they can be used to skip the zero parts of the dot product. Using this method, one can easily compute $Az$, $Bz$, and $Cz$ in $O(\Qsum\cdot X)$ time.
+
+Binding and summing over points on the boolean hypercube also follow the same idea, and can be performed in $O(\Qsum\cdot X)$ time.
+
+\subsection{Modifying Compact Polynomials}
+While evaluations on the boolean hypercube can is easy, without cares, any modification to the polynomial can result in $\P$ losing the sparsity information: during the sum-check, binding any of the $P$ variables to a value $r_p$ other than 0 or 1 would land $\P$ in an evaluation where $Q_i$'s are no longer applicable: as a result, would force any future operations back to $O(P\cdot \Qmax\cdot X)$ time.
+
+To solve this problem, $\P$ always binds the $X$ variables first in sum-check. This enables it, at least in the first $x$ rounds, to sum over the polynomial on points where the $P$ and $Q$ variables are within the boolean hypercube. Thus, $\P$ can skip the zero section of the polynomial for the first $x$ rounds, reducing the summing cost of Sum-Check 1 to the $O(\max(P\cdot \Qmax, \Qsum\cdot X))$.
+
+This idea can and needs to be further expanded. The motivation is that to produce $Z_{r_q}$, $\P$ needs to only bind the $Q$ variables of the compact polynomial $Z$. If $\P$ starts binding from the beginning (most significant bits) of $Q$, then information regarding $Q_i$'s are lost after the first round. However, if $\P$ starts from the end of (least significant bits) $Q$, then the information is preserved (if $Z(1, 0, 0)$ and $Z(1, 0, 1)$ are both 0, then $Z(1, 0, r)$ is also 0).
+
+To further optimize caching, we let the compact form stores the $q$ variables \emph{in reverse}, i.e. the cell $Z[p][q][x]$ stores $Z(p, \qrev, x)$, where $\qrev$ is $q$ with bits reversed. This allows us to perform evaluation and binding of polynomials in the sum-check in the "right" order (i.e. from left to right), but generates the $r_q$ list in reverse order. We call this reversed list $r_{\qrev}$. Note that as long as every polynomial ($Az$, $Bz$, $Cz$, $Z$, $w$, $\io$) stores $\qrev$ instead of $q$, nothing needs to be changed in the protocol to accomodate $r_{\qrev}$.
+
+Finally, a clarification to the previous paragraph: $Z[p][q][x]$ actually stores $Z(p, \qrev \cdot s, x)$, where $s = \Qmax / Q_p$. This is because non-zero entries in $\qrev$ are no longer together, but rather always $s$ apart. Take an example of $\Qmax = 16, Q_i = 4$. Non-zero entres of $q$ are $(0000_2, 0001_2, 0010_2, 0011_2)$, but non-zero entries of $\qrev$ are $(0000_2, 1000_2 = 8, 0100_2 = 4, 1100_2 = 12)$. To store them compactly, we put $\qrev = 4$ in slot 1, $\qrev = 8$ in slot 2, etc. This mostly does not affect any operation, especially not binding.
+
+Finally, we can derive the cost analysis for summing and binding a polynomial $Z$ of compact form with $\qrev$:
+\begin{enumerate}
+    \item Since every valid $Z[p][\qrev]$ vector is not sparse, binding one $x$ variable before any $p$ and $\qrev$ always cut the number of non-zero entries by half.
+    \item If we bind one $\qrev$ variable before any $p$ variables (regardless of whether $x$ variables are binded or not), then for any instance $i$, as long as there are more than one proof, the number of non-zero entries are cut by half. This means binding all $\qrev$ variables takes at least $O(P \cdot \log \Qmax)$ (or $O(P \cdot \log \Qmax\cdot X)$) time. Since we assume $\Qsum = O(\Qmax)$, this is acceptable.
+    \item If we bind any $p$ variable before finishing all $\qrev$ variables, compactness is lost. Fortunately none of the steps requires this process.
+\end{enumerate}
+Using these properties, we can revise the Prover Cost:
+\begin{itemize}
+    \item In step \ref{step:mat-product}: $Az$, $Bz$, $Cz$ are now $\Qsum \cdot X$ compact polynomials and computing them take $O(\Qsum \cdot X)$ time.
+    \item In step \ref{step:sumcheck-1}: Sum-check 1 still takes $p + \qmax + x$ rounds, but summing over polynomials now takes in total $O(\Qsum \cdot X)$ time. Since $\P$ binds in the order of $x \to \qrev \to p$, their respective binding costs are:
+    \begin{itemize}
+        \item $O(\Qsum \cdot X)$ for the first $x$ rounds
+        \item $O(P \cdot \log \Qmax)$ for the next $q$ rounds
+        \item $O(P)$ for the last $p$ rounds
+    \end{itemize}
+    As a result, cost for Sum-check 1 excluding $\eq_\tau$ is $O(\Qsum \cdot X)$.
+    \item In step \ref{step:compute-z-poly}: compute $Z_{r_q}$ requires computing $Z$ and then binding it to $r_{\qrev}$. $Z$ can be stored in compact form, taking $O(\Qsum \cdot X)$ space. Binding, as explained earlier, takes $O(P \cdot \log \Qmax\cdot X)$ time.
+\end{itemize}
+This leaves us with the problem of witness commitment and $\eq_\tau$ creation.
+
+\subsection{Committing Compact Polynomials}
+For polynomial commitment, Spartan expresses a polynomial expression $M(r)$ as
+$$\displaystyle M(r_x, r_y) = \sum_{i, j :: M(i, j)\neq 0} M(i, j)\cdot \eq(i, r_x)\cdot\eq(j, r_y)$$
+where $r_x$ is the first half of $r$ and $r_y$ is the second.
+
+The evaluation $M(r)$ can then be treated as a SNARK of the dot product, thus $\V$, which is also the verifier of the commitment, only needs to pay the cost of dot product on one particular $(r_x, r_y)$, which is $O(\sqrt{n})$, where $n$ is the number of non-zero entries in $M$.
+
+We first note that if $M$ is in sparse polynomial form, then $\P$'s work is linear to the number of non-zero entries. This applies also to \code{spartan\_parallel}, which means nothing needs to be altered to commit $A, B, C$ matrices.
+
+\section{Other Improvements}
+
+\subsection{Converting Inputs into Witnesses}
+
+\subsection{Better Encoding of $\eq_\tau$}
+
+\end{document}

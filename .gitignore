@@ -11,6 +11,8 @@ Cargo.lock
 
 *.txt
 
-writeups/*
-!writeups/*/*.tex
+writeups/backend_overview/*
+writeups/spartan_parallel/*
+!writeups/backend_overview/*.tex
+!writeups/spartan_parallel/*.tex
 .DS_Store
