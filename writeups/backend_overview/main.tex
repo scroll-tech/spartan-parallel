@@ -133,8 +133,8 @@ To solve these problems, \code{spartan\_parallel} improves on the naive version 
 \subsection{The \code{spartan\_parallel} Proof System}
 We now succinctly describe the \code{spartan\_parallel} proof system:
 \begin{enumerate}
-    \item The instances for all $P$ blocks are provided by the frontend.
-    \item Program states $(io, w)$ of all $\Qsum$ executions are provided by $\P$ and committed into $P$ commitments, one for each block.
+    \item The value $P$ and the instances for all $P$ blocks are provided by the frontend.
+    \item All $Q_i$ and the program states $(io, w)$ of all $\Qsum$ executions are provided by $\P$ and committed into $P$ commitments, one for each block.
     \item $\P$ concatenates each $(io_{i, j}, w_{i, j})$ pair into a single vector $z_{i, j}$.
     \item $\P$ computes three polynomials, each extending all $\Qsum$ length-$X$ vectors $Az$, $Bz$, or $Cz$. This step takes $O(\Qsum\cdot Y)$ time since $\P$ can skip all the zeros.
     \item $\P$ engages $\V$ in the first sumcheck protocol to prove $\sum_{p, q, x} \eq\cdot (Az \cdot Bz - Cz) = 0$. The sumcheck lasts $p + \qmax + x$ rounds but $\P$ only needs to perform $O(\Qsum\cdot Y)$ evaluations and bindings. At the end of the sumcheck, $\V$ samples vectors $r_p, r_q, r_x$ of length $p, \qmax, x$.
@@ -146,13 +146,13 @@ We now succinctly describe the \code{spartan\_parallel} proof system:
 
 \subsection{Commitments and Shared Commitments}
 
-The program states of the block correctness proof is represented as $z = (io, w)$. As explained earlier, $io$ is the input and output state of each block execution, sorted in block order. These values will also be used by $\PERMB$. As a result, the commitment of $io$, which is actually $P$ commitments each describing $Q_i \times Y$ entries, is a share commitment. On the other hand, commitment for $w$ is used exclusively by the block correctness proof.
+The program states of the block correctness proof is represented as $z = (io, w)$. As explained earlier, $io$ is the input and output state of each block execution, sorted in block order. These values will also be used by $\PERMB$. As a result, the commitment of $io$, which is actually $P$ commitments each describing $Q_i \times Y$ entries, is a shared commitment. On the other hand, commitment for $w$ is used exclusively by the block correctness proof.
 
 As a result, we define the shared commitment of $\psb$ to be the commitment of $io$. Runtime and memory constraint in the block correctness proof dictates that $\psb$ will be committed as $P$ commitments, which later also dictates the strategy used by the proof $\PERMB$.
 
 % --
 
-\section{Proof of Consistency and Modified \code{spartan\_parallel}}\label{sec:consistency}
+\section{Proof of Consistency and \code{spartan\_pseudo\_parallel}}\label{sec:consistency}
 
 The next proof is to verify that, when ordering the program states in execution order, the output state of the previous block execution matches the input state of the next block execution. As explained previously, checks on whether the correct block is being executed can be done within each block as long as the block label is included in the input and output states.
 
@@ -203,13 +203,47 @@ At the end of RLC, $\P$ convinces $\V$ that a list of $\RLC(io_i) = (v_i, v_i\RL
 \begin{itemize}
     \item If $io_i$ is invalid, then $io_{i+1}$ is also invalid, so both $\RLC(io_i)$ and $\RLC(io_{i+1})$ are a zero-vectors.
     \item Consistency between each pair of $\RLC(io_i)$ and $\RLC(io_{i+1})$ is checked using only one constraint. We let the $i$th constraint in $I$ checks the consistency between $\RLC(io_i)$ and $\RLC(io_{i+1})$. This means that if $io_i$ is invalid, all variables used by the $i$th constraint will be 0, and the constraint will be satisfied with both sides being 0.
+    \item \red{There is a hidden third condition, which is that each row in $A$ has the same amount of non-zero entry, same with $B$ and $C$. This way, not only do we know which constraints are multiplied to 0, we also know which non-zero entries in $A$, $B$, and $C$ are multiplied to 0.}
 \end{itemize}
-It turns out that these two properties are enough to apply the basic idea behind \code{spartan\_parallel}. Instead of $Q$ proofs, each with $X$ constraints and $Y$ variables, we now have 1 proof with $Q\cdot Y$ non-zero variables and $Q\cdot X$ constraints that are \emph{multiplied to non-zero variables}. 
+It turns out that these two properties are enough to apply the basic idea behind \code{spartan\_parallel}. Instead of $Q$ proofs, each with $X$ constraints and $Y$ variables, we now have 1 proof with $Q\cdot Y$ non-zero variables and $Q\cdot X$ constraints that are \emph{multiplied to non-zero variables}. We call this construction a \emph{pseudo-parallel proof system} with
+\begin{itemize}
+    \item Number of proofs: $P = 1$
+    \item Number of parallel constraints and inputs per proof: $Q_0 = Q = \Qsum$
+    \item Base constraint size: $X = 1$
+    \item Base input size: $Y = 3$ (then round to the next power of 2)
+\end{itemize}
+This construction allows the system to also support multiple proofs, each with different numbers of parallel inputs (and constraints), just like $P$ and $Q_i$ in \code{spartan\_parallel}. We will exploit this property later when discussing permutation.
 
-
-
-Since $\P$ does so by invoking \code{spartan\_parallel} with one instance, this means $\P$ has committed all $\Qsum$ copies of $\RLC(io_i)$ in a single commitment $c$. To finalize the consistency check of $\RLC(io_i)$, $\P$ needs to engage $\V$ in another proof system using the same commitment $c$. This poses a problem: $c$ describes a matrix of size $\Qsum \cdot Y$, but the consistency instance needs to be applied to a matrix of size $\Qbound \cdot Y$, 
+Finally, during the RLC verification, $\P$ invokes \code{spartan\_parallel} with one instance. This means $\P$ has committed all $\Qsum$ copies of $\RLC(io_i)$ in a single commitment. This will also be what the pseudo-parallel proof system needs to support: one commitment per proof.
 
 \subsection{The \code{spartan\_pseudo\_parallel} Proof System}
+
+In the previous subsection, we introduced a pseudo-parallelism and properties that relate it to full data-parallelism. The next step is to modify \code{spartan\_parallel} to support pseudo-parallelism. We call this new proof system \code{spartan\_pseudo\_parallel}, described below:
+\begin{enumerate}
+    \item The one and only instance is provided by the frontend. $A$, $B$, and $C$ are of size $\Qbound X\times \Qbound Y$. $\P$ and $\V$ doesn't need to know $\Qbound$ as long as all $Q_i \leq \Qbound$.
+    \item $P$, $Q_i$'s, and program states $\RLC(io_{i, j})$ of all $\Qsum$ executions are provided by $\P$ and committed into $P$ commitments, one for each proof. Each commitment $c_i$ represents a matrix of size $Q_i \times Y$.
+    \item $\P$ sets $z_{i, j} = \RLC(io_{i, j})$. The entire $z$ is of size $P\times Q_i\times Y$.
+    \item $\P$ computes $Az$, $Bz$, and $Cz$ and extends them to three polynomials. Each $Az$, $Bz$, and $Cz$ is of size $P\times Q_i \times X$. Note that the correct output of the matrix multiplication should be of size $P\times \Qbound \times X$, but $\P$ can skip the $Q_i \dots \Qbound$ part because they are all 0's. This step takes $O(\Qsum\cdot Y)$ time. \red{This step is possible because we only needs to read the first $O(Q_i)$ non-zero entries of the instances. If the constraints do not look exactly like each other, we cannot do this!}
+    \item $Az$, $Bz$, $Cz$ are in the exact same format as in \code{spartan\_parallel}, so sumcheck 1 also stays the same. $\P$ engages $\V$ to prove $\sum_{p, q, x} \eq\cdot (Az \cdot Bz - Cz) = 0$ in $p + \qmax + x$ rounds, performing $O(\Qsum\cdot Y)$ evaluations and bindings. At the end of the sumcheck, $\V$ samples vectors $r_p, r_{qx}, r_x$ of length $p, \qmax, x$. Note that $\Qmax = \max_i(Q_i)\leq\Qbound$.
+    \item $\V$ samples three random values $r_A$, $r_B$, and $r_C$. $\P$ computes a polynomial $\Z_{r_p}$ that extends all $z_{i, j}$ and binds to $r_p$ (instead of $r_q$! In \code{spartan\_pseudo\_parallel}, $P$ is the dimension only existed in $z$). $\P$ also computes polynomial $\ABC = r_A\cdot A + r_B\cdot B + r_C\cdot C$.
+    \item $\P$ engages $\V$ in the second sumcheck protocol to prove $\sum_{q, y} \ABC \cdot \Z_{r_p} = e$, where $e$ is the claim from the first sumcheck. At the end of the sumcheck, $\V$ samples vectors $r_{qy}, r_y$ of length $\qmax, y$. Note that $r_{qx}$ and $r_{qy}$ are not related. $\V$ uses $(r_{qx}, r_x)$ to perform RLC on the constraints and $(r_{qy}, r_y)$ for RLC on $z$. \red{In \code{spartan\_parallel}, the sumcheck one output $r_p$ is applied to both the instance and $z$, which is why, in sumcheck 2, we need to introduce an additional polynomial $\eq_p$ to make it degree-1. In \code{spartan\_pseudo\_parallel}, sumcheck 1 produces $r_p$, which is only used by $z$, and $r_{qx}$, which is only used by the instance, so no degree-2 bindings, no $\eq$.}
+    \item $\P$ opens all $P$ commitments of $io$ and $w$ on $r_{qy}, r_y$ and proves that their linear combination using $r_p$ is $\Z_{r_p}(r_{qy}, r_y)$. This takes $O(\Qsum\cdot Y)$ time for $\P$ and $O(\sqrt{P\cdot \Qmax\cdot Y})$ time for $\V$.
+    \item Finally, $\P$ opens one commitment on all instances to reveal the evaluation on $r_{qx}, r_x, r_{qy}, r_y$.
+\end{enumerate}
+From $\V$'s perspective, \code{spartan\_pseudo\_parallel} is almost exactly like \code{spartan\_parallel}, except the challenge vectors are now ($r_p, r_{qx}, r_x, r_{qy}, r_y$) instead of ($r_p, r_p', r_q, r_x, r_y)$. $\P$ needs to pre-process the instances and inputs to make them fit \code{spartan\_parallel}, but none of the changes ultimately affect its runtime.
+
+\subsection{Commitments and Shared Commitments}
+
+Finally, we state the shared commitments introduced by the consistency proof. The $io$'s in execution order will be used by $\PERME$. Thus, the commitment of $io$ describing $\Qsum \times Y$ entries is a shared commitment, and we define it to be $\pse$.
+
+% --
+
+\section{Proofs of Permutation}\label{sec:permutation}
+
+In this section, we use \code{spartan\_parallel} and \code{spartan\_pseudo\_parallel} to verify that values commited by $\psb$ and $\pse$ are indeed permutations of each other. 
+
+% --
+
+\section{Verifying the Final Output}\label{sec:final_output}
 
 \end{document}
