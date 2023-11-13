@@ -4,6 +4,7 @@
 #![allow(clippy::assertions_on_result_states)]
 
 // TODO: Proof might be incorrect if a block is never executed
+// TODO: Maybe we should just use the valid bit as constant?
 // Q: Would it be insecure if an entry has valid = 0 but everything else not 0?
 // A: Shouldn't matter because consistency check will force invalid entries to be 0's
 // Q: What should we do with the constant bit if the entry is invalid?

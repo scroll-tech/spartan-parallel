@@ -191,11 +191,11 @@ fn produce_r1cs() -> (
   let V_Z0 = 6;
   let V_Z1 = 7;
   let V_B0 = 8;
-  // let V_valid = num_vars;
+  let V_valid = num_vars;
   let V_bi = num_vars + 1;
   let V_ii = num_vars + 2;
   let V_si = num_vars + 3;
-  let V_cnst = num_vars + 4;
+  let V_cnst = V_valid;
   let V_bo = num_vars + 5;
   let V_io = num_vars + 6;
   let V_so = num_vars + 7;
@@ -343,7 +343,7 @@ fn produce_r1cs() -> (
   let consis_comb_num_non_zero_entries = 4 * input_output_cutoff - 1;
 
   let V_valid = num_vars;
-  let V_cnst = num_vars + input_output_cutoff;
+  let V_cnst = V_valid;
 
   let consis_comb_inst = {
     let mut A_list = Vec::new();
@@ -495,7 +495,7 @@ fn produce_r1cs() -> (
       // w3[2]: the constant 1, 0 if invalid
       let V_tau = 0;
       // The best way to find a CONSTANT ONE is to peak into the constant term of the first input, which is guaranteed to be valid
-      let V_cnst = num_vars + input_output_cutoff;
+      let V_cnst = num_vars;
 
       let mut constraint_count = 0;
 
@@ -560,7 +560,7 @@ fn produce_r1cs() -> (
   
         let V_valid = 0;
         let V_x = 1;
-        let V_cnst = 2;
+        let V_cnst = V_valid;
         let V_pi = 3;
         let V_d1 = 4;
         let V_d2 = 5;
