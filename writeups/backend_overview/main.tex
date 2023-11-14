@@ -18,10 +18,13 @@
 \newcommand{\ABC}{\widetilde{ABC}}
 \newcommand{\eq}{\widetilde{\mbox{eq}}}
 \newcommand{\valid}{\tilde{\mbox{valid}}}
-\newcommand{\io}{\widetilde{(\mbox{io, 1})}}
+\newcommand{\iob}{io_{\mathtt{BLOCK}}}
+\newcommand{\ioe}{io_{\mathtt{EXEC}}}
 
 \newcommand{\PERMB}{\mathtt{PERM_{BLOCK}}}
 \newcommand{\PERME}{\mathtt{PERM_{EXEC}}}
+\newcommand{\ROOTE}{\mathtt{ROOT_{EXEC}}}
+\newcommand{\ROOTB}{\mathtt{ROOT_{BLOCK}}}
 \newcommand{\psb}{\mathtt{ps_{block}}}
 \newcommand{\pse}{\mathtt{ps_{exec}}}
 \newcommand{\ps}{\mathtt{ps}}
@@ -241,6 +244,56 @@ Finally, we state the shared commitments introduced by the consistency proof. Th
 \section{Proofs of Permutation}\label{sec:permutation}
 
 In this section, we use \code{spartan\_parallel} and \code{spartan\_pseudo\_parallel} to verify that values commited by $\psb$ and $\pse$ are indeed permutations of each other. 
+
+\subsection{Permutation Basics}
+
+Given two lists $a = (a_0, a_1, ..., a_{n-1})$, $b = (b_0, b_1, ..., b_{n-1})$, the goal is to prove that $b$ is a permutation of $a$. We can employ a simple idea from \red{XXX}: let $p_a$ be a degree-$n$ polynomial with roots $a_0, ..., a_{n-1}$ and $p_b$ be a degree-$n$ polynomial with roots $b_0, ..., b_{n-1}$. If $b$ is a permutation of $a$, then $p_a$ and $p_b$ are the same polynomial. This leads to the following proof:
+\begin{enumerate}
+    \item $\P$ commits to $a$ and $b$.
+    \item $\V$ samples a random challenge $\tau$.
+    \item $\P$ computes $p_a(\tau) = \prod_i (\tau - a_i)$ and $p_b(\tau) = \prod_i (\tau - b_i)$. It uses a proof system to convince $\V$ that $p_a(\tau)$ and $p_b(\tau)$ are computed correctly.
+    \item Finally, $\V$ checks that $p_a(\tau) = p_b(\tau)$.
+\end{enumerate} 
+
+If $p_a$ and $p_b$ are not the same polynomial, it is extremely unlikely that they match on a random value $\tau$. Thus, $\V$ is convinced $a$ and $b$ are permutations of each other if $p_a(\tau) = p_b(\tau)$.
+
+\subsection{Permutation of Sequences}
+
+Now, instead of $a$ and $b$ being lists of values, we let them be lists of sequences. Let each $a_i = (a_{i, 0}, \dots a_{i, m-1})$ and ach $b_i = (b_{i, 0}, \dots b_{i, m-1})$. The goal is to check that $b = (b_0\dots b_{n-1})$ is a permutation of $a = (a_0\dots a_{n-1})$, i.e.:
+$$\forall_i, \exists_j \mbox{ such that } \forall_k, a_{i, k} = b_{j, k} \ \mbox{ and }\ \forall_{i'}, \exists_{j'} \mbox{ such that } \forall_k, b_{i', k} = a_{j', k}$$
+
+To verify the permutation, $\P$ computes an RLC on $a_i$ and $b_i$. Then, $\P$ can again construct two polynomials with roots being the values of $\RLC(a_i)$ and $\RLC(b_i)$. Details of the protocol is below:
+\begin{enumerate}
+    \item $\P$ commits to $a$ and $b$.
+    \item $\V$ samples random challenge $\tau$ and $r$.
+    \item For $i\in [0, n)$, $\P$ computes $\RLC(a_i) = \sum_k r^k \cdot a_{i, k}$ and $\RLC(b_i) = \sum_k r^k \cdot b_{i, k}$. It uses a proof system to convince $\V$ that all $\RLC(a_i)$ and $\RLC(b_i)$ are computed correctly.
+    \item $\P$ then computes $p_a(\tau) = \prod_i (\tau - \RLC(a_i))$ and $p_b(\tau) = \prod_i (\tau - \RLC(b_i))$. It convinces $\V$ that they are correct using another proof.
+    \item Finally, $\V$ checks that $p_a(\tau) = p_b(\tau)$.
+\end{enumerate} 
+
+\subsection{Permutation Check for $\pse$}
+
+Applying the idea behind the permutation check to the backend, $\V$ wants to verify that the list of $io$ in block order (referred to as $\iob$) and the list of $io$ in execution order ($\ioe$) are permutations of each other. So $\P$ treats each $\iob$ as $a_i$ and each $\ioe$ as $b_i$, and constructs polynomials on them. To align with the block correctness and consistency check, $\P$ also needs to commit $\iob$ and $\ioe$ using $\psb$ and $\pse$ respectively.
+
+We start by reasoning about the easier case. The commitment $\pse$ requires $\ioe$ to be expressed as a $\Qsum\times Y$ matrix, where each row corresponds to one $\ioe$ entry. This presents a natural way to compute the polynomial evaluation $p_\mathtt{EXEC}(\tau)$:
+\begin{enumerate}
+    \item $\P$ commits $\pse$.
+    \item $\V$ randomly samples $\tau$ and $r$.
+    \item \label{step:permE_root} For each ${\ioe}_i$, $\P$ computes $\tau - \RLC({\ioe}_i)$, where $\RLC({\ioe}_i) = \sum_{k = 0}^{Y-1} r^k \cdot {\ioe}_{i, k}$. $\P$ proves the correctness of all $\tau - \RLC({\ioe}_i)$ to $\V$.
+    \item \label{step:permE_poly} Finally, $\P$ computes $p_\mathtt{EXEC}(\tau) = \prod_{i = 0}^{\Qsum - 1}(\tau - \RLC({\ioe}_i))$
+\end{enumerate}
+
+The above protocol closely resembles the consistency check: step \ref{step:permE_root} contains the majority of the constraints, and can be applied to each $io$ separately and verified in parallel, while step \ref{step:permE_poly} contains a small set of constraints that multiply derived values from multiple $\ioe$'s, and thus not so easily paralllelizable. Can we construct the instance in step \ref{step:permE_poly} in a way that $\P$ and $\V$ can apply \code{spartan\_pseudo\_parallel}?
+
+The answer is yes. We can apply \code{spartan\_pseudo\_parallel} if the instance contains constraints that are: 1. structurally identical, 2. only involves inputs derived from two consecutive $io$'s, and 3. the inputs should all be 0 if the first $io$ is invalid. These requirements can be satisfied by computing the product recursively. For each $io_i$, let $\P$ supply two values $(x_i, \pi_i)$, where $x_i = \tau - \RLC({\ioe}_i)$ and $\pi_i = \prod_{j = i}^{\Qsum - 1} x_j$. This way, the constraints in step \ref{step:permE_poly} can be expressed as $\forall_i, \pi_i = x_i \cdot \pi_{i+1}$. However, this construct fails to address the issue of invalid $io$'s: when an $io$ is invalid, $\tau - \RLC({\ioe}_i) = \tau\neq 0$, so pseudo-parallelism does not hold.
+
+To deal with this problem, $x$ needs to be expressed as $v_i \cdot (\tau - \RLC({\ioe}_i))$, but now the formular for $pi$ needs to change as well: if $io_{i + 1}$ is invalid, $pi_{i + 1}$ should be 0, but $pi_i$ should treat $pi_{i + 1}$ as if it is a 1 (otherwise multiplication would not work). We propose the following way to compute $pi_i$:
+$$pi_i = v_i * x_i * (\pi_{i+1} + (1 - v_{i+1}))$$
+
+With these in mind, we redesign the protocol:
+\begin{enumerate}
+    \item At the end of step \ref{step:permE_root}, $\P$ computes a list of $\ROOTE_i = (v, x, \pi, D_1, D_2)$
+\end{enumerate}
 
 % --
 

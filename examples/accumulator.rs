@@ -478,8 +478,8 @@ fn produce_r1cs() -> (
   };
 
   // PERM_ROOT
-  let perm_root_num_cons = num_vars + 3;
-  let perm_root_num_non_zero_entries = 2 * num_vars + 3;
+  let perm_root_num_cons = num_vars + 2;
+  let perm_root_num_non_zero_entries = 2 * num_vars + 2;
   let perm_root_inst = {
     let (A, B, C) = {
       let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -492,7 +492,6 @@ fn produce_r1cs() -> (
       // w2: one block_inputs entry dot product <r>: i0, i1 * r, i2 * r^2, i3 * r^3, ...
       // w3[0]: valid bit, should match block_inputs[0]
       // w3[1]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...)), 0 if invalid
-      // w3[2]: the constant 1, 0 if invalid
       let V_tau = 0;
       // The best way to find a CONSTANT ONE is to peak into the constant term of the first input, which is guaranteed to be valid
       let V_cnst = num_vars;
@@ -517,10 +516,6 @@ fn produce_r1cs() -> (
           [vec![(V_tau, 1)], (0..num_vars).map(|i| (2 * num_vars + i, -1)).collect()].concat(), 
           vec![(num_vars, 1)], 
           vec![(3 * num_vars + 1, 1)]);
-      constraint_count += 1;
-      // correctness of w3[2]: is the constant 1
-      (A, B, C) = gen_constr(A, B, C, V_cnst, 
-        constraint_count, vec![(V_cnst, 1)], vec![(num_vars, 1)], vec![(3 * num_vars + 2, 1)]);
 
       (A, B, C)   
     };
@@ -537,18 +532,16 @@ fn produce_r1cs() -> (
   // PERM_BLOCK_POLY and PERM_EXEC_POLY
   // The strategy is to compute the local polynomials (evaluated on tau) for each block instance
   // Each w3[p][2] (i.e. w3[p][0][2]) stores the product pi for instance P. The verifier obtains all P of them and multiply them together.
-  // The correct formular is pi = v[k] * x[k] * (v[k+1] * x[k+1] + (1 - v[k+1])))
-  // To do this, think of each entry of w3[k] (w3[p][k]) as a tuple (v, x, 1, pi, D1, D2)
+  // The correct formular is pi = v[k] * x[k] * (pi[k+1] + (1 - v[k+1])))
+  // To do this, think of each entry of w3[k] (w3[p][k]) as a tuple (v, x, pi, D)
   // v[k]  <- whether the entry is valid
   // x[k]  <- \tau - (\sum_i a_i * r^{i-1})
-  // 1[k]  <- v[k] * 1
   // pi[k] <- v[k] * D2[k]
-  // D1[k] <- v[k+1] * pi[k+1]
-  // D2[k] <- x[k] * (D1[k] + (1 - v[k + 1]))
+  // D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
   // PERM_EXEC_POLY looks like PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
-  let perm_poly_num_cons_base = 4;
-  let perm_block_poly_num_non_zero_entries = 5 * block_max_num_proofs_bound;
-  let perm_exec_poly_num_non_zero_entries = 5 * total_num_proofs_bound;
+  let perm_poly_num_cons_base = 2;
+  let perm_block_poly_num_non_zero_entries = 4 * block_max_num_proofs_bound;
+  let perm_exec_poly_num_non_zero_entries = 4 * total_num_proofs_bound;
   
   let perm_poly_inst = [block_max_num_proofs_bound, total_num_proofs_bound].map(|entry_size| {
     let perm_poly_num_cons = perm_poly_num_cons_base * entry_size;
@@ -559,47 +552,38 @@ fn produce_r1cs() -> (
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
   
         let V_valid = 0;
-        let V_x = 1;
         let V_cnst = V_valid;
-        let V_pi = 3;
-        let V_d1 = 4;
-        let V_d2 = 5;
+        let V_x = 1;
+        let V_pi = 2;
+        let V_d = 3;
   
         let mut constraint_count = 0;
   
         // Need to order the constraints so that they solve the inputs in the front first
         // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
         for i in 0..entry_size - 1 {
-          // D1
-          (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-            constraint_count, vec![((i + 1) * num_vars + V_valid, 1)], vec![((i + 1) * num_vars + V_pi, 1)], vec![(i * num_vars + V_d1, 1)]);
-          constraint_count += 1;
-          // D2
+          // D
           (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
             constraint_count, 
             vec![(i * num_vars + V_x, 1)], 
-            vec![(i * num_vars + V_d1, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
-            vec![(i * num_vars + V_d2, 1)]);
+            vec![((i + 1) * num_vars + V_pi, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
+            vec![(i * num_vars + V_d, 1)]);
           constraint_count += 1;
           // pi
           (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-            constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
-          // Pad base constraint size to 4
-          constraint_count += 2;
+            constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
+          // Pad base constraint size to 2
+          constraint_count += 1;
         }
         // Last Entry
         let i = entry_size - 1;
-        // last D1 is 0
+        // last D is x[k] * 1
         (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-          constraint_count, vec![(i * num_vars + V_d1, 1)], vec![], vec![]);
-        constraint_count += 1;
-        // last D2 is x[k] * 1
-        (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-          constraint_count, vec![(i * num_vars + V_x, 1)], vec![], vec![(i * num_vars + V_d2, 1)]);
+          constraint_count, vec![(i * num_vars + V_x, 1)], vec![], vec![(i * num_vars + V_d, 1)]);
         constraint_count += 1;
         // last pi is just usual
         (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-          constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d2, 1)], vec![(i * num_vars + V_pi, 1)]);
+          constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
   
         (A, B, C)   
       };

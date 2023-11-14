@@ -858,7 +858,7 @@ impl SNARK {
       ).collect();
       perm_w0[0] = comb_tau;
       
-      // w3 is [valid, tau - Xi, 1, ...]
+      // w3 is [v, x, pi, D]
       // See accumulator.rs
       let mut perm_block_w3: Vec<Vec<Vec<Scalar>>> = Vec::new();
       for p in 0..block_num_instances {
@@ -867,14 +867,12 @@ impl SNARK {
           perm_block_w3[p][q] = vec![Scalar::zero(); num_vars];
           perm_block_w3[p][q][0] = block_inputs_mat[p][q][0];
           perm_block_w3[p][q][1] = (comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b)) * block_inputs_mat[p][q][0];
-          perm_block_w3[p][q][2] = Scalar::one() * block_inputs_mat[p][q][0];
           if q != block_num_proofs[p] - 1 {
-            perm_block_w3[p][q][4] = perm_block_w3[p][q + 1][0] * perm_block_w3[p][q + 1][3];
-            perm_block_w3[p][q][5] = perm_block_w3[p][q][1] * (perm_block_w3[p][q][4] + Scalar::one() - perm_block_w3[p][q + 1][0]);
+            perm_block_w3[p][q][3] = perm_block_w3[p][q][1] * (perm_block_w3[p][q + 1][2] + Scalar::one() - perm_block_w3[p][q + 1][0]);
           } else {
-            perm_block_w3[p][q][5] = perm_block_w3[p][q][1];
+            perm_block_w3[p][q][3] = perm_block_w3[p][q][1];
           }
-          perm_block_w3[p][q][3] = perm_block_w3[p][q][0] * perm_block_w3[p][q][5];
+          perm_block_w3[p][q][2] = perm_block_w3[p][q][0] * perm_block_w3[p][q][3];
         }
       }
       let mut perm_exec_w3 = vec![Vec::new(); consis_num_proofs];
@@ -882,14 +880,12 @@ impl SNARK {
         perm_exec_w3[q] = vec![Scalar::zero(); num_vars];
         perm_exec_w3[q][0] = exec_inputs_list[q][0];
         perm_exec_w3[q][1] = (comb_tau - perm_exec_w2[q].iter().fold(Scalar::zero(), |a, b| a + b)) * exec_inputs_list[q][0];
-        perm_exec_w3[q][2] = Scalar::one() * exec_inputs_list[q][0];
         if q != consis_num_proofs - 1 {
-          perm_exec_w3[q][4] = perm_exec_w3[q + 1][0] * perm_exec_w3[q + 1][3];
-          perm_exec_w3[q][5] = perm_exec_w3[q][1] * (perm_exec_w3[q][4] + Scalar::one() - perm_exec_w3[q + 1][0]);
+          perm_exec_w3[q][3] = perm_exec_w3[q][1] * (perm_exec_w3[q + 1][2] + Scalar::one() - perm_exec_w3[q + 1][0]);
         } else {
-          perm_exec_w3[q][5] = perm_exec_w3[q][1];
+          perm_exec_w3[q][3] = perm_exec_w3[q][1];
         }
-        perm_exec_w3[q][3] = perm_exec_w3[q][0] * perm_exec_w3[q][5];
+        perm_exec_w3[q][2] = perm_exec_w3[q][0] * perm_exec_w3[q][3];
       }
 
       // create a multilinear polynomial using the supplied assignment for variables
