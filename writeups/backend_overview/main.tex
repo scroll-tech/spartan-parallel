@@ -352,7 +352,7 @@ Finally, we revisit the components listed in section \ref{sec:input} and present
         \item additional intermediate values used by the proofs: i.e., $w_{i, j}$ for block correctness
     \end{enumerate}
     \item $\P$ commits to $\iob$ as $\psb$, which is consisted of $P$ small commitments. $\P$ also commits to $\ioe$ as one single commitment $\pse$. $\P$ sends $\psb$ and $\pse$ to $\V$.
-    \item $\V$ samples challenges $\tau$ and $r$ for RLC and constructing the permutation polynomial and sends to $\P$.
+    \item $\V$ samples challenges $\tau$ and $r$ for RLC and the permutation polynomial, and sends the challenges to $\P$.
     \item $\P$ computes and commits to $\RLC(\ioc) = (v, \RLC(i), \RLC(o))$ for consistency check and $\ROOTE, \ROOTB = (v, x, \pi)$ for permutation check.
     \item $\P$ convinces $\V$ that every block execution is performed correctly, with
     \begin{itemize}
