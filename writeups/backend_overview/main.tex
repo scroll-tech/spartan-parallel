@@ -10,6 +10,8 @@
 \newcommand{\Qmax}{Q_{\mathtt{max}}}
 \newcommand{\qmax}{q_{\mathtt{max}}}
 \newcommand{\qrev}{q_{\mathtt{rev}}}
+\newcommand{\Msum}{M_{\mathtt{sum}}}
+\newcommand{\Mmax}{M_{\mathtt{max}}}
 \renewcommand{\P}{\mathcal{P}}
 \newcommand{\V}{\mathcal{V}}
 \newcommand{\F}{\mathbb{F}}
@@ -406,6 +408,20 @@ Finally, we revisit the components listed in section \ref{sec:input} and present
         \item ${\ioe}_0$ is an execution of the entry block and ${\ioe}_{\Qsum - 1}$ an execution of the exit block.
         \item All entries of $i_0$ matches the input to $f$ and all entries of $o_{\Qsum - 1}$ matches $\P$'s claim about the output of $f$.
     \end{enumerate}
+\end{enumerate}
+
+%--
+
+\section{Memory Consistency and Beyond}
+
+The final step is to expand the backend to support memory consistency:
+\begin{enumerate}
+    \item At compile time, the frontend supplies an upperbound on the maximum number of memory accesses of the program, $\Mmax$.
+    \item For each block, the front end supplies an instance to extract all STORE and LOAD information. However, the instance does not need to split out ($v$, addr, val). Instead the instance also takes in challenges $r$ and $\tau$, and directly computes $x = \prod (\tau - ($v$ + r\cdot \mbox{addr} + r^2 \cdot \mbox{val}))$
+    \item Just like $\PERMB$, for each block execution, $\P$ provides $(v, x, \pi)$ for the memory accesses. $\P$ and $\V$ use $\PERMB$ to construct the permutation polynomial for (addr, val) in block order.
+    \item $\P$ supplies the actual number of memory accesses, $\Msum$, and $\Msum$ pairs of (addr, val) in address order. After receiving $r$ and $tau$ from $\V$, it computes $(v, x, \pi)$ for each (addr, val) pair. It proves the correctness of $x$ and $\pi$ using $\PERME$.
+    \item $\V$ checks permutation of the two memory access sequences by multuplying $\pi$'s in block order and compare to $\pi$ in address order.
+    \item The frontend supplies constraints for memory consistency check of up to $\Mmax$ pairs of (addr, val). $\P$ and $\V$ engages in \code{spartan\_pseudo\_parallel} to verify consistency of (addr, val) in address order.
 \end{enumerate}
 
 \end{document}
