@@ -89,6 +89,9 @@ fn produce_r1cs() -> (
   usize,
   usize,
   [Instance; 2],
+  usize,
+  usize,
+  Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
   Vec<InputsAssignment>
@@ -209,7 +212,6 @@ fn produce_r1cs() -> (
   let V_T1 = 4;
   let V_M0 = 5;
   let V_M1 = 6;
-
 
   let block_inst = {
     let mut A_list = Vec::new();
@@ -613,6 +615,115 @@ fn produce_r1cs() -> (
   });
 
   // --
+  // MEM_EXTRACT Instances
+  // --
+
+  // parameters of the MEM_EXTRACT instance
+  // maximum value among the R1CS instances
+  let mem_extract_num_cons = 6;
+  let mem_extract_num_non_zero_entries = 9;
+
+  // !!!NOTE: we assume that there are fewer memory accesses than witnesses, need to double check whether that is true!!!
+  // MR is r * val for each (addr, val)
+  // MC is the cumulative product of v * (tau - addr - MR)
+  // The final product is stored in x
+  //        0   1   2   3   4   5   6   7    8    9  10  11   12  13  14  15 
+  // Exec:  Z0  Z1  B0  T0  T1  M0  M1   _ | v | b0  i0  s0 | _ | b1  i1  s1 |
+  //        16  17  18  19  20  21  22  23   24  25  26  27    28  29  30  31
+  //        tau  r   _   _   _   _   _   _ |  v   x  pi   D  | MR  MC  MR  MC |
+  let V_valid = num_vars;
+  let V_cnst = V_valid;
+  let V_M0 = 5;
+  let V_M1 = 6;
+  let V_tau = 2 * num_vars;
+  let V_r = 2 * num_vars + 1;
+  let V_v = 3 * num_vars;
+  let V_x = 3 * num_vars + 1;
+  let V_MR = |i: usize| 3 * num_vars + 4 + 2 * i;
+  let V_MC = |i: usize| 3 * num_vars + 5 + 2 * i;
+
+  let mem_extract_inst = {
+    let mut A_list = Vec::new();
+    let mut B_list = Vec::new();
+    let mut C_list = Vec::new();
+
+    // Instance 0: block 1
+    // Instances need to be sorted form highest # of execution -> lowest
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      let mut i = 0;
+      // addr = 0, val = M0
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_r, 1)], vec![(V_M0, 1)], vec![(V_MR(0), 1)]);
+      i += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_valid, 1)], vec![(V_tau, 1), (V_MR(0), -1)], vec![(V_MC(0), 1)]);
+      i += 1;
+      // addr = 1, val = M1
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_r, 1)], vec![(V_M1, 1)], vec![(V_MR(1), 1)]);
+      i += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_MC(0), 1)], vec![(V_tau, 1), (V_cnst, -1), (V_MR(1), -1)], vec![(V_MC(1), 1)]);
+      i += 1;
+      // w3[0]
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_valid, 1)], vec![], vec![(V_v, 1)]);
+      i += 1;
+      // w3[1]
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_x, 1)], vec![], vec![(V_MC(1), 1)]); 
+
+      (A, B, C)
+    };
+    A_list.push(A);
+    B_list.push(B);
+    C_list.push(C);
+    
+    // Instance 1: block 0
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      let mut i = 0;
+      // addr = 0, val = 1
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_r, 1)], vec![(V_cnst, 1)], vec![(V_MR(0), 1)]);
+      i += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_valid, 1)], vec![(V_tau, 1), (V_MR(0), -1)], vec![(V_MC(0), 1)]);
+      i += 1;
+      // addr = 1, val = 2
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_r, 1)], vec![(V_cnst, 2)], vec![(V_MR(1), 1)]);
+      i += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_MC(0), 1)], vec![(V_tau, 1), (V_cnst, -1), (V_MR(1), -1)], vec![(V_MC(1), 1)]);
+      i += 1;
+      // w3[0]
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_valid, 1)], vec![], vec![(V_v, 1)]);
+      i += 1;
+      // w3[1]
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        i, vec![(V_x, 1)], vec![], vec![(V_MC(1), 1)]); 
+
+      (A, B, C)
+    };
+    A_list.push(A);
+    B_list.push(B);
+    C_list.push(C);
+
+    let mem_extract_inst = Instance::new(block_num_instances, mem_extract_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
+    
+    mem_extract_inst
+  };
+
+  // --
   // End Instances
   // --
 
@@ -764,6 +875,10 @@ fn produce_r1cs() -> (
     perm_exec_poly_num_non_zero_entries,
     perm_poly_inst,
 
+    mem_extract_num_cons,
+    mem_extract_num_non_zero_entries,
+    mem_extract_inst,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -813,6 +928,10 @@ fn main() {
     perm_exec_poly_num_non_zero_entries,
     perm_poly_inst,
     
+    mem_extract_num_cons,
+    mem_extract_num_non_zero_entries,
+    mem_extract_inst,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs
@@ -836,6 +955,7 @@ fn main() {
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
   let perm_exec_poly_gens = SNARKGens::new(perm_exec_poly_num_cons, total_num_proofs_bound * num_vars, 1, perm_exec_poly_num_non_zero_entries);
+  let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances, mem_extract_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
@@ -853,6 +973,7 @@ fn main() {
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_poly_inst[0], &perm_block_poly_gens);
   let (perm_exec_poly_comm, perm_exec_poly_decomm) = SNARK::encode(&perm_poly_inst[1], &perm_exec_poly_gens);
+  let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
