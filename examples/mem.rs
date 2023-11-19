@@ -23,10 +23,7 @@
 //!   }                               }
 //!
 //! Converting each block to constraints:
-//! Block 1:                        Block 2:
-//!   b0 = b_in                       b0 = b_in
-//!   i0 = i_in                       i0 = i_in
-//!   s0 = s_in                       s0 = s_in
+//! Block 0:                        Block 1:
 //!   v = v * v                       v = v * v
 //!   0 = b0                          0 = v * (b0 - 1)
 //!   0 = i0                          0 = v * (i1 - i0 - M0)
@@ -38,18 +35,17 @@
 //!   T1 = v * (1 - B0)               T1 = v * (1 - B0)
 //!   0 = T1 * (i0 - 3)               0 = T1 * (i1 - 3)
 //!   0 = T1 * (b1 - 2)               0 = T1 * (b1 - 2)
-//!   b_out = b1                      b_out = b1
-//!   i_out = i0                      i_out = i1
-//!   s_out = s0                      s_out = s1
+//!   i1 = i0
+//!   s1 = s0
 //! 
 //! Program States
-//!        0    1   2   3   4    5   6   7    8   9  10  11  12  13  14  15
+//!        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
 //! Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
 //! 0      1    0   0   0   0    1   0   0  -3i   1   1   1   0   0   0   0
 //! 1      1    1   0   0   0    1   1   2  -2i   1   1   1   0   1   2   0
 //! 2      1    1   1   2   0    1   2   4  -1i   1   1   1   0   1   2   0
 //! 3      1    1   2   4   0    2   3   6    0   0   0   0   1   1   2   0
-//! 0      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
+//! 4      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
 //!
 #![allow(clippy::assertions_on_result_states)]
 use std::ops::Neg;
@@ -170,7 +166,7 @@ fn produce_r1cs() -> (
   // everything else is instance-specific
   // Divide inputs into (1, input, 1, output)
   // So num_inputs = num_outputs = input_output_cutoff - 1
-  let num_vars = 16;
+  let num_vars = 8;
   let input_output_cutoff = 4;
 
   // Number of proofs of each R1CS instance
@@ -191,30 +187,29 @@ fn produce_r1cs() -> (
   // parameters of the BLOCK instance
   // maximum value among the R1CS instances
   let block_num_cons = 16;
-  let block_num_non_zero_entries = 19;
+  let block_num_non_zero_entries = 21;
   // Number of R1CS instances
   let block_num_instances = 2;
 
-  //                    0    1    2    3    4    5    6    7    8
-  // variable orders:  b0   i0   s0   b1   i1   s1   Z0   Z1   B0 
-  // input orders:  valid  b_i  i_i  s_i    1  b_o  i_o  s_o
-  let V_b0 = 0;
-  let V_i0 = 1;
-  let V_s0 = 2;
-  let V_b1 = 3;
-  let V_i1 = 4;
-  let V_s1 = 5;
-  let V_Z0 = 6;
-  let V_Z1 = 7;
-  let V_B0 = 8;
+  // Program States
+  //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
+  // Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
   let V_valid = num_vars;
-  let V_bi = num_vars + 1;
-  let V_ii = num_vars + 2;
-  let V_si = num_vars + 3;
   let V_cnst = V_valid;
-  let V_bo = num_vars + 5;
-  let V_io = num_vars + 6;
-  let V_so = num_vars + 7;
+  let V_b0 = num_vars + 1;
+  let V_i0 = num_vars + 2;
+  let V_s0 = num_vars + 3;
+  let V_b1 = num_vars + 5;
+  let V_i1 = num_vars + 6;
+  let V_s1 = num_vars + 7;
+  let V_Z0 = 0;
+  let V_Z1 = 1;
+  let V_B0 = 2;
+  let V_T0 = 3;
+  let V_T1 = 4;
+  let V_M0 = 5;
+  let V_M1 = 6;
+
 
   let block_inst = {
     let mut A_list = Vec::new();
@@ -222,55 +217,56 @@ fn produce_r1cs() -> (
     let mut C_list = Vec::new();
 
     // Instance 0: block 1
-    // Instances need to be sorted in reverse # of proofs order
+    // Instances need to be sorted form highest # of execution -> lowest
     let (A, B, C) = {
       let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
-      // R1CS:
-      // b0 = b_in
+      let mut i = 0;
+      // v * v = v
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        0, vec![(V_b0, 1)], vec![], vec![(V_bi, 1)]);
-      // i0 = i_in
+        i, vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]);
+      i += 1;
+      // v * (b0 - 1) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        1, vec![(V_i0, 1)], vec![], vec![(V_ii, 1)]);
-      // s0 = s_in
+        i, vec![(V_valid, 1)], vec![(V_b0, 1), (V_cnst, -1)], vec![]);
+      i += 1;
+      // v * (i1 - i0 - M0) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        2, vec![(V_s0, 1)], vec![], vec![(V_si, 1)]);
-      // b0 = 1
+        i, vec![(V_valid, 1)], vec![(V_i1, 1), (V_i0, -1), (V_M0, -1)], vec![]);
+      i += 1;
+      // v * (s1 - s0 - M1) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        3, vec![(V_b0, 1)], vec![], vec![(V_cnst, 1)]);
-      // s1 - s0 = i0
+        i, vec![(V_valid, 1)], vec![(V_s1, 1), (V_s0, -1), (V_M1, -1)], vec![]);
+      i += 1;
+      // (i1 - 3) * Z0 = Z1
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        4, vec![(V_s1, 1), (V_s0, -1)], vec![], vec![(V_i0, 1)]);
-      // i1 - i0 = 1
+        i, vec![(V_i1, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]);
+      i += 1;
+      // v * B0 = T0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        5, vec![(V_i1, 1), (V_i0, -1)], vec![], vec![(V_cnst, 1)]);
-      // (i1 - 4) * Z0 = Z1
+        i, vec![(V_valid, 1)], vec![(V_B0, 1)], vec![(V_T0, 1)]);
+      i += 1;
+      // T0 * (Z1 - 1) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        6, vec![(V_i1, 1), (V_cnst, -4)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]);
-      // B0 * (Z1 - 1) = 0
+        i, vec![(V_T0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]);
+      i += 1;
+      // T0 * (b1 - 1) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        7, vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]);
-      // B0 * (b1 - 1) = 0
+        i, vec![(V_T0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]);
+      i += 1;
+      // v * (1 - B0) = T1
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        8, vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]);
-      // (1 - B0) * (i1 - 4) = 0
+        i, vec![(V_valid, 1)], vec![(V_cnst, 1), (V_B0, -1)], vec![(V_T1, 1)]);
+      i += 1;
+      // T1 * (i1 - 3) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        9, vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -4)], vec![]);
-      // (1 - B0) * (b1 - 2) = 0
+        i, vec![(V_T1, 1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]);
+      i += 1;
+      // T1 * (b1 - 2) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        10, vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]);
-      // b_out = b1
-      (A, B, C) = gen_constr(A, B, C, V_cnst,
-        11, vec![(V_bo, 1)], vec![], vec![(V_b1, 1)]);
-      // i_out = i1
-      (A, B, C) = gen_constr(A, B, C, V_cnst,
-        12, vec![(V_io, 1)], vec![], vec![(V_i1, 1)]);
-      // s_out = s1
-      (A, B, C) = gen_constr(A, B, C, V_cnst,
-        13, vec![(V_so, 1)], vec![], vec![(V_s1, 1)]);
+        i, vec![(V_T1, 1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]);
 
       (A, B, C)
     };
@@ -284,49 +280,50 @@ fn produce_r1cs() -> (
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
-      // R1CS:
-      // b0 = b_in
+      let mut i = 0;
+      // v * v = v
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        0, vec![(V_b0, 1)], vec![], vec![(V_bi, 1)]);
-      // i0 = i_in
-      (A, B, C) = gen_constr(A, B, C, V_cnst,
-        1, vec![(V_i0, 1)], vec![], vec![(V_ii, 1)]);
-      // s0 = s_in
-      (A, B, C) = gen_constr(A, B, C, V_cnst,
-        2, vec![(V_s0, 1)], vec![], vec![(V_si, 1)]);
+        i, vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]);
+      i += 1;
       // b0 = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        3, vec![(V_b0, 1)], vec![], vec![]);
+        i, vec![(V_b0, 1)], vec![], vec![]);
+      i += 1;
       // i0 = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        4, vec![(V_i0, 1)], vec![], vec![]);
+        i, vec![(V_i0, 1)], vec![], vec![]);
+      i += 1;
       // s0 = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        5, vec![(V_s0, 1)], vec![], vec![]);
-      // (i0 - 4) * Z0 = Z1
+        i, vec![(V_s0, 1)], vec![], vec![]);
+      i += 1;
+      // (i0 - 3) * Z0 = Z1
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        6, vec![(V_i0, 1), (V_cnst, -4)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]);
-      // B0 * (Z1 - 1) = 0
+        i, vec![(V_i0, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]);
+      i += 1;
+      // v * B0 = T0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        7, vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]);
-      // B0 * (b1 - 1) = 0
+        i, vec![(V_valid, 1)], vec![(V_B0, 1)], vec![(V_T0, 1)]);
+      i += 1;
+      // T0 * (Z1 - 1) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        8, vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]);
-      // (1 - B0) * (i0 - 4) = 0
+        i, vec![(V_T0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]);
+      i += 1;
+      // T0 * (b1 - 1) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        9, vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i0, 1), (V_cnst, -4)], vec![]);
-      // (1 - B0) * (b1 - 2) = 0
+        i, vec![(V_T0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]);
+      i += 1;
+      // v * (1 - B0) = T1
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        10, vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]);
-      // b_out = b1
+        i, vec![(V_valid, 1)], vec![(V_cnst, 1), (V_B0, -1)], vec![(V_T1, 1)]);
+      i += 1;
+      // T1 * (i0 - 3) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        11, vec![(V_bo, 1)], vec![], vec![(V_b1, 1)]);
-      // i_out = i0
+        i, vec![(V_T1, 1)], vec![(V_i0, 1), (V_cnst, -3)], vec![]);
+      i += 1;
+      // T1 * (b1 - 2) = 0
       (A, B, C) = gen_constr(A, B, C, V_cnst,
-        12, vec![(V_io, 1)], vec![], vec![(V_i0, 1)]);
-      // s_out = s0
-      (A, B, C) = gen_constr(A, B, C, V_cnst,
-        13, vec![(V_so, 1)], vec![], vec![(V_s0, 1)]);
+        i, vec![(V_T1, 1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]);
 
       (A, B, C)
     };
@@ -627,9 +624,9 @@ fn produce_r1cs() -> (
   let consis_num_proofs: usize = 8;
   // What is the input and the output?
   let input = vec![zero, zero];
-  let output = vec![four, six];
+  let output = vec![three, six];
   // Which block in the execution order is the output block?
-  let output_block_index = 4;
+  let output_block_index = 3;
 
   // --
   // Begin Assignments
@@ -642,47 +639,42 @@ fn produce_r1cs() -> (
     let mut exec_inputs = Vec::new();
 
     // Block 1
+    //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
+    // Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
+    // 0      1    1   0   0   0    1   1   2  -2i   1   1   1   0   1   2   0
+    // 1      1    1   1   2   0    1   2   4  -1i   1   1   1   0   1   2   0
+    // 2      1    1   2   4   0    2   3   6    0   0   0   0   1   1   2   0
+    // 3      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
     let (assignment_vars, assignment_inputs) = {
       let mut assignment_vars = Vec::new();
       let mut assignment_inputs = Vec::new();
-      //                    0    1    2    3    4    5    6    7    8
-      // variable orders:  b0   i0   s0   b1   i1   s1   Z0   Z1   B0 
-      // input orders:  valid  b_i  i_i  s_i    1  b_o  i_o  s_o
       // Iteration i = 1
-      let mut vars = vec![one, zero, zero, one, one, zero, Scalar::from(3u32).neg().invert().to_bytes(), one, one];
-      let mut inputs = vec![one, one, zero, zero, one, one, one, zero];
-      vars.extend(vec![zero; 7]);
-      inputs.extend(vec![zero; 8]);
+      let vars = vec![Scalar::from(2u32).neg().invert().to_bytes(), one, one, one, zero, one, two, zero];
+      let inputs = vec![one, one, zero, zero, zero, one, one, two];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 2
-      let mut vars = vec![one, one, zero, one, two, one, Scalar::from(2u32).neg().invert().to_bytes(), one, one];
-      let mut inputs = vec![one, one, one, zero, one, one, two, one];
-      vars.extend(vec![zero; 7]);
-      inputs.extend(vec![zero; 8]);
+      let vars = vec![Scalar::from(1u32).neg().invert().to_bytes(), one, one, one, zero, one, two, zero];
+      let inputs = vec![one, one, one, two, zero, one, two, four];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 3
-      let mut vars = vec![one, two, one, one, three, three, Scalar::from(1u32).neg().invert().to_bytes(), one, one];
-      let mut inputs = vec![one, one, two, one, one, one, three, three];
-      vars.extend(vec![zero; 7]);
-      inputs.extend(vec![zero; 8]);
+      let vars = vec![zero, zero, zero, zero, one, one, two, zero];
+      let inputs = vec![one, one, two, four, zero, two, three, six];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 4
-      let mut vars = vec![one, three, three, two, four, six, zero, zero, zero];
-      let mut inputs = vec![one, one, three, three, one, two, four, six];
-      vars.extend(vec![zero; 7]);
-      inputs.extend(vec![zero; 8]);
+      let vars = vec![zero; 8];
+      let inputs = vec![zero; 8];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
@@ -695,16 +687,14 @@ fn produce_r1cs() -> (
     block_inputs_matrix.push(assignment_inputs);
 
     // Block 0
+    //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
+    // Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
+    // 0      1    0   0   0   0    1   0   0  -3i   1   1   1   0   0   0   0
     let (assignment_vars, assignment_inputs) = {
       let mut assignment_vars = Vec::new();
       let mut assignment_inputs = Vec::new();
-      //                    0    1    2    3    4    5    6    7    8
-      // variable orders:  b0   i0   s0   b1   i1   s1   Z0   Z1   B0 
-      // input orders:  valid  b_i  i_i  s_i    1  b_o  i_o  s_o
-      let mut vars = vec![zero, zero, zero, one, zero, zero, Scalar::from(4u32).neg().invert().to_bytes(), one, one];
-      let mut inputs = vec![one, zero, zero, zero, one, one, zero, zero];
-      vars.extend(vec![zero; 7]);
-      inputs.extend(vec![zero; 8]);
+      let vars = vec![Scalar::from(3u32).neg().invert().to_bytes(), one, one, one, zero, zero, zero, zero];
+      let inputs = vec![one, zero, zero, zero, zero, one, zero, zero];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
@@ -923,7 +913,7 @@ fn main() {
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof
-    .verify(
+    .verify::<false>(
       input_block_num,
       output_block_num,
       &input,

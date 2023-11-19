@@ -342,7 +342,6 @@ struct IOProofs {
   output_valid_proof: PolyEvalProof,
   input_block_num_proof: PolyEvalProof,
   output_block_num_proof: PolyEvalProof,
-  constant_proof: PolyEvalProof,
   input_correctness_proof_list: Vec<PolyEvalProof>,
   output_correctness_proof_list: Vec<PolyEvalProof>,
 }
@@ -412,17 +411,6 @@ impl IOProofs {
       transcript,
       random_tape,
     );
-    // constant_proof
-    let (constant_proof, _comm) = PolyEvalProof::prove(
-      exec_poly_inputs,
-      None,
-      &to_bin_array(input_output_cutoff),
-      &Scalar::one(),
-      None,
-      &vars_gens.gens_pc,
-      transcript,
-      random_tape,
-    );
     // correctness_proofs
     let mut input_correctness_proof_list = Vec::new();
     let mut output_correctness_proof_list = Vec::new();
@@ -455,7 +443,6 @@ impl IOProofs {
       output_valid_proof,
       input_block_num_proof,
       output_block_num_proof,
-      constant_proof,
       input_correctness_proof_list,
       output_correctness_proof_list,
     }
@@ -510,14 +497,6 @@ impl IOProofs {
       transcript,
       &to_bin_array(output_block_index * num_vars + input_output_cutoff + 1),
       &output_block_num,
-      comm_poly_inputs,
-    )?;
-    // constant_proof
-    self.constant_proof.verify_plain(
-      &vars_gens.gens_pc,
-      transcript,
-      &to_bin_array(input_output_cutoff),
-      &Scalar::one(),
       comm_poly_inputs,
     )?;
     // correctness_proofs
@@ -866,7 +845,7 @@ impl SNARK {
         for q in (0..block_num_proofs[p]).rev() {
           perm_block_w3[p][q] = vec![Scalar::zero(); num_vars];
           perm_block_w3[p][q][0] = block_inputs_mat[p][q][0];
-          perm_block_w3[p][q][1] = (comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b)) * block_inputs_mat[p][q][0];
+          perm_block_w3[p][q][1] = perm_block_w3[p][q][0] * (comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b));
           if q != block_num_proofs[p] - 1 {
             perm_block_w3[p][q][3] = perm_block_w3[p][q][1] * (perm_block_w3[p][q + 1][2] + Scalar::one() - perm_block_w3[p][q + 1][0]);
           } else {
@@ -985,8 +964,8 @@ impl SNARK {
         consis_w2.push(vec![Scalar::zero(); num_vars]);
         consis_w3.push(vec![Scalar::zero(); num_vars]);
         
-        consis_w3[q][1] = exec_inputs_list[q][input_output_cutoff];
-        consis_w3[q][2] = exec_inputs_list[q][input_output_cutoff];
+        consis_w3[q][1] = exec_inputs_list[q][0];
+        consis_w3[q][2] = exec_inputs_list[q][0];
         for i in 1..input_output_cutoff {
           consis_w2[q][i] = perm_w0[i] * exec_inputs_list[q][i];
           consis_w2[q][input_output_cutoff + i] = perm_w0[i] * exec_inputs_list[q][input_output_cutoff + i];
@@ -1705,7 +1684,7 @@ impl SNARK {
   }
 
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
-  pub fn verify(
+  pub fn verify<const DEBUG: bool>(
     &self,
     input_block_num: usize,
     output_block_num: usize,
@@ -1818,6 +1797,7 @@ impl SNARK {
     // BLOCK CORRECTNESS
     // --
 
+    if DEBUG {println!("BLOCK CORRECTNESS")};
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let block_challenges = self.block_r1cs_sat_proof.verify(
@@ -1856,7 +1836,7 @@ impl SNARK {
     // --
     // CONSIS_COMB
     // --
-
+    if DEBUG {println!("CONSIS COMB")};
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let consis_comb_challenges = self.consis_comb_r1cs_sat_proof.verify(
@@ -1895,7 +1875,7 @@ impl SNARK {
     // --
     // CONSIS_CHECK
     // --
-
+    if DEBUG {println!("CONSIS CHECK")};
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let consis_check_challenges = self.consis_check_r1cs_sat_proof.verify_single(
@@ -1932,7 +1912,7 @@ impl SNARK {
     // --
     // PERM_PRELIM
     // --
-
+    if DEBUG {println!("PERM PRELIM")};
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_prelim_challenges = self.perm_prelim_r1cs_sat_proof.verify(
@@ -1987,7 +1967,7 @@ impl SNARK {
     // --
     // PERM_BLOCK_ROOT
     // --
-
+    if DEBUG {println!("BLOCK ROOT")};
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
@@ -2026,7 +2006,7 @@ impl SNARK {
     // --
     // PERM_BLOCK_POLY
     // --
-
+    if DEBUG {println!("BLOCK POLY")};
     let perm_block_poly_bound_tau = {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_block_poly_challenges = self.perm_block_poly_r1cs_sat_proof.verify_single(
@@ -2078,7 +2058,7 @@ impl SNARK {
     // --
     // PERM_EXEC_ROOT
     // --
-
+    if DEBUG {println!("PERM EXEC ROOT")};
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_exec_root_challenges = self.perm_exec_root_r1cs_sat_proof.verify(
@@ -2117,7 +2097,7 @@ impl SNARK {
     // --
     // PERM_EXEC_POLY
     // --
-
+    if DEBUG {println!("PERM EXEC POLY")};
     let perm_exec_poly_bound_tau = {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_exec_poly_challenges = self.perm_exec_poly_r1cs_sat_proof.verify_single(

@@ -1040,13 +1040,15 @@ impl ZKSumcheckInstanceProof {
     for j in 0..num_rounds {
       /* For debugging only */
       /* If the value is not 0, the instance / input is wrong */
-      /* 
+      /*
       if j == 0 {
+        println!("NEW INSTANCE");
         let mut expected = Scalar::zero();
         for p in 0..instance_len {
           let step = proof_len / num_proofs[p];
           for q in 0..num_proofs[p] {
             for x in 0..cons_len {
+              // println!("p: {}, q: {}, x: {}, val: {:?}", p, q, x, poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x] * (poly_B.index(p, q, x) * poly_C.index(p, q, x) - poly_D.index(p, q, x)));
               expected += poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x] * (poly_B.index(p, q, x) * poly_C.index(p, q, x) - poly_D.index(p, q, x));
             }
           }
