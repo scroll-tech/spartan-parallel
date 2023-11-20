@@ -583,6 +583,12 @@ pub struct SNARK {
   mem_extract_inst_evals: (Scalar, Scalar, Scalar),
   mem_extract_r1cs_eval_proof: R1CSEvalProof,
 
+  mem_block_poly_r1cs_sat_proof: R1CSProof,
+  mem_block_poly_inst_evals: (Scalar, Scalar, Scalar),
+  mem_block_poly_r1cs_eval_proof: R1CSEvalProof,
+  mem_block_poly_list: Vec<Scalar>,
+  proof_eval_mem_block_prod_list: Vec<PolyEvalProof>,
+
   io_proof: IOProofs
 }
 
@@ -1056,6 +1062,12 @@ impl SNARK {
           // Compute x
           mem_block_w1[p][q][1] = mem_block_w1[p][q][4 + 2 * (block_num_mem_accesses[p] - 1) + 1];
           // Compute D and pi
+          if q != block_num_proofs[p] - 1 {
+            mem_block_w1[p][q][3] = mem_block_w1[p][q][1] * (mem_block_w1[p][q + 1][2] + Scalar::one() - mem_block_w1[p][q + 1][0]);
+          } else {
+            mem_block_w1[p][q][3] = mem_block_w1[p][q][1];
+          }
+          mem_block_w1[p][q][2] = mem_block_w1[p][q][0] * mem_block_w1[p][q][3];
         }
       }
 
@@ -1717,7 +1729,7 @@ impl SNARK {
       (proof, mem_extract_challenges)
     };
 
-    // Final evaluation on PERM_BLOCK_ROOT
+    // Final evaluation on MEM_EXTRACT
     let (mem_extract_inst_evals, mem_extract_r1cs_eval_proof) = {
       let [rp, _, rx, ry] = mem_extract_challenges;
       let inst = mem_extract_inst;
@@ -1749,6 +1761,93 @@ impl SNARK {
 
       timer_prove.stop();
       (inst_evals, r1cs_eval_proof)
+    };
+
+    // --
+    // MEM_BLOCK_POLY
+    // --
+
+    let (mem_block_poly_r1cs_sat_proof, mem_block_poly_challenges) = {
+      let (proof, mem_block_poly_challenges) = {
+        R1CSProof::prove_single(
+          block_num_instances,
+          perm_poly_num_cons_base,
+          num_vars,
+          // We need to feed the compile-time bound because that is the size of the constraints
+          // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
+          block_max_num_proofs_bound,
+          &block_num_proofs,
+          &perm_block_poly_inst.inst,
+          &proofs_times_vars_gens,
+          &mem_block_w1.iter().map(|i| i.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())).collect(),
+          &mem_block_poly_w1_list,
+          transcript,
+          &mut random_tape,
+        )
+      };
+
+      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+      (proof, mem_block_poly_challenges)
+    };
+
+    // Final evaluation on MEM_BLOCK_POLY
+    let (mem_block_poly_inst_evals, mem_block_poly_r1cs_eval_proof) = {
+      let [_, rx, ry] = &mem_block_poly_challenges;
+      let inst = perm_block_poly_inst;
+      let timer_eval = Timer::new("eval_sparse_polys");
+      let inst_evals = {
+        let (Ar, Br, Cr) = inst.inst.evaluate(&Vec::new(), rx, ry);
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        (Ar, Br, Cr)
+      };
+      timer_eval.stop();
+
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &perm_block_poly_decomm.decomm,
+          &rx,
+          &ry,
+          &inst_evals,
+          &perm_block_poly_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
+
+      timer_prove.stop();
+      (inst_evals, r1cs_eval_proof)
+    };
+
+    // Record the prod of each instance
+    let (mem_block_poly_list, proof_eval_mem_block_prod_list) = {
+      let mut mem_block_poly_list = Vec::new();
+      let mut proof_eval_mem_block_prod_list = Vec::new();
+      for p in 0..block_num_instances {
+        let r_len = (block_num_proofs[p] * num_vars).log_2();
+        // Prod is the 3rd entry
+        let mem_block_poly = mem_block_poly_w1_list[p][3];
+        let (proof_eval_mem_block_prod, _comm_mem_block_prod) = PolyEvalProof::prove(
+          &mem_block_poly_w1_list[p],
+          None,
+          &[vec![Scalar::zero(); r_len - 2], vec![Scalar::one(); 2]].concat(),
+          &mem_block_poly,
+          None,
+          &proofs_times_vars_gens.gens_pc,
+          transcript,
+          &mut random_tape,
+        );
+        mem_block_poly_list.push(mem_block_poly);
+        proof_eval_mem_block_prod_list.push(proof_eval_mem_block_prod);
+      }
+      (mem_block_poly_list, proof_eval_mem_block_prod_list)
     };
 
     // --
@@ -1826,6 +1925,12 @@ impl SNARK {
       mem_extract_r1cs_sat_proof,
       mem_extract_inst_evals,
       mem_extract_r1cs_eval_proof,
+
+      mem_block_poly_r1cs_sat_proof,
+      mem_block_poly_inst_evals,
+      mem_block_poly_r1cs_eval_proof,
+      mem_block_poly_list,
+      proof_eval_mem_block_prod_list,
 
       io_proof
     }
@@ -2123,7 +2228,7 @@ impl SNARK {
     // --
     // PERM_BLOCK_ROOT
     // --
-    if DEBUG {println!("BLOCK ROOT")};
+    if DEBUG {println!("PERM BLOCK ROOT")};
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
@@ -2162,7 +2267,7 @@ impl SNARK {
     // --
     // PERM_BLOCK_POLY
     // --
-    if DEBUG {println!("BLOCK POLY")};
+    if DEBUG {println!("PERM BLOCK POLY")};
     let perm_block_poly_bound_tau = {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let perm_block_poly_challenges = self.perm_block_poly_r1cs_sat_proof.verify_single(
@@ -2325,7 +2430,7 @@ impl SNARK {
       timer_sat_proof.stop();
 
       let timer_eval_proof = Timer::new("verify_eval_proof");
-      // Verify Evaluation on PERM_BLOCK_ROOT
+      // Verify Evaluation on MEM_EXTRACT
       let (Ar, Br, Cr) = &self.mem_extract_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
@@ -2342,6 +2447,57 @@ impl SNARK {
       timer_eval_proof.stop();
     }
 
+    // --
+    // MEM_BLOCK_POLY
+    // --
+    if DEBUG {println!("MEM BLOCK POLY")};
+    let mem_block_poly_bound_tau = {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let mem_block_poly_challenges = self.mem_block_poly_r1cs_sat_proof.verify_single(
+        block_num_instances,
+        perm_poly_num_cons_base,
+        num_vars,
+        block_max_num_proofs_bound,
+        &block_num_proofs,
+        &proofs_times_vars_gens,
+        &self.mem_block_poly_inst_evals,
+        &self.mem_block_comm_w1_list,
+        transcript,
+      )?;
+      timer_sat_proof.stop();
+
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on MEM_BLOCK_POLY
+      let (Ar, Br, Cr) = &self.mem_block_poly_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [_, rx, ry] = &mem_block_poly_challenges;
+      self.mem_block_poly_r1cs_eval_proof.verify(
+        &perm_block_poly_comm.comm,
+        rx,
+        ry,
+        &self.mem_block_poly_inst_evals,
+        &perm_block_poly_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+
+      // COMPUTE POLY FOR MEM_BLOCK
+      let mut mem_block_poly_bound_tau = Scalar::one();
+      for p in 0..block_num_instances {
+        let r_len = (block_num_proofs[p] * num_vars).log_2();
+        self.proof_eval_mem_block_prod_list[p].verify_plain(
+          &proofs_times_vars_gens.gens_pc,
+          transcript,
+          &[vec![Scalar::zero(); r_len - 2], vec![Scalar::one(); 2]].concat(),
+          &self.mem_block_poly_list[p],
+          &self.mem_block_comm_w1_list[p],
+        )?;
+        mem_block_poly_bound_tau *= self.mem_block_poly_list[p];
+      }
+      mem_block_poly_bound_tau
+    };
 
     // --
     // IO_PROOFS

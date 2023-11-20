@@ -547,7 +547,7 @@ fn produce_r1cs() -> (
     perm_root_inst
   };
 
-  // PERM_BLOCK_POLY and PERM_EXEC_POLY
+  // PERM_BLOCK_POLY, PERM_EXEC_POLY, (MEM_BLOCK_POLY)
   // The strategy is to compute the local polynomials (evaluated on tau) for each block instance
   // Each w3[p][2] (i.e. w3[p][0][2]) stores the product pi for instance P. The verifier obtains all P of them and multiply them together.
   // The correct formular is pi = v[k] * x[k] * (pi[k+1] + (1 - v[k+1])))
@@ -556,7 +556,8 @@ fn produce_r1cs() -> (
   // x[k]  <- \tau - (\sum_i a_i * r^{i-1})
   // pi[k] <- v[k] * D2[k]
   // D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
-  // PERM_EXEC_POLY looks like PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
+  // PERM_EXEC_POLY is PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
+  // MEM_BLOCK_POLY is PERM_BLOCK_POLY
   let perm_poly_num_cons_base = 2;
   let perm_block_poly_num_non_zero_entries = 4 * block_max_num_proofs_bound;
   let perm_exec_poly_num_non_zero_entries = 4 * total_num_proofs_bound;
@@ -618,12 +619,12 @@ fn produce_r1cs() -> (
   });
 
   // --
-  // MEM_EXTRACT Instances
+  // MEM Instances
   // --
 
+  // MEM_EXTRACT
   // How many memory accesses are in each block?
   let block_num_mem_accesses = vec![2, 2];
-
   // parameters of the MEM_EXTRACT instance
   // maximum value among the R1CS instances
   let mem_extract_num_cons = 8;
@@ -731,6 +732,10 @@ fn produce_r1cs() -> (
     
     mem_extract_inst
   };
+
+  // MEM_ADDR_COMB
+  // Takes in a list of (v, addr, val), combine each of them to (v, x, pi, D)
+  
 
   // --
   // End Instances
