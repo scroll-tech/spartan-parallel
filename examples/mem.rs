@@ -21,7 +21,8 @@
 //!     else:                           else:
 //!       b = 2                           b = 2
 //!   }                               }
-//!
+//! Note: take caution when translating STORE(0, 1) into constraints. If an execution of the block is invalid, this could cause a problem!
+//! 
 //! Converting each block to constraints:
 //! Block 0:                        Block 1:
 //!   v = v * v                       v = v * v
@@ -51,7 +52,7 @@
 use std::ops::Neg;
 
 use curve25519_dalek::scalar::Scalar;
-use libspartan::{Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment};
+use libspartan::{Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
 
 #[allow(non_snake_case)]
@@ -89,12 +90,14 @@ fn produce_r1cs() -> (
   usize,
   usize,
   [Instance; 2],
+  Vec<usize>,
   usize,
   usize,
   Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
-  Vec<InputsAssignment>
+  Vec<InputsAssignment>,
+  Vec<Vec<MemsAssignment>>
 ) {
   // bad test cases for debugging
   // set them to unreachable values to prevent bad tests
@@ -618,29 +621,35 @@ fn produce_r1cs() -> (
   // MEM_EXTRACT Instances
   // --
 
+  // How many memory accesses are in each block?
+  let block_num_mem_accesses = vec![2, 2];
+
   // parameters of the MEM_EXTRACT instance
   // maximum value among the R1CS instances
-  let mem_extract_num_cons = 6;
+  let mem_extract_num_cons = 8;
   let mem_extract_num_non_zero_entries = 9;
 
   // !!!NOTE: we assume that there are fewer memory accesses than witnesses, need to double check whether that is true!!!
   // MR is r * val for each (addr, val)
   // MC is the cumulative product of v * (tau - addr - MR)
+
   // The final product is stored in x
-  //        0   1   2   3   4   5   6   7    8    9  10  11   12  13  14  15 
-  // Exec:  Z0  Z1  B0  T0  T1  M0  M1   _ | v | b0  i0  s0 | _ | b1  i1  s1 |
-  //        16  17  18  19  20  21  22  23   24  25  26  27    28  29  30  31
-  //        tau  r   _   _   _   _   _   _ |  v   x  pi   D  | MR  MC  MR  MC |
-  let V_valid = num_vars;
+  // 0   1   2   3   4   5   6   7    0   1   2   3     4   5   6   7
+  // tau r   _   _   _   _   _   _ |  v   x  pi   D  | MR  MC  MR  MC |
+  // 0   1   2   3   4   5   6   7    0    1   2   3   4    5   6   7
+  // Z0  Z1  B0  T0  T1  M0  M1   _ | v | b0  i0  s0 | _ | b1  i1  s1 |
+  // The prover still needs (addr, val) in block order to evaluate MR and MC
+
+  let V_tau = 0;
+  let V_r = 1;
+  let V_v = num_vars;
+  let V_x = num_vars + 1;
+  let V_MR = |i: usize| num_vars + 4 + 2 * i;
+  let V_MC = |i: usize| num_vars + 5 + 2 * i;
+  let V_M0 = 2 * num_vars + 5;
+  let V_M1 = 2 * num_vars + 6;
+  let V_valid = 3 * num_vars;
   let V_cnst = V_valid;
-  let V_M0 = 5;
-  let V_M1 = 6;
-  let V_tau = 2 * num_vars;
-  let V_r = 2 * num_vars + 1;
-  let V_v = 3 * num_vars;
-  let V_x = 3 * num_vars + 1;
-  let V_MR = |i: usize| 3 * num_vars + 4 + 2 * i;
-  let V_MC = |i: usize| 3 * num_vars + 5 + 2 * i;
 
   let mem_extract_inst = {
     let mut A_list = Vec::new();
@@ -743,11 +752,19 @@ fn produce_r1cs() -> (
   // Begin Assignments
   // --
 
-  let (block_vars_matrix, block_inputs_matrix, exec_inputs) = {
+  let (
+    block_vars_matrix, 
+    block_inputs_matrix, 
+    exec_inputs,
+    block_mems_matrix
+  ) = {
 
     let mut block_vars_matrix = Vec::new();
     let mut block_inputs_matrix = Vec::new();
     let mut exec_inputs = Vec::new();
+    // Mems matrix is of the form (0, 0, 0, 0, addr, val, addr, val, ...)
+    // Skip the first four entries
+    let mut block_mems_matrix = Vec::new();
 
     // Block 1
     //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
@@ -756,66 +773,85 @@ fn produce_r1cs() -> (
     // 1      1    1   1   2   0    1   2   4  -1i   1   1   1   0   1   2   0
     // 2      1    1   2   4   0    2   3   6    0   0   0   0   1   1   2   0
     // 3      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
-    let (assignment_vars, assignment_inputs) = {
+    let (assignment_vars, assignment_inputs, assignment_mems) = {
       let mut assignment_vars = Vec::new();
       let mut assignment_inputs = Vec::new();
+      let mut assignment_mems = Vec::new();
       // Iteration i = 1
       let vars = vec![Scalar::from(2u32).neg().invert().to_bytes(), one, one, one, zero, one, two, zero];
       let inputs = vec![one, one, zero, zero, zero, one, one, two];
+      let mems = vec![zero, zero, zero, zero, zero, one, one, two];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
+      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
+      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 2
       let vars = vec![Scalar::from(1u32).neg().invert().to_bytes(), one, one, one, zero, one, two, zero];
       let inputs = vec![one, one, one, two, zero, one, two, four];
+      let mems = vec![zero, zero, zero, zero, zero, one, one, two];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
+      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
+      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 3
       let vars = vec![zero, zero, zero, zero, one, one, two, zero];
       let inputs = vec![one, one, two, four, zero, two, three, six];
+      let mems = vec![zero, zero, zero, zero, zero, one, one, two];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
+      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
+      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 4
       let vars = vec![zero; 8];
       let inputs = vec![zero; 8];
+      let mems = vec![zero; 8];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
+      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
+      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.push(next_block_assignment_inputs);
       
-      (assignment_vars, assignment_inputs)
+      (assignment_vars, assignment_inputs, assignment_mems)
     };
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
+    block_mems_matrix.push(assignment_mems);
 
     // Block 0
     //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
     // Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
     // 0      1    0   0   0   0    1   0   0  -3i   1   1   1   0   0   0   0
-    let (assignment_vars, assignment_inputs) = {
+    let (assignment_vars, assignment_inputs, assignment_mems) = {
       let mut assignment_vars = Vec::new();
       let mut assignment_inputs = Vec::new();
+      let mut assignment_mems = Vec::new();
       let vars = vec![Scalar::from(3u32).neg().invert().to_bytes(), one, one, one, zero, zero, zero, zero];
       let inputs = vec![one, zero, zero, zero, zero, one, zero, zero];
+      let mems = vec![zero, zero, zero, zero, zero, one, one, two];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
+      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
+      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.insert(0, next_block_assignment_inputs);
 
-      (assignment_vars, assignment_inputs)
+      (assignment_vars, assignment_inputs, assignment_mems)
     };
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
+    block_mems_matrix.push(assignment_mems);
 
     // Pad exec_inputs with 0
     assert!(consis_num_proofs >= exec_inputs.len());
@@ -827,7 +863,7 @@ fn produce_r1cs() -> (
     // Witnesses for permutation cannot be generated until tau and r are generated
     // Both can only be generated at proving time
 
-    (block_vars_matrix, block_inputs_matrix, exec_inputs)
+    (block_vars_matrix, block_inputs_matrix, exec_inputs, block_mems_matrix)
   };
 
   // --
@@ -875,13 +911,15 @@ fn produce_r1cs() -> (
     perm_exec_poly_num_non_zero_entries,
     perm_poly_inst,
 
+    block_num_mem_accesses,
     mem_extract_num_cons,
     mem_extract_num_non_zero_entries,
     mem_extract_inst,
 
     block_vars_matrix,
     block_inputs_matrix,
-    exec_inputs
+    exec_inputs,
+    block_mems_matrix
   )
 }
 
@@ -928,13 +966,15 @@ fn main() {
     perm_exec_poly_num_non_zero_entries,
     perm_poly_inst,
     
+    block_num_mem_accesses,
     mem_extract_num_cons,
     mem_extract_num_non_zero_entries,
     mem_extract_inst,
 
     block_vars_matrix,
     block_inputs_matrix,
-    exec_inputs
+    exec_inputs,
+    block_mems_matrix
   ) = produce_r1cs();
 
   let perm_block_poly_num_cons = perm_poly_num_cons_base * block_max_num_proofs_bound;
@@ -995,6 +1035,7 @@ fn main() {
     &block_comm,
     &block_decomm,
     &block_gens,
+    
     consis_num_proofs,
     &consis_comb_inst,
     &consis_comb_comm,
@@ -1005,6 +1046,7 @@ fn main() {
     &consis_check_comm,
     &consis_check_decomm,
     &consis_check_gens,
+
     &perm_prelim_inst,
     &perm_prelim_comm,
     &perm_prelim_decomm,
@@ -1022,9 +1064,18 @@ fn main() {
     &perm_exec_poly_comm,
     &perm_exec_poly_decomm,
     &perm_exec_poly_gens,
+
+    block_num_mem_accesses,
+    &mem_extract_inst,
+    &mem_extract_comm,
+    &mem_extract_decomm,
+    &mem_extract_gens,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
+    block_mems_matrix,
+
     &vars_gens,
     &proofs_times_vars_gens,
     &total_proofs_times_vars_gens,
@@ -1051,6 +1102,7 @@ fn main() {
       block_num_cons, 
       &block_comm,
       &block_gens,
+
       consis_num_proofs, 
       consis_comb_num_cons, 
       &consis_comb_comm,
@@ -1058,6 +1110,7 @@ fn main() {
       consis_check_num_cons_base, 
       &consis_check_comm,
       &consis_check_gens,
+
       perm_prelim_num_cons,
       &perm_prelim_comm,
       &perm_prelim_gens,
@@ -1069,6 +1122,11 @@ fn main() {
       &perm_block_poly_gens,
       &perm_exec_poly_comm,
       &perm_exec_poly_gens,
+
+      mem_extract_num_cons,
+      &mem_extract_comm,
+      &mem_extract_gens,
+
       &vars_gens,
       &proofs_times_vars_gens,
       &total_proofs_times_vars_gens,

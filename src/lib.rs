@@ -4,6 +4,7 @@
 #![allow(clippy::assertions_on_result_states)]
 
 // TODO: Proof might be incorrect if a block is never executed
+// TODO: Mem Proof might be incorrect if a block contains no mem execution
 // TODO: Maybe we should just use the valid bit as constant?
 // Q: Would it be insecure if an entry has valid = 0 but everything else not 0?
 // A: Shouldn't matter because consistency check will force invalid entries to be 0's
@@ -120,8 +121,11 @@ impl Assignment {
 /// `VarsAssignment` holds an assignment of values to variables in an `Instance`
 pub type VarsAssignment = Assignment;
 
-/// `InputsAssignment` holds an assignment of values to variables in an `Instance`
+/// `InputsAssignment` holds an assignment of values to inputs in an `Instance`
 pub type InputsAssignment = Assignment;
+
+/// `MemsAssignment` holds an assignment of values to (addr, val) pairs in an `Instance`
+pub type MemsAssignment = Assignment;
 
 /// `Instance` holds the description of R1CS matrices and a hash of the matrices
 pub struct Instance {
@@ -534,6 +538,7 @@ pub struct SNARK {
   perm_exec_comm_w3: Vec<PolyCommitment>,
   consis_comm_w2: Vec<PolyCommitment>,
   consis_comm_w3: Vec<PolyCommitment>,
+  mem_block_comm_w1_list: Vec<PolyCommitment>,
 
   block_r1cs_sat_proof: R1CSProof,
   block_inst_evals: (Scalar, Scalar, Scalar),
@@ -573,6 +578,10 @@ pub struct SNARK {
   perm_exec_poly_r1cs_eval_proof: R1CSEvalProof,
   perm_exec_poly: Scalar,
   proof_eval_perm_exec_prod: PolyEvalProof,
+
+  mem_extract_r1cs_sat_proof: R1CSProof,
+  mem_extract_inst_evals: (Scalar, Scalar, Scalar),
+  mem_extract_r1cs_eval_proof: R1CSEvalProof,
 
   io_proof: IOProofs
 }
@@ -651,9 +660,18 @@ impl SNARK {
     perm_exec_poly_decomm: &ComputationDecommitment,
     perm_exec_poly_gens: &SNARKGens,
 
+    block_num_mem_accesses: Vec<usize>,
+    mem_extract_inst: &Instance,
+    mem_extract_comm: &ComputationCommitment,
+    mem_extract_decomm: &ComputationDecommitment,
+    mem_extract_gens: &SNARKGens,
+
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
     exec_inputs_list: Vec<InputsAssignment>,
+    // The prover does not commit block_mems_mat; instead, it uses it to compute mem_extract_w1
+    block_mems_mat: Vec<Vec<MemsAssignment>>,
+
     vars_gens: &R1CSGens,
     proofs_times_vars_gens: &R1CSGens,
     total_proofs_times_vars_gens: &R1CSGens,
@@ -668,6 +686,11 @@ impl SNARK {
 
     transcript.append_protocol_name(SNARK::protocol_name());
 
+    // Currently only support the following case:
+    for n in &block_num_mem_accesses {
+      assert!(2 * n <= num_vars - 4);
+    }
+
     // --
     // COMMITMENTS
     // --
@@ -680,11 +703,13 @@ impl SNARK {
     perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_block_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_exec_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
+    mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
 
     // unwrap the assignments
     let block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let block_inputs_mat = block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
+    let block_mems_mat = block_mems_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
 
     // Commit io
     let input_block_num = Scalar::from(input_block_num as u64);
@@ -811,6 +836,10 @@ impl SNARK {
       consis_w3,
       consis_poly_w3,
       consis_comm_w3,
+
+      mem_block_w1,
+      mem_block_poly_w1_list,
+      mem_block_comm_w1_list,
     ) = {
       let comb_tau = transcript.challenge_scalar(b"challenge_tau");
       let comb_r = transcript.challenge_scalar(b"challenge_r");
@@ -1005,6 +1034,53 @@ impl SNARK {
         (consis_poly_w3, consis_comm_w3)
       };
 
+      // FOR MEM
+      // w1 is (v, x, pi, D, MR, MC, MR, MC, ...)
+      let mut mem_block_w1 = Vec::new();
+      for p in 0..block_num_instances {
+        mem_block_w1.push(vec![Vec::new(); block_num_proofs[p]]);
+        for q in (0..block_num_proofs[p]).rev() {
+          mem_block_w1[p][q] = vec![Scalar::zero(); num_vars];
+          mem_block_w1[p][q][0] = block_inputs_mat[p][q][0];
+          // Compute MR, MC
+          for x in 0..block_num_mem_accesses[p] {
+            let i = 2 * x + 4;
+            // MR = r * val
+            mem_block_w1[p][q][i] = comb_r * block_mems_mat[p][q][i + 1];
+            // MC = v * (tau - addr - MR)
+            let t = comb_tau - block_mems_mat[p][q][i] - mem_block_w1[p][q][i];
+            mem_block_w1[p][q][i + 1] = 
+              if x == 0 { block_inputs_mat[p][q][0] * t }
+              else { mem_block_w1[p][q][i - 1] * t };
+          }
+          // Compute x
+          mem_block_w1[p][q][1] = mem_block_w1[p][q][4 + 2 * (block_num_mem_accesses[p] - 1) + 1];
+          // Compute D and pi
+        }
+      }
+
+      // commit the witnesses and inputs separately instance-by-instance
+      let mut mem_block_poly_w1_list = Vec::new();
+      let mut mem_block_comm_w1_list = Vec::new();
+
+      for p in 0..block_num_instances {
+        let (mem_block_poly_w1, mem_block_comm_w1) = {
+          // Flatten the witnesses into a Q_i * X list
+          let w1_list_p = mem_block_w1[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let mem_block_poly_w1 = DensePolynomial::new(w1_list_p);
+          // produce a commitment to the satisfying assignment
+          let (mem_block_comm_w1, _blinds_vars) = mem_block_poly_w1.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          mem_block_comm_w1.append_to_transcript(b"poly_commitment", transcript);
+          (mem_block_poly_w1, mem_block_comm_w1)
+        };
+        mem_block_poly_w1_list.push(mem_block_poly_w1);
+        mem_block_comm_w1_list.push(mem_block_comm_w1);
+      }
+
+
       (
         comb_tau,
         comb_r,
@@ -1033,6 +1109,10 @@ impl SNARK {
         vec![consis_w3],
         vec![consis_poly_w3],
         vec![consis_comm_w3],
+
+        mem_block_w1,
+        mem_block_poly_w1_list,
+        mem_block_comm_w1_list,
       )
     };
 
@@ -1610,6 +1690,68 @@ impl SNARK {
     };
 
     // --
+    // MEM_EXTRACT
+    // --
+
+    let (mem_extract_r1cs_sat_proof, mem_extract_challenges) = {
+      let (proof, mem_extract_challenges) = {
+        R1CSProof::prove(
+          4,
+          1,
+          block_num_instances,
+          block_max_num_proofs,
+          block_num_proofs,
+          num_vars,
+          &mem_extract_inst.inst,
+          &vars_gens,
+          vec![&perm_w0, &mem_block_w1, &block_vars_mat, &block_inputs_mat],
+          vec![&perm_poly_w0, &mem_block_poly_w1_list, &block_poly_vars_list, &block_poly_inputs_list],
+          transcript,
+          &mut random_tape,
+        )
+      };
+
+      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+      (proof, mem_extract_challenges)
+    };
+
+    // Final evaluation on PERM_BLOCK_ROOT
+    let (mem_extract_inst_evals, mem_extract_r1cs_eval_proof) = {
+      let [rp, _, rx, ry] = mem_extract_challenges;
+      let inst = mem_extract_inst;
+      let timer_eval = Timer::new("eval_sparse_polys");
+      let inst_evals = {
+        let (Ar, Br, Cr) = inst.inst.evaluate(&rp, &rx, &ry);
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        (Ar, Br, Cr)
+      };
+      timer_eval.stop();
+
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &mem_extract_decomm.decomm,
+          &&[rp, rx].concat(),
+          &ry,
+          &inst_evals,
+          &mem_extract_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
+
+      timer_prove.stop();
+      (inst_evals, r1cs_eval_proof)
+    };
+
+    // --
     // IO_PROOFS
     // --
 
@@ -1640,6 +1782,8 @@ impl SNARK {
 
       consis_comm_w2,
       consis_comm_w3,
+
+      mem_block_comm_w1_list,
 
       block_r1cs_sat_proof,
       block_inst_evals,
@@ -1678,6 +1822,10 @@ impl SNARK {
       perm_exec_poly_r1cs_eval_proof,
       perm_exec_poly,
       proof_eval_perm_exec_prod,
+
+      mem_extract_r1cs_sat_proof,
+      mem_extract_inst_evals,
+      mem_extract_r1cs_eval_proof,
 
       io_proof
     }
@@ -1726,6 +1874,10 @@ impl SNARK {
     perm_exec_poly_comm: &ComputationCommitment,
     perm_exec_poly_gens: &SNARKGens,
 
+    mem_extract_num_cons: usize,
+    mem_extract_comm: &ComputationCommitment,
+    mem_extract_gens: &SNARKGens,
+
     vars_gens: &R1CSGens,
     proofs_times_vars_gens: &R1CSGens,
     total_proofs_times_vars_gens: &R1CSGens,
@@ -1752,6 +1904,7 @@ impl SNARK {
       perm_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
       perm_block_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
       perm_exec_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      mem_extract_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
       // Commit io
       input_block_num.append_to_transcript(b"input_block_num", transcript);
@@ -1791,6 +1944,9 @@ impl SNARK {
       self.perm_exec_comm_w3[0].append_to_transcript(b"poly_commitment", transcript);
       self.consis_comm_w2[0].append_to_transcript(b"poly_commitment", transcript);
       self.consis_comm_w3[0].append_to_transcript(b"poly_commitment", transcript);
+      for p in 0..block_num_instances {
+        self.mem_block_comm_w1_list[p].append_to_transcript(b"poly_commitment", transcript);
+      }
     }
 
     // --
@@ -2146,6 +2302,46 @@ impl SNARK {
     // ASSERT_CORRECTNESS_OF_PERMUTATION
     // --
     assert_eq!(perm_block_poly_bound_tau, perm_exec_poly_bound_tau);
+
+    // --
+    // MEM_EXTRACT
+    // --
+    if DEBUG {println!("MEM EXTRACT")};
+    {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let mem_extract_challenges = self.mem_extract_r1cs_sat_proof.verify(
+        4,
+        1,
+        block_num_instances,
+        block_max_num_proofs,
+        block_num_proofs,
+        num_vars,
+        mem_extract_num_cons,
+        &vars_gens,
+        &self.mem_extract_inst_evals,
+        vec![&self.perm_comm_w0, &self.mem_block_comm_w1_list, &self.block_comm_vars_list, &self.block_comm_inputs_list],
+        transcript,
+      )?;
+      timer_sat_proof.stop();
+
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on PERM_BLOCK_ROOT
+      let (Ar, Br, Cr) = &self.mem_extract_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [rp, _, rx, ry] = mem_extract_challenges;
+      self.mem_extract_r1cs_eval_proof.verify(
+        &mem_extract_comm.comm,
+        &[rp, rx].concat(),
+        &ry,
+        &self.mem_extract_inst_evals,
+        &mem_extract_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+    }
+
 
     // --
     // IO_PROOFS
