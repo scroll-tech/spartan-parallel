@@ -672,6 +672,11 @@ impl SNARK {
     mem_extract_decomm: &ComputationDecommitment,
     mem_extract_gens: &SNARKGens,
 
+    mem_addr_comb_inst: &Instance,
+    mem_addr_comb_comm: &ComputationCommitment,
+    mem_addr_comb_decomm: &ComputationDecommitment,
+    mem_addr_comb_gens: &SNARKGens,
+
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
     exec_inputs_list: Vec<InputsAssignment>,
@@ -710,6 +715,7 @@ impl SNARK {
     perm_block_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_exec_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
+    mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
 
     // unwrap the assignments
     let block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
@@ -1983,6 +1989,10 @@ impl SNARK {
     mem_extract_comm: &ComputationCommitment,
     mem_extract_gens: &SNARKGens,
 
+    mem_addr_comb_num_cons: usize,
+    mem_addr_comb_comm: &ComputationCommitment,
+    mem_addr_comb_gens: &SNARKGens,
+
     vars_gens: &R1CSGens,
     proofs_times_vars_gens: &R1CSGens,
     total_proofs_times_vars_gens: &R1CSGens,
@@ -2010,6 +2020,7 @@ impl SNARK {
       perm_block_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
       perm_exec_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
       mem_extract_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      mem_addr_comb_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
       // Commit io
       input_block_num.append_to_transcript(b"input_block_num", transcript);

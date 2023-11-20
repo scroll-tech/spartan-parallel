@@ -94,6 +94,9 @@ fn produce_r1cs() -> (
   usize,
   usize,
   Instance,
+  usize,
+  usize,
+  Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
   Vec<InputsAssignment>,
@@ -631,31 +634,30 @@ fn produce_r1cs() -> (
   let mem_extract_num_non_zero_entries = 9;
 
   // !!!NOTE: we assume that there are fewer memory accesses than witnesses, need to double check whether that is true!!!
-  // MR is r * val for each (addr, val)
-  // MC is the cumulative product of v * (tau - addr - MR)
-
-  // The final product is stored in x
-  // 0   1   2   3   4   5   6   7    0   1   2   3     4   5   6   7
-  // tau r   _   _   _   _   _   _ |  v   x  pi   D  | MR  MC  MR  MC |
-  // 0   1   2   3   4   5   6   7    0    1   2   3   4    5   6   7
-  // Z0  Z1  B0  T0  T1  M0  M1   _ | v | b0  i0  s0 | _ | b1  i1  s1 |
-  // The prover still needs (addr, val) in block order to evaluate MR and MC
-
-  let V_tau = 0;
-  let V_r = 1;
-  let V_v = num_vars;
-  let V_x = num_vars + 1;
-  let V_MR = |i: usize| num_vars + 4 + 2 * i;
-  let V_MC = |i: usize| num_vars + 5 + 2 * i;
-  let V_M0 = 2 * num_vars + 5;
-  let V_M1 = 2 * num_vars + 6;
-  let V_valid = 3 * num_vars;
-  let V_cnst = V_valid;
 
   let mem_extract_inst = {
     let mut A_list = Vec::new();
     let mut B_list = Vec::new();
     let mut C_list = Vec::new();
+
+    // MR is r * val for each (addr, val)
+    // MC is the cumulative product of v * (tau - addr - MR)
+    // The final product is stored in x
+    // 0   1   2   3   4   5   6   7    0   1   2   3     4   5   6   7
+    // tau r   _   _   _   _   _   _ |  v   x  pi   D  | MR  MC  MR  MC |
+    // 0   1   2   3   4   5   6   7    0    1   2   3   4    5   6   7
+    // Z0  Z1  B0  T0  T1  M0  M1   _ | v | b0  i0  s0 | _ | b1  i1  s1 |
+    // The prover still needs (addr, val) in block order to evaluate MR and MC
+    let V_tau = 0;
+    let V_r = 1;
+    let V_v = num_vars;
+    let V_x = num_vars + 1;
+    let V_MR = |i: usize| num_vars + 4 + 2 * i;
+    let V_MC = |i: usize| num_vars + 5 + 2 * i;
+    let V_M0 = 2 * num_vars + 5;
+    let V_M1 = 2 * num_vars + 6;
+    let V_valid = 3 * num_vars;
+    let V_cnst = V_valid;
 
     // Instance 0: block 1
     // Instances need to be sorted form highest # of execution -> lowest
@@ -733,9 +735,54 @@ fn produce_r1cs() -> (
     mem_extract_inst
   };
 
-  // MEM_ADDR_COMB
-  // Takes in a list of (v, addr, val), combine each of them to (v, x, pi, D)
+  // MEM_BLOCK_POLY is PERM_BLOCK_POLY
+
+  // MEM_ADDR_COMB converts (v, addr, val, _) to (v, x, pi, D)
+  let mem_addr_comb_num_cons = 3;
+  let mem_addr_comb_num_non_zero_entries = 5;
   
+  let mem_addr_comb_inst = {
+    let mut A_list = Vec::new();
+    let mut B_list = Vec::new();
+    let mut C_list = Vec::new();
+
+    // Input width is 4!
+    let width = 4;
+    // 0   1   2   3 | 0   1   2   3 | 0   1   2   3 | 0   1   2   3
+    // tau r   _   _ | v   x  pi   D | v addr val  _ | MR  _   _   _
+    let V_tau = 0;
+    let V_r = 1;
+    let V_v = width;
+    let V_x = width + 1;
+    let V_valid = 2 * width;
+    let V_addr = 2 * width + 1;
+    let V_val = 2 * width + 2;
+    let V_MR = 3 * width;
+
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      // MR = r * val
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        0, vec![(V_r, 1)], vec![(V_val, 1)], vec![(V_MR, 1)]);
+      // w1[0] = v
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        1, vec![(V_v, 1)], vec![], vec![(V_valid, 1)]);
+      // w1[1] = x = v * (tau - addr - MR)
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        2, vec![(V_v, 1)], vec![(V_tau, 1), (V_addr, -1), (V_MR, -1)], vec![(V_x, 1)]);
+      (A, B, C)
+    };
+
+    A_list.push(A);
+    B_list.push(B);
+    C_list.push(C);
+
+    let mem_addr_comb_inst = Instance::new(1, mem_addr_comb_num_cons, 4 * width, &A_list, &B_list, &C_list).unwrap();
+    mem_addr_comb_inst
+  };
 
   // --
   // End Instances
@@ -921,6 +968,10 @@ fn produce_r1cs() -> (
     mem_extract_num_non_zero_entries,
     mem_extract_inst,
 
+    mem_addr_comb_num_cons,
+    mem_addr_comb_num_non_zero_entries,
+    mem_addr_comb_inst,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -976,6 +1027,10 @@ fn main() {
     mem_extract_num_non_zero_entries,
     mem_extract_inst,
 
+    mem_addr_comb_num_cons,
+    mem_addr_comb_num_non_zero_entries,
+    mem_addr_comb_inst,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -1001,6 +1056,7 @@ fn main() {
   let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
   let perm_exec_poly_gens = SNARKGens::new(perm_exec_poly_num_cons, total_num_proofs_bound * num_vars, 1, perm_exec_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances, mem_extract_num_non_zero_entries);
+  let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
@@ -1019,6 +1075,7 @@ fn main() {
   let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_poly_inst[0], &perm_block_poly_gens);
   let (perm_exec_poly_comm, perm_exec_poly_decomm) = SNARK::encode(&perm_poly_inst[1], &perm_exec_poly_gens);
   let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
+  let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
@@ -1076,6 +1133,11 @@ fn main() {
     &mem_extract_decomm,
     &mem_extract_gens,
 
+    &mem_addr_comb_inst,
+    &mem_addr_comb_comm,
+    &mem_addr_comb_decomm,
+    &mem_addr_comb_gens,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -1131,6 +1193,9 @@ fn main() {
       mem_extract_num_cons,
       &mem_extract_comm,
       &mem_extract_gens,
+      mem_addr_comb_num_cons,
+      &mem_addr_comb_comm,
+      &mem_addr_comb_gens,
 
       &vars_gens,
       &proofs_times_vars_gens,
