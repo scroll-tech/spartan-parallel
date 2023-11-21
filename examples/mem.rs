@@ -96,11 +96,13 @@ fn produce_r1cs() -> (
   Instance,
   usize,
   usize,
+  usize,
   Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
   Vec<InputsAssignment>,
-  Vec<Vec<MemsAssignment>>
+  Vec<Vec<MemsAssignment>>,
+  Vec<MemsAssignment>,
 ) {
   // bad test cases for debugging
   // set them to unreachable values to prevent bad tests
@@ -799,6 +801,8 @@ fn produce_r1cs() -> (
   let output = vec![three, six];
   // Which block in the execution order is the output block?
   let output_block_index = 3;
+  // How many memory executions are there?
+  let total_num_mem_accesses = 8;
 
   // --
   // Begin Assignments
@@ -808,7 +812,8 @@ fn produce_r1cs() -> (
     block_vars_matrix, 
     block_inputs_matrix, 
     exec_inputs,
-    block_mems_matrix
+    block_mems_matrix,
+    addr_mems_list
   ) = {
 
     let mut block_vars_matrix = Vec::new();
@@ -817,6 +822,7 @@ fn produce_r1cs() -> (
     // Mems matrix is of the form (0, 0, 0, 0, addr, val, addr, val, ...)
     // Skip the first four entries
     let mut block_mems_matrix = Vec::new();
+    let mut addr_mems_list = Vec::new();
 
     // Block 1
     //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
@@ -915,7 +921,15 @@ fn produce_r1cs() -> (
     // Witnesses for permutation cannot be generated until tau and r are generated
     // Both can only be generated at proving time
 
-    (block_vars_matrix, block_inputs_matrix, exec_inputs, block_mems_matrix)
+    // Memory accesses in address order: (v, addr, val, _)
+    for _ in 0..4 {
+      addr_mems_list.push(VarsAssignment::new(&vec![one, zero, one, zero]).unwrap());
+    }
+    for _ in 0..4 {
+      addr_mems_list.push(VarsAssignment::new(&vec![one, one, two, zero]).unwrap());
+    }
+
+    (block_vars_matrix, block_inputs_matrix, exec_inputs, block_mems_matrix, addr_mems_list)
   };
 
   // --
@@ -968,6 +982,7 @@ fn produce_r1cs() -> (
     mem_extract_num_non_zero_entries,
     mem_extract_inst,
 
+    total_num_mem_accesses,
     mem_addr_comb_num_cons,
     mem_addr_comb_num_non_zero_entries,
     mem_addr_comb_inst,
@@ -975,7 +990,8 @@ fn produce_r1cs() -> (
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
-    block_mems_matrix
+    block_mems_matrix,
+    addr_mems_list,
   )
 }
 
@@ -1027,6 +1043,7 @@ fn main() {
     mem_extract_num_non_zero_entries,
     mem_extract_inst,
 
+    total_num_mem_accesses,
     mem_addr_comb_num_cons,
     mem_addr_comb_num_non_zero_entries,
     mem_addr_comb_inst,
@@ -1034,7 +1051,8 @@ fn main() {
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
-    block_mems_matrix
+    block_mems_matrix,
+    addr_mems_list,
   ) = produce_r1cs();
 
   let perm_block_poly_num_cons = perm_poly_num_cons_base * block_max_num_proofs_bound;
@@ -1133,6 +1151,7 @@ fn main() {
     &mem_extract_decomm,
     &mem_extract_gens,
 
+    total_num_mem_accesses,
     &mem_addr_comb_inst,
     &mem_addr_comb_comm,
     &mem_addr_comb_decomm,
@@ -1142,6 +1161,7 @@ fn main() {
     block_inputs_matrix,
     exec_inputs,
     block_mems_matrix,
+    addr_mems_list,
 
     &vars_gens,
     &proofs_times_vars_gens,
@@ -1193,6 +1213,7 @@ fn main() {
       mem_extract_num_cons,
       &mem_extract_comm,
       &mem_extract_gens,
+      total_num_mem_accesses,
       mem_addr_comb_num_cons,
       &mem_addr_comb_comm,
       &mem_addr_comb_gens,
