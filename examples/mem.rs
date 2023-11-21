@@ -49,7 +49,7 @@
 //! 4      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
 //!
 #![allow(clippy::assertions_on_result_states)]
-use std::{ops::Neg, cmp::max};
+use std::ops::Neg;
 
 use curve25519_dalek::scalar::Scalar;
 use libspartan::{Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
@@ -94,6 +94,9 @@ fn produce_r1cs() -> (
   usize,
   Instance,
   usize,
+  usize,
+  usize,
+  Instance,
   usize,
   usize,
   Instance,
@@ -552,18 +555,18 @@ fn produce_r1cs() -> (
     perm_root_inst
   };
 
-  // PERM_POLY (for PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY, MEM_ADDR_POLY)
+  // PERM_POLY (for PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY), MEM_ADDR_POLY
   // The strategy is to compute the local polynomials (evaluated on tau) for each block instance
   // Each w3[p][2] (i.e. w3[p][0][2]) stores the product pi for instance P. The verifier obtains all P of them and multiply them together.
   // The correct formular is pi = v[k] * x[k] * (pi[k+1] + (1 - v[k+1])))
   // To do this, think of each entry of w3[k] (w3[p][k]) as a tuple (v, x, pi, D)
   // v[k]  <- whether the entry is valid
   // x[k]  <- \tau - (\sum_i a_i * r^{i-1})
-  // pi[k] <- v[k] * D2[k]
+  // pi[k] <- v[k] * D[k]
   // D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
-  // number of variables is max(total_num_proofs_bound, total_num_mem_accesses_bound) * num_vars
+  // number of variables is total_num_proofs_bound * num_vars
   let perm_poly_num_cons_base = 2;
-  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
+  let perm_size_bound = total_num_proofs_bound;
   let perm_poly_num_cons = perm_size_bound * perm_poly_num_cons_base;
   let perm_poly_num_non_zero_entries = perm_size_bound * 4;
   
@@ -584,14 +587,14 @@ fn produce_r1cs() -> (
       // Need to order the constraints so that they solve the inputs in the front first
       // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
       for i in 0..perm_size_bound - 1 {
-        // D
+        // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))
         (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
           constraint_count, 
           vec![(i * num_vars + V_x, 1)], 
           vec![((i + 1) * num_vars + V_pi, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
           vec![(i * num_vars + V_d, 1)]);
         constraint_count += 1;
-        // pi
+        // pi[k] = v[k] * D[k]
         (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
           constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
         // Pad base constraint size to 2
@@ -780,6 +783,65 @@ fn produce_r1cs() -> (
 
     let mem_addr_comb_inst = Instance::new(1, mem_addr_comb_num_cons, 4 * width, &A_list, &B_list, &C_list).unwrap();
     mem_addr_comb_inst
+  };
+
+  // MEM_ADDR_POLY is like PERM_POLY except number of variables is total_num_mem_accesses_bound and gap is 4
+  let mem_addr_poly_num_cons_base = 2;
+  let mem_addr_poly_num_cons = total_num_mem_accesses_bound * perm_poly_num_cons_base;
+  let mem_addr_poly_num_non_zero_entries = total_num_mem_accesses_bound * 4;
+  
+  let mem_addr_poly_inst = {
+    let width = 4;
+
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      let V_valid = 0;
+      let V_cnst = V_valid;
+      let V_x = 1;
+      let V_pi = 2;
+      let V_d = 3;
+
+      let mut constraint_count = 0;
+
+      // Need to order the constraints so that they solve the inputs in the front first
+      // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
+      for i in 0..total_num_mem_accesses_bound - 1 {
+        // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))
+        (A, B, C) = gen_constr(A, B, C, i * width + V_cnst,
+          constraint_count, 
+          vec![(i * width + V_x, 1)], 
+          vec![((i + 1) * width + V_pi, 1), (i * width + V_cnst, 1), ((i + 1) * width + V_valid, -1)], 
+          vec![(i * width + V_d, 1)]);
+        constraint_count += 1;
+        // pi[k] = v[k] * D[k]
+        (A, B, C) = gen_constr(A, B, C, i * width + V_cnst,
+          constraint_count, vec![(i * width + V_valid, 1)], vec![(i * width + V_d, 1)], vec![(i * width + V_pi, 1)]);
+        // Pad base constraint size to 2
+        constraint_count += 1;
+      }
+      // Last Entry
+      let i = total_num_mem_accesses_bound - 1;
+      // last D is x[k] * 1
+      (A, B, C) = gen_constr(A, B, C, i * width + V_cnst,
+        constraint_count, vec![(i * width + V_x, 1)], vec![], vec![(i * width + V_d, 1)]);
+      constraint_count += 1;
+      // last pi is just usual
+      (A, B, C) = gen_constr(A, B, C, i * width + V_cnst,
+        constraint_count, vec![(i * width + V_valid, 1)], vec![(i * width + V_d, 1)], vec![(i * width + V_pi, 1)]);
+
+      (A, B, C)   
+    };
+
+    let A_list = vec![A.clone()];
+    let B_list = vec![B.clone()];
+    let C_list = vec![C.clone()];
+
+    let mem_addr_poly_inst = Instance::new(1, mem_addr_poly_num_cons, total_num_mem_accesses_bound * width, &A_list, &B_list, &C_list).unwrap();
+    
+    mem_addr_poly_inst
   };
 
   // --
@@ -982,6 +1044,10 @@ fn produce_r1cs() -> (
     mem_addr_comb_num_non_zero_entries,
     mem_addr_comb_inst,
 
+    mem_addr_poly_num_cons_base,
+    mem_addr_poly_num_non_zero_entries,
+    mem_addr_poly_inst,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -1042,6 +1108,10 @@ fn main() {
     mem_addr_comb_num_non_zero_entries,
     mem_addr_comb_inst,
 
+    mem_addr_poly_num_cons_base,
+    mem_addr_poly_num_non_zero_entries,
+    mem_addr_poly_inst,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -1049,9 +1119,10 @@ fn main() {
     addr_mems_list,
   ) = produce_r1cs();
 
-  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
-  let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
+  let perm_size_bound = total_num_proofs_bound;
+  let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
+  let mem_addr_poly_num_cons = mem_addr_poly_num_cons_base * total_num_mem_accesses_bound;
 
   assert_eq!(block_num_instances, block_vars_matrix.len());
   assert_eq!(block_num_instances, block_inputs_matrix.len());
@@ -1068,6 +1139,7 @@ fn main() {
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances, mem_extract_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
+  let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound * 4, 1, mem_addr_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
@@ -1084,6 +1156,7 @@ fn main() {
   let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
   let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
   let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
+  let (mem_addr_poly_comm, mem_addr_poly_decomm) = SNARK::encode(&mem_addr_poly_inst, &mem_addr_poly_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
@@ -1143,6 +1216,12 @@ fn main() {
     &mem_addr_comb_decomm,
     &mem_addr_comb_gens,
 
+    mem_addr_poly_num_cons_base,
+    &mem_addr_poly_inst,
+    &mem_addr_poly_comm,
+    &mem_addr_poly_decomm,
+    &mem_addr_poly_gens,
+
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
@@ -1200,6 +1279,9 @@ fn main() {
       mem_addr_comb_num_cons,
       &mem_addr_comb_comm,
       &mem_addr_comb_gens,
+      mem_addr_poly_num_cons_base,
+      &mem_addr_poly_comm,
+      &mem_addr_poly_gens,
 
       &vars_gens,
       &proofs_times_vars_gens,

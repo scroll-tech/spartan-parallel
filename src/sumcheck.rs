@@ -1048,7 +1048,7 @@ impl ZKSumcheckInstanceProof {
           let step = proof_len / num_proofs[p];
           for q in 0..num_proofs[p] {
             for x in 0..cons_len {
-              println!("p: {}, q: {}, x: {}, val: {:?}", p, q, x, poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x] * (poly_B.index(p, q, x) * poly_C.index(p, q, x) - poly_D.index(p, q, x)));
+              // println!("p: {}, q: {}, x: {}, val: {:?}", p, q, x, poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x] * (poly_B.index(p, q, x) * poly_C.index(p, q, x) - poly_D.index(p, q, x)));
               expected += poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x] * (poly_B.index(p, q, x) * poly_C.index(p, q, x) - poly_D.index(p, q, x));
             }
           }

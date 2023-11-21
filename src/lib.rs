@@ -44,8 +44,6 @@ mod timer;
 mod transcript;
 mod unipoly;
 
-use std::cmp::max;
-
 use dense_mlpoly::{DensePolynomial, PolyCommitment, PolyEvalProof};
 use errors::{ProofVerifyError, R1CSError};
 use itertools::Itertools;
@@ -604,6 +602,12 @@ pub struct SNARK {
   proof_eval_mem_addr_w0_at_zero: PolyEvalProof,
   proof_eval_mem_addr_w0_at_one: PolyEvalProof,
 
+  mem_addr_poly_r1cs_sat_proof: R1CSProof,
+  mem_addr_poly_inst_evals: (Scalar, Scalar, Scalar),
+  mem_addr_poly_r1cs_eval_proof: R1CSEvalProof,
+  mem_addr_poly: Scalar,
+  proof_eval_mem_addr_prod: PolyEvalProof,
+
   io_proof: IOProofs
 }
 
@@ -669,7 +673,6 @@ impl SNARK {
     perm_root_gens: &SNARKGens,
 
     perm_poly_num_cons_base: usize,
-
     perm_poly_inst: &Instance,
     perm_poly_comm: &ComputationCommitment,
     perm_poly_decomm: &ComputationDecommitment,
@@ -687,6 +690,12 @@ impl SNARK {
     mem_addr_comb_comm: &ComputationCommitment,
     mem_addr_comb_decomm: &ComputationDecommitment,
     mem_addr_comb_gens: &SNARKGens,
+
+    mem_addr_poly_num_cons_base: usize,
+    mem_addr_poly_inst: &Instance,
+    mem_addr_poly_comm: &ComputationCommitment,
+    mem_addr_poly_decomm: &ComputationDecommitment,
+    mem_addr_poly_gens: &SNARKGens,
 
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
@@ -726,6 +735,7 @@ impl SNARK {
     perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
+    mem_addr_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
 
     // unwrap the assignments
     let block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
@@ -1261,7 +1271,7 @@ impl SNARK {
     let exec_inputs_list = vec![exec_inputs_list];
     let addr_mems_list = vec![addr_mems_list];
     // Compute perm_size_bound
-    let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
+    let perm_size_bound = total_num_proofs_bound;
 
     // --
     // BLOCK CORRECTNESS
@@ -2077,6 +2087,87 @@ impl SNARK {
     };
 
     // --
+    // MEM_ADDR_POLY
+    // --
+
+    let (mem_addr_poly_r1cs_sat_proof, mem_addr_poly_challenges) = {
+      let (proof, mem_addr_poly_challenges) = {
+        R1CSProof::prove_single(
+          1,
+          mem_addr_poly_num_cons_base,
+          4,
+          total_num_mem_accesses_bound,
+          total_num_mem_accesses,
+          &vec![total_num_mem_accesses],
+          &mem_addr_poly_inst.inst,
+          &proofs_times_vars_gens,
+          &vec![mem_addr_w1[0].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())],
+          &mem_addr_poly_w1,
+          transcript,
+          &mut random_tape,
+        )
+      };
+
+      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+      (proof, mem_addr_poly_challenges)
+    };
+
+    // Final evaluation on MEM_ADDR_POLY
+    let (mem_addr_poly_inst_evals, mem_addr_poly_r1cs_eval_proof) = {
+      let [_, rx, ry] = &mem_addr_poly_challenges;
+      let inst = mem_addr_poly_inst;
+      let timer_eval = Timer::new("eval_sparse_polys");
+      let inst_evals = {
+        let (Ar, Br, Cr) = inst.inst.evaluate(&Vec::new(), rx, ry);
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        (Ar, Br, Cr)
+      };
+      timer_eval.stop();
+
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &mem_addr_poly_decomm.decomm,
+          &rx,
+          &ry,
+          &inst_evals,
+          &mem_addr_poly_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
+
+      timer_prove.stop();
+      (inst_evals, r1cs_eval_proof)
+    };
+
+    // Record the prod of instance
+    let (mem_addr_poly, proof_eval_mem_addr_prod) = {
+      let r_len = (total_num_mem_accesses * 4).log_2();
+      // Prod is the 3rd entry
+      let mem_addr_poly = mem_addr_poly_w1[0][3];
+      let (proof_eval_mem_addr_prod, _comm_mem_addr_prod) = PolyEvalProof::prove(
+        &mem_addr_poly_w1[0],
+        None,
+        &[vec![Scalar::zero(); r_len - 2], vec![Scalar::one(); 2]].concat(),
+        &mem_addr_poly,
+        None,
+        &proofs_times_vars_gens.gens_pc,
+        transcript,
+        &mut random_tape,
+      );
+      (mem_addr_poly, proof_eval_mem_addr_prod)
+    };
+
+
+    // --
     // IO_PROOFS
     // --
 
@@ -2169,6 +2260,12 @@ impl SNARK {
       proof_eval_mem_addr_w0_at_zero,
       proof_eval_mem_addr_w0_at_one,
 
+      mem_addr_poly_r1cs_sat_proof,
+      mem_addr_poly_inst_evals,
+      mem_addr_poly_r1cs_eval_proof,
+      mem_addr_poly,
+      proof_eval_mem_addr_prod,
+
       io_proof
     }
   }
@@ -2223,6 +2320,10 @@ impl SNARK {
     mem_addr_comb_comm: &ComputationCommitment,
     mem_addr_comb_gens: &SNARKGens,
 
+    mem_addr_poly_num_cons_base: usize,
+    mem_addr_poly_comm: &ComputationCommitment,
+    mem_addr_poly_gens: &SNARKGens,
+
     vars_gens: &R1CSGens,
     proofs_times_vars_gens: &R1CSGens,
 
@@ -2249,6 +2350,7 @@ impl SNARK {
       perm_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
       mem_extract_comm.comm.append_to_transcript(b"consis_comm", transcript);
       mem_addr_comb_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      mem_addr_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
       // Commit io
       input_block_num.append_to_transcript(b"input_block_num", transcript);
@@ -2297,7 +2399,7 @@ impl SNARK {
       self.mem_addr_comm_w3[0].append_to_transcript(b"poly_commitment", transcript);
     }
     // Compute perm_size_bound
-    let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
+    let perm_size_bound = total_num_proofs_bound;
 
     // --
     // BLOCK CORRECTNESS
@@ -2803,6 +2905,59 @@ impl SNARK {
       timer_eval_proof.stop();
     }
 
+    // --
+    // MEM_ADDR_POLY
+    // --
+    if DEBUG {println!("MEM ADDR POLY")};
+    let mem_addr_poly_bound_tau = {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let mem_addr_poly_challenges = self.mem_addr_poly_r1cs_sat_proof.verify_single(
+        1,
+        mem_addr_poly_num_cons_base,
+        4,
+        total_num_mem_accesses_bound,
+        total_num_mem_accesses,
+        &vec![total_num_mem_accesses],
+        &proofs_times_vars_gens,
+        &self.mem_addr_poly_inst_evals,
+        &self.mem_addr_comm_w1,
+        transcript,
+      )?;
+      timer_sat_proof.stop();
+
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on PERM_EXEC_POLY
+      let (Ar, Br, Cr) = &self.mem_addr_poly_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [_, rx, ry] = &mem_addr_poly_challenges;
+      self.mem_addr_poly_r1cs_eval_proof.verify(
+        &mem_addr_poly_comm.comm,
+        rx,
+        ry,
+        &self.mem_addr_poly_inst_evals,
+        &mem_addr_poly_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+
+      // COMPUTE POLY FOR PERM_EXEC
+      let r_len = (total_num_mem_accesses * 4).log_2();
+      self.proof_eval_mem_addr_prod.verify_plain(
+        &proofs_times_vars_gens.gens_pc,
+        transcript,
+        &[vec![Scalar::zero(); r_len - 2], vec![Scalar::one(); 2]].concat(),
+        &self.mem_addr_poly,
+        &self.mem_addr_comm_w1[0],
+      )?;
+      self.mem_addr_poly
+    };
+
+    // --
+    // ASSERT_CORRECTNESS_OF_MEMORY
+    // --
+    assert_eq!(mem_block_poly_bound_tau, mem_addr_poly_bound_tau);
 
     // --
     // IO_PROOFS
