@@ -13,6 +13,8 @@
 // Q: Can we trust that the Prover orders all valid = 1 before valid = 0?
 // A: Yes, because otherwise consistency check wouldn't pass with overwhelming probability
 
+// TODO: Cannot append rx, ry with 0 in prove_single, need to tweak evaluate for Instance!
+
 extern crate byteorder;
 extern crate core;
 extern crate curve25519_dalek;
@@ -1399,6 +1401,7 @@ impl SNARK {
           consis_check_num_cons_base,
           num_vars,
           total_num_proofs_bound,
+          consis_num_proofs,
           &vec![consis_num_proofs],
           &consis_check_inst.inst,
           &total_proofs_times_vars_gens,
@@ -1619,6 +1622,7 @@ impl SNARK {
           // We need to feed the compile-time bound because that is the size of the constraints
           // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
           block_max_num_proofs_bound,
+          block_max_num_proofs,
           &block_num_proofs,
           &perm_block_poly_inst.inst,
           &proofs_times_vars_gens,
@@ -1766,6 +1770,7 @@ impl SNARK {
           perm_poly_num_cons_base,
           num_vars,
           total_num_proofs_bound,
+          consis_num_proofs,
           &vec![consis_num_proofs],
           &perm_exec_poly_inst.inst,
           &total_proofs_times_vars_gens,
@@ -1909,6 +1914,7 @@ impl SNARK {
           // We need to feed the compile-time bound because that is the size of the constraints
           // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
           block_max_num_proofs_bound,
+          block_max_num_proofs,
           &block_num_proofs,
           &perm_block_poly_inst.inst,
           &proofs_times_vars_gens,
@@ -2388,6 +2394,7 @@ impl SNARK {
         consis_check_num_cons_base,
         num_vars,
         total_num_proofs_bound,
+        consis_num_proofs,
         &vec![consis_num_proofs],
         &total_proofs_times_vars_gens,
         &self.consis_check_inst_evals,
@@ -2519,6 +2526,7 @@ impl SNARK {
         perm_poly_num_cons_base,
         num_vars,
         block_max_num_proofs_bound,
+        block_max_num_proofs,
         &block_num_proofs,
         &proofs_times_vars_gens,
         &self.perm_block_poly_inst_evals,
@@ -2610,6 +2618,7 @@ impl SNARK {
         perm_poly_num_cons_base,
         num_vars,
         total_num_proofs_bound,
+        consis_num_proofs,
         &vec![consis_num_proofs],
         &total_proofs_times_vars_gens,
         &self.perm_exec_poly_inst_evals,
@@ -2702,6 +2711,7 @@ impl SNARK {
         perm_poly_num_cons_base,
         num_vars,
         block_max_num_proofs_bound,
+        block_max_num_proofs,
         &block_num_proofs,
         &proofs_times_vars_gens,
         &self.mem_block_poly_inst_evals,

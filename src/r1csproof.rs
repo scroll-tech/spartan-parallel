@@ -819,11 +819,12 @@ impl R1CSProof {
   }
 
   // Proving a single instance with multiple proofs specialized for PERM_POLY and CONSIS_CHECK
-  // Constraints is of size max_input_rows * base_constraint_size
-  // Inputs of each proof is of size max_input_rows * base_input_size
+  // Constraints is of size max_input_rows_bound * base_constraint_size
+  // Inputs of each proof is of size max_input_rows_bound * base_input_size
   // However, only first input_rows[i] * base_input_size entries are non-zero, and only these input_rows[i] * base_input_size entries are supplied
   // Moreover, when multiplying the instance with the inputs, only the first input_rows[i] * base_constraint_size products will be non_zero
-  // All of max_input_rows, input_rows[i], base_input_size, and base_constraint_size are powers of 2
+  // Let max_input_row = max_i(input_rows[i])
+  // All of max_input_rows_bound, max_input_rows, input_rows[i], base_input_size, and base_constraint_size are powers of 2
   //
   // The strategy of prove_single is to redefine the variables such that
   // num_proofs -> num_instances, input_rows -> num_proofs, base_input_size -> num_inputs, base_constraint_size -> num_constraints
@@ -832,6 +833,7 @@ impl R1CSProof {
     num_proofs: usize,
     base_constraint_size: usize,
     base_input_size: usize,
+    max_input_rows_bound: usize,
     max_input_rows: usize,
     input_rows: &Vec<usize>,
 
@@ -862,6 +864,7 @@ impl R1CSProof {
       assert_eq!(input, input.next_power_of_two());
       assert_eq!(w_mat[i].len(), input * base_input_size);
     }
+    assert!(max_input_rows <= max_input_rows_bound);
 
     // --
     // PHASE 1
@@ -883,7 +886,7 @@ impl R1CSProof {
     let mut poly_tau_q = DensePolynomial::new(EqPolynomial::new(tau_q).evals());
     let mut poly_tau_xb = DensePolynomial::new(EqPolynomial::new(tau_xb).evals());
     let (mut poly_Az, mut poly_Bz, mut poly_Cz) =
-      inst.multiply_vec_single(num_proofs, input_rows, max_input_rows, base_constraint_size, base_input_size, z_list);
+      inst.multiply_vec_single(num_proofs, input_rows, max_input_rows_bound, max_input_rows, base_constraint_size, base_input_size, z_list);
 
     // Sumcheck 1: (Az * Bz - Cz) * eq(x, q, p) = 0
     let (sc_proof_phase1, rx, _claims_phase1, blind_claim_postsc1) = R1CSProof::prove_phase_one(
@@ -989,7 +992,14 @@ impl R1CSProof {
       // compute the initial evaluation table for R(\tau, x)
       let evals_rx = EqPolynomial::new(rx.clone()).evals();
       let (evals_A, evals_B, evals_C) =
-        inst.compute_eval_table_sparse(1, inst.get_num_cons(), z_len, &evals_rx);
+        inst.compute_eval_table_sparse_single(
+          1, 
+          max_input_rows, 
+          max_input_rows_bound, 
+          inst.get_num_cons(), 
+          z_len,
+          &evals_rx
+        );
 
       assert_eq!(evals_A.len(), evals_B.len());
       assert_eq!(evals_A.len(), evals_C.len());
@@ -1098,6 +1108,9 @@ impl R1CSProof {
       pok_Cz_claim, proof_prod
     );
 
+    // rx and ry might not be long enough: in that case, append them with 0
+    let pad = (max_input_rows_bound / max_input_rows).log_2();
+
     (
       R1CSProof {
         sc_proof_phase1,
@@ -1112,7 +1125,7 @@ impl R1CSProof {
         proof_eval_vars_at_ry_list,
         proof_eq_sc_phase2
       },
-      [rp, rx, ry]
+      [rp, [rx, vec![Scalar::zero(); pad]].concat(), [ry, vec![Scalar::zero(); pad]].concat()]
     )
   }
 
@@ -1121,6 +1134,7 @@ impl R1CSProof {
     num_proofs: usize,
     base_constraint_size: usize,
     base_input_size: usize,
+    max_input_rows_bound: usize,
     max_input_rows: usize,
     input_rows: &Vec<usize>,
 
@@ -1131,6 +1145,8 @@ impl R1CSProof {
     transcript: &mut Transcript,
   ) -> Result<[Vec<Scalar>; 3], ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
+
+    println!("AAA");
 
     // derive the verifier's challenge tau
     let (num_rounds_p, num_rounds_q, num_rounds_xb, num_rounds_yb) = 
@@ -1151,6 +1167,8 @@ impl R1CSProof {
       &gens.gens_sc.gens_4,
       transcript,
     )?;
+
+    println!("BBB");
 
     // perform the intermediate sum-check test with claimed Az, Bz, and Cz
     let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &self.claims_phase2;
@@ -1202,6 +1220,8 @@ impl R1CSProof {
       &comm_claim_post_phase1,
     )?;
 
+    println!("CCC");
+
     // derive three public challenges and then derive a joint claim
     let r_A = transcript.challenge_scalar(b"challenge_Az");
     let r_B = transcript.challenge_scalar(b"challenge_Bz");
@@ -1230,6 +1250,8 @@ impl R1CSProof {
       transcript,
     )?;
     
+    println!("DDD");
+
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
     for p in 0..num_proofs {
@@ -1256,7 +1278,8 @@ impl R1CSProof {
     let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_comm_vars_list).compress();
     assert_eq!(expected_comm_vars_at_ry, self.comm_vars_at_ry);
 
-    // compute commitment to eval_Z_at_ry = (Scalar::one() - ry[0]) * self.eval_vars_at_ry + ry[0] * poly_input_eval
+    println!("EEE");
+
     let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();
 
     // perform the final check in the second sum-check protocol
@@ -1270,6 +1293,8 @@ impl R1CSProof {
       &expected_claim_post_phase2,
       &comm_claim_post_phase2,
     )?;
+
+    println!("FFF");
 
     Ok([rp, [rq_rx, rx].concat(), ry])
   }

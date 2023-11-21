@@ -185,6 +185,8 @@ fn produce_r1cs() -> (
   // OBTAINED DURING COMPILE TIME
   let total_num_proofs_bound = 16;
   let block_max_num_proofs_bound = 8;
+  // Bound on total number of memory accesses
+  let total_num_mem_accesses_bound = 16;
 
   // What is the input and output block?
   // Note: the assumption is that during a normal execution, the input block and the output block will only be reached once
@@ -552,7 +554,7 @@ fn produce_r1cs() -> (
     perm_root_inst
   };
 
-  // PERM_BLOCK_POLY, PERM_EXEC_POLY, (MEM_BLOCK_POLY)
+  // PERM_BLOCK_POLY, PERM_EXEC_POLY, (MEM_BLOCK_POLY), MEM_ADDR_POLY
   // The strategy is to compute the local polynomials (evaluated on tau) for each block instance
   // Each w3[p][2] (i.e. w3[p][0][2]) stores the product pi for instance P. The verifier obtains all P of them and multiply them together.
   // The correct formular is pi = v[k] * x[k] * (pi[k+1] + (1 - v[k+1])))
@@ -563,6 +565,7 @@ fn produce_r1cs() -> (
   // D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
   // PERM_EXEC_POLY is PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
   // MEM_BLOCK_POLY is PERM_BLOCK_POLY
+  // MEM_ADDR_POLY is PERM_BLOCK_POLY except number of variables is now total_num_mem_accesses_bound
   let perm_poly_num_cons_base = 2;
   let perm_block_poly_num_non_zero_entries = 4 * block_max_num_proofs_bound;
   let perm_exec_poly_num_non_zero_entries = 4 * total_num_proofs_bound;

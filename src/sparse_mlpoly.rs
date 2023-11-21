@@ -473,7 +473,7 @@ impl SparseMatPolynomial {
   // So trailing zeros in MZ should also not be recorded
   // Return a num_proofs * base_num_rows matrix
   pub fn multiply_vec_pad(&self,
-    max_num_proofs: usize,
+    max_num_proofs_bound: usize,
     num_proofs: usize,
     base_num_rows: usize,
     base_num_cols: usize,
@@ -484,8 +484,8 @@ impl SparseMatPolynomial {
     let mut Mz_list = vec![vec![Scalar::zero(); base_num_rows]; num_proofs];
     // Based on the construction of PERM_POLY and CONSIS_CHECK,
     // We don't need to scan through every non-zero entry of the instance
-    // Only the first (num_proofs / (max_num_proofs - 1)) fraction of entries will correspond to non-zero values in Z
-    for i in 0..self.M.len() * num_proofs / (max_num_proofs - 1) {
+    // Only the first (num_proofs / (max_num_proofs_bound - 1)) fraction of entries will correspond to non-zero values in Z
+    for i in 0..self.M.len() * num_proofs / (max_num_proofs_bound - 1) {
       let row = self.M[i].row;
       // No need to evaluate constraints beyond num_proofs * base_num_rows
       // As the results are always 0
@@ -512,6 +512,28 @@ impl SparseMatPolynomial {
     for i in 0..self.M.len() {
       let entry = &self.M[i];
       M_evals[entry.col] += rx[entry.row] * entry.val;
+    }
+    M_evals
+  }
+
+  // Only compute the first max_num_proofs / (max_num_proofs_bound - 1) entries
+  // num_cols is already num_vars * max_num_proofs / (max_num_proofs_bound - 1)
+  pub fn compute_eval_table_sparse_single(
+    &self,
+    rx: &[Scalar],
+    max_num_proofs: usize,
+    max_num_proofs_bound: usize,
+    _num_rows: usize,
+    num_cols: usize,
+  ) -> Vec<Scalar> {
+    let mut M_evals: Vec<Scalar> = vec![Scalar::zero(); num_cols];
+
+    for i in 0..self.M.len() * max_num_proofs / (max_num_proofs_bound - 1) {
+      let entry = &self.M[i];
+      // Skip out-of-bound constraints
+      if entry.row < rx.len() && entry.col < num_cols {
+        M_evals[entry.col] += rx[entry.row] * entry.val;
+      }
     }
     M_evals
   }

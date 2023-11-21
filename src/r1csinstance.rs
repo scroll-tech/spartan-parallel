@@ -390,13 +390,15 @@ impl R1CSInstance {
     &self,
     num_instances: usize,
     num_proofs: &Vec<usize>,
+    max_num_proofs_bound: usize,
     max_num_proofs: usize,
     num_rows: usize,
     num_cols: usize,
     z_list: &Vec<Vec<Scalar>>,
   ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
-    assert!(max_num_proofs * num_rows <= self.num_cons);
-    assert!(max_num_proofs * num_cols <= self.num_vars);
+    assert!(max_num_proofs <= max_num_proofs_bound);
+    assert!(max_num_proofs_bound * num_rows <= self.num_cons);
+    assert!(max_num_proofs_bound * num_cols <= self.num_vars);
 
     let mut Az = Vec::new();
     let mut Bz = Vec::new();
@@ -406,9 +408,9 @@ impl R1CSInstance {
       let z = &z_list[p];
       assert!(num_proofs[p] <= max_num_proofs);
       // Each returns a num_proofs[p] * num_rows matrix
-      Az.push(self.A_list[0].multiply_vec_pad(max_num_proofs, num_proofs[p], num_rows, num_cols, z));
-      Bz.push(self.B_list[0].multiply_vec_pad(max_num_proofs, num_proofs[p], num_rows, num_cols, z));
-      Cz.push(self.C_list[0].multiply_vec_pad(max_num_proofs, num_proofs[p], num_rows, num_cols, z));
+      Az.push(self.A_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
+      Bz.push(self.B_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
+      Cz.push(self.C_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
     }
     (
       DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
@@ -461,6 +463,39 @@ impl R1CSInstance {
 
     (evals_A_list, evals_B_list, evals_C_list)
   }
+
+  // Only compute the first max_num_proofs / (max_num_proofs_bound - 1) entries
+  // num_cols is already num_vars * max_num_proofs / (max_num_proofs_bound - 1)
+  pub fn compute_eval_table_sparse_single(
+    &self,
+    num_instances: usize,
+    max_num_proofs: usize,
+    max_num_proofs_bound: usize,
+    num_rows: usize,
+    num_cols: usize,
+    evals: &[Scalar],
+  ) -> (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
+    assert!(self.num_instances == 1 || self.num_instances == num_instances);
+    assert_eq!(num_rows, self.num_cons);
+    assert!(num_cols <= self.num_vars * max_num_proofs / (max_num_proofs_bound - 1));
+
+    let mut evals_A_list = Vec::new();
+    let mut evals_B_list = Vec::new();
+    let mut evals_C_list = Vec::new();
+    for p in 0..num_instances {
+      let p_inst = if self.num_instances == 1 { 0 } else { p };
+
+      let evals_A = self.A_list[p_inst].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+      let evals_B = self.B_list[p_inst].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+      let evals_C = self.C_list[p_inst].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+      evals_A_list.extend(evals_A);
+      evals_B_list.extend(evals_B);
+      evals_C_list.extend(evals_C);
+    }
+
+    (evals_A_list, evals_B_list, evals_C_list)
+  }
+
 
   pub fn evaluate(&self, rp: &[Scalar], rx: &[Scalar], ry: &[Scalar]) -> (Scalar, Scalar, Scalar) {
     let evals = SparseMatPolynomial::multi_evaluate(&[&self.A_poly, &self.B_poly, &self.C_poly], &[rp, rx].concat(), ry);
