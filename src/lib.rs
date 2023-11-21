@@ -590,6 +590,10 @@ pub struct SNARK {
   mem_extract_inst_evals: (Scalar, Scalar, Scalar),
   mem_extract_r1cs_eval_proof: R1CSEvalProof,
 
+  mem_cohere_r1cs_sat_proof: R1CSProof,
+  mem_cohere_inst_evals: (Scalar, Scalar, Scalar),
+  mem_cohere_r1cs_eval_proof: R1CSEvalProof,
+
   mem_block_poly_r1cs_sat_proof: R1CSProof,
   mem_block_poly_inst_evals: (Scalar, Scalar, Scalar),
   mem_block_poly_r1cs_eval_proof: R1CSEvalProof,
@@ -1916,6 +1920,68 @@ impl SNARK {
     };
 
     // --
+    // MEM_COHERE
+    // --
+
+    let (mem_cohere_r1cs_sat_proof, mem_cohere_challenges) = {
+      let (proof, mem_cohere_challenges) = {
+        R1CSProof::prove_single(
+          1,
+          mem_cohere_num_cons_base,
+          4,
+          total_num_mem_accesses_bound,
+          total_num_mem_accesses,
+          &vec![total_num_mem_accesses],
+          &mem_cohere_inst.inst,
+          &proofs_times_vars_gens,
+          &vec![addr_mems_list[0].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())],
+          &addr_poly_mems,
+          transcript,
+          &mut random_tape,
+        )
+      };
+
+      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+      (proof, mem_cohere_challenges)
+    };
+
+    // Final evaluation on MEM_COHERE
+    let (mem_cohere_inst_evals, mem_cohere_r1cs_eval_proof) = {
+      let [_, rx, ry] = &mem_cohere_challenges;
+      let inst = mem_cohere_inst;
+      let timer_eval = Timer::new("eval_sparse_polys");
+      let inst_evals = {
+        let (Ar, Br, Cr) = inst.inst.evaluate(&Vec::new(), rx, ry);
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        (Ar, Br, Cr)
+      };
+      timer_eval.stop();
+
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &mem_cohere_decomm.decomm,
+          &rx,
+          &ry,
+          &inst_evals,
+          &mem_cohere_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
+
+      timer_prove.stop();
+      (inst_evals, r1cs_eval_proof)
+    };
+
+    // --
     // MEM_BLOCK_POLY
     // --
 
@@ -2254,6 +2320,10 @@ impl SNARK {
       mem_extract_r1cs_sat_proof,
       mem_extract_inst_evals,
       mem_extract_r1cs_eval_proof,
+
+      mem_cohere_r1cs_sat_proof,
+      mem_cohere_inst_evals,
+      mem_cohere_r1cs_eval_proof,
 
       mem_block_poly_r1cs_sat_proof,
       mem_block_poly_inst_evals,
@@ -2808,6 +2878,44 @@ impl SNARK {
       )?;
       timer_eval_proof.stop();
     }
+
+    // --
+    // MEM_COHERE
+    // --
+    if DEBUG {println!("MEM COHERE")};
+    {
+      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let mem_cohere_challenges = self.mem_cohere_r1cs_sat_proof.verify_single(
+        1,
+        mem_cohere_num_cons_base,
+        4,
+        total_num_mem_accesses_bound,
+        total_num_mem_accesses,
+        &vec![total_num_mem_accesses],
+        &proofs_times_vars_gens,
+        &self.mem_cohere_inst_evals,
+        &self.addr_comm_mems,
+        transcript,
+      )?;
+      timer_sat_proof.stop();
+
+      let timer_eval_proof = Timer::new("verify_eval_proof");
+      // Verify Evaluation on MEM_COHERE
+      let (Ar, Br, Cr) = &self.mem_cohere_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [_, rx, ry] = &mem_cohere_challenges;
+      self.mem_cohere_r1cs_eval_proof.verify(
+        &mem_cohere_comm.comm,
+        rx,
+        ry,
+        &self.mem_cohere_inst_evals,
+        &mem_cohere_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+    };
 
     // --
     // MEM_BLOCK_POLY

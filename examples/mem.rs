@@ -49,7 +49,7 @@
 //! 4      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
 //!
 #![allow(clippy::assertions_on_result_states)]
-use std::ops::Neg;
+use std::{ops::Neg, cmp::max};
 
 use curve25519_dalek::scalar::Scalar;
 use libspartan::{Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
@@ -126,6 +126,7 @@ fn produce_r1cs() -> (
   // Separate vars into three lists
   // BLOCK, CONSIS, PERM
 
+  let minus_one = Scalar::from(1u32).neg().to_bytes();
   let zero = Scalar::zero().to_bytes();
   let one = Scalar::one().to_bytes();
   let two = Scalar::from(2u32).to_bytes();
@@ -454,6 +455,9 @@ fn produce_r1cs() -> (
         (A, B, C) = gen_constr(A, B, C, 0,
           i, vec![(i * num_vars + V_o, 1), ((i + 1) * num_vars + V_i, -1)], vec![((i + 1) * num_vars + V_valid, 1)], vec![]);
       }
+      // Pad A, B, C with dummy entries so their size is multiple of total_num_proofs_bound
+      (A, B, C) = gen_constr(A, B, C, 0,
+        total_num_proofs_bound - 1, vec![(V_cnst, 0); 2], vec![(V_cnst, 0)], vec![]);
       (A, B, C)
     };
     A_list.push(A);
@@ -604,10 +608,11 @@ fn produce_r1cs() -> (
         constraint_count += 1;
       }
       // Last Entry
+      // Pad A, B, C with dummy entries so their size is multiple of perm_size_bound
       let i = perm_size_bound - 1;
       // last D is x[k] * 1
       (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-        constraint_count, vec![(i * num_vars + V_x, 1)], vec![], vec![(i * num_vars + V_d, 1)]);
+        constraint_count, vec![(i * num_vars + V_x, 1)], vec![(V_cnst, 1), (V_cnst, 0), (V_cnst, 0)], vec![(i * num_vars + V_d, 1)]);
       constraint_count += 1;
       // last pi is just usual
       (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
@@ -740,7 +745,7 @@ fn produce_r1cs() -> (
   };
 
   // MEM_COHERE
-  // MEM_CONHERE takes in addr_mem = <v, addr, val, D>
+  // MEM_COHERE takes in addr_mem = <v, addr, val, D>
   // and verifies that
   // 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
   // 2. v[k + 1] * (addr[k + 1] - addr[k] - 1) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
@@ -771,11 +776,11 @@ fn produce_r1cs() -> (
       for i in 0..total_num_mem_accesses_bound - 1 {
         // (v[k] - 1) * v[k + 1] = 0
         (A, B, C) = gen_constr(A, B, C, V_cnst,
-          num_cons, vec![(i * width + V_valid, 1), (V_cnst, -1)], vec![((i + 1) * width + V_valid, 1)], vec![]);
+          num_cons, vec![(i * width + V_valid, 1), (i * width + V_cnst, -1)], vec![((i + 1) * width + V_valid, 1)], vec![]);
         num_cons += 1;
         // v[k + 1] * (addr[k + 1] - addr[k] - 1) = D[k]
         (A, B, C) = gen_constr(A, B, C, V_cnst,
-          num_cons, vec![((i + 1) * width + V_valid, 1)], vec![((i + 1) * width + V_addr, 1), (i * width + V_addr, -1), (V_cnst, -1)], vec![(V_D, 1)]);
+          num_cons, vec![((i + 1) * width + V_valid, 1)], vec![((i + 1) * width + V_addr, 1), (i * width + V_addr, -1), (i * width + V_cnst, -1)], vec![(i * width + V_D, 1)]);
         num_cons += 1;
         // D[k] * (addr[k + 1] - addr[k]) = 0
         (A, B, C) = gen_constr(A, B, C, V_cnst,
@@ -786,6 +791,18 @@ fn produce_r1cs() -> (
           num_cons, vec![(i * width + V_D, 1)], vec![((i + 1) * width + V_val, 1), (i * width + V_val, -1)], vec![]);
         num_cons += 1;
       }
+      // Pad A, B, C with dummy entries so their size is multiple of total_num_mem_accesses_bound
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        num_cons, vec![(V_cnst, 0); 2], vec![(V_cnst, 0)], vec![]);
+      num_cons += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 3], vec![(V_cnst, 0)]);
+      num_cons += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 2], vec![(V_cnst, 0)]);
+      num_cons += 1;
+      (A, B, C) = gen_constr(A, B, C, V_cnst,
+        num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 2], vec![(V_cnst, 0)]);
       (A, B, C)
     };
     A_list.push(A);
@@ -884,10 +901,11 @@ fn produce_r1cs() -> (
         constraint_count += 1;
       }
       // Last Entry
+      // Pad A, B, C with dummy entries so their size is multiple of total_num_mem_accesses_bound
       let i = total_num_mem_accesses_bound - 1;
       // last D is x[k] * 1
       (A, B, C) = gen_constr(A, B, C, i * width + V_cnst,
-        constraint_count, vec![(i * width + V_x, 1)], vec![], vec![(i * width + V_d, 1)]);
+        constraint_count, vec![(i * width + V_x, 1)], vec![(V_cnst, 1), (V_cnst, 0), (V_cnst, 0)], vec![(i * width + V_d, 1)]);
       constraint_count += 1;
       // last pi is just usual
       (A, B, C) = gen_constr(A, B, C, i * width + V_cnst,
@@ -1040,13 +1058,16 @@ fn produce_r1cs() -> (
     // Witnesses for permutation cannot be generated until tau and r are generated
     // Both can only be generated at proving time
 
-    // Memory accesses in address order: (v, addr, val, _)
-    for _ in 0..4 {
-      addr_mems_list.push(VarsAssignment::new(&vec![one, zero, one, zero]).unwrap());
+    // Memory accesses in address order: (v, addr, val, D)
+    // where D[k] = v[k + 1] * (addr[k + 1] - addr[k] - 1)
+    for _ in 0..3 {
+      addr_mems_list.push(VarsAssignment::new(&vec![one, zero, one, minus_one]).unwrap());
     }
-    for _ in 0..4 {
-      addr_mems_list.push(VarsAssignment::new(&vec![one, one, two, zero]).unwrap());
+    addr_mems_list.push(VarsAssignment::new(&vec![one, zero, one, zero]).unwrap());
+    for _ in 0..3 {
+      addr_mems_list.push(VarsAssignment::new(&vec![one, one, two, minus_one]).unwrap());
     }
+    addr_mems_list.push(VarsAssignment::new(&vec![one, one, two, zero]).unwrap());
 
     (block_vars_matrix, block_inputs_matrix, exec_inputs, block_mems_matrix, addr_mems_list)
   };
@@ -1215,7 +1236,7 @@ fn main() {
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
   // for size PROOF * VAR
-  let proofs_times_vars_gens = SNARKGens::new(block_num_cons, perm_size_bound * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
+  let proofs_times_vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound) * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances

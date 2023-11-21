@@ -13,6 +13,7 @@ use super::scalar::Scalar;
 use super::timer::Timer;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use core::cmp::Ordering;
+use std::cmp::min;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
@@ -485,7 +486,7 @@ impl SparseMatPolynomial {
     // Based on the construction of PERM_POLY and CONSIS_CHECK,
     // We don't need to scan through every non-zero entry of the instance
     // Only the first (num_proofs / (max_num_proofs_bound - 1)) fraction of entries will correspond to non-zero values in Z
-    for i in 0..self.M.len() * num_proofs / (max_num_proofs_bound - 1) {
+    for i in 0..self.M.len() * num_proofs / max_num_proofs_bound {
       let row = self.M[i].row;
       // No need to evaluate constraints beyond num_proofs * base_num_rows
       // As the results are always 0
@@ -528,7 +529,7 @@ impl SparseMatPolynomial {
   ) -> Vec<Scalar> {
     let mut M_evals: Vec<Scalar> = vec![Scalar::zero(); num_cols];
 
-    for i in 0..self.M.len() * max_num_proofs / (max_num_proofs_bound - 1) {
+    for i in 0..self.M.len() * max_num_proofs / max_num_proofs_bound {
       let entry = &self.M[i];
       // Skip out-of-bound constraints
       if entry.row < rx.len() && entry.col < num_cols {
