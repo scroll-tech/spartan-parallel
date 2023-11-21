@@ -1125,7 +1125,7 @@ impl R1CSProof {
         proof_eval_vars_at_ry_list,
         proof_eq_sc_phase2
       },
-      [rp, [rx, vec![Scalar::zero(); pad]].concat(), [ry, vec![Scalar::zero(); pad]].concat()]
+      [rp, [vec![Scalar::zero(); pad], rx].concat(), [vec![Scalar::zero(); pad], ry].concat()]
     )
   }
 
@@ -1146,8 +1146,6 @@ impl R1CSProof {
   ) -> Result<[Vec<Scalar>; 3], ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
-    println!("AAA");
-
     // derive the verifier's challenge tau
     let (num_rounds_p, num_rounds_q, num_rounds_xb, num_rounds_yb) = 
       (num_proofs.log_2(), max_input_rows.log_2(), base_constraint_size.log_2(), base_input_size.log_2());
@@ -1167,8 +1165,6 @@ impl R1CSProof {
       &gens.gens_sc.gens_4,
       transcript,
     )?;
-
-    println!("BBB");
 
     // perform the intermediate sum-check test with claimed Az, Bz, and Cz
     let (comm_Az_claim, comm_Bz_claim, comm_Cz_claim, comm_prod_Az_Bz_claims) = &self.claims_phase2;
@@ -1220,8 +1216,6 @@ impl R1CSProof {
       &comm_claim_post_phase1,
     )?;
 
-    println!("CCC");
-
     // derive three public challenges and then derive a joint claim
     let r_A = transcript.challenge_scalar(b"challenge_Az");
     let r_B = transcript.challenge_scalar(b"challenge_Bz");
@@ -1249,8 +1243,6 @@ impl R1CSProof {
       &gens.gens_sc.gens_3,
       transcript,
     )?;
-    
-    println!("DDD");
 
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
@@ -1278,8 +1270,6 @@ impl R1CSProof {
     let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_comm_vars_list).compress();
     assert_eq!(expected_comm_vars_at_ry, self.comm_vars_at_ry);
 
-    println!("EEE");
-
     let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();
 
     // perform the final check in the second sum-check protocol
@@ -1294,9 +1284,9 @@ impl R1CSProof {
       &comm_claim_post_phase2,
     )?;
 
-    println!("FFF");
-
-    Ok([rp, [rq_rx, rx].concat(), ry])
+    // rx and ry might not be long enough: in that case, append them with 0
+    let pad = (max_input_rows_bound / max_input_rows).log_2();
+    Ok([rp, [vec![Scalar::zero(); pad], rq_rx, rx].concat(), [vec![Scalar::zero(); pad], ry].concat()])
   }
 }
 

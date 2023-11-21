@@ -49,7 +49,7 @@
 //! 4      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
 //!
 #![allow(clippy::assertions_on_result_states)]
-use std::ops::Neg;
+use std::{ops::Neg, cmp::max};
 
 use curve25519_dalek::scalar::Scalar;
 use libspartan::{Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
@@ -88,8 +88,7 @@ fn produce_r1cs() -> (
   Instance,
   usize,
   usize,
-  usize,
-  [Instance; 2],
+  Instance,
   Vec<usize>,
   usize,
   usize,
@@ -184,7 +183,6 @@ fn produce_r1cs() -> (
   // Total for all blocks and one block
   // OBTAINED DURING COMPILE TIME
   let total_num_proofs_bound = 16;
-  let block_max_num_proofs_bound = 8;
   // Bound on total number of memory accesses
   let total_num_mem_accesses_bound = 16;
 
@@ -554,7 +552,7 @@ fn produce_r1cs() -> (
     perm_root_inst
   };
 
-  // PERM_BLOCK_POLY, PERM_EXEC_POLY, (MEM_BLOCK_POLY), MEM_ADDR_POLY
+  // PERM_POLY (for PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY, MEM_ADDR_POLY)
   // The strategy is to compute the local polynomials (evaluated on tau) for each block instance
   // Each w3[p][2] (i.e. w3[p][0][2]) stores the product pi for instance P. The verifier obtains all P of them and multiply them together.
   // The correct formular is pi = v[k] * x[k] * (pi[k+1] + (1 - v[k+1])))
@@ -563,68 +561,63 @@ fn produce_r1cs() -> (
   // x[k]  <- \tau - (\sum_i a_i * r^{i-1})
   // pi[k] <- v[k] * D2[k]
   // D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
-  // PERM_EXEC_POLY is PERM_BLOCK_POLY except number of variables is now total_num_proofs_bound
-  // MEM_BLOCK_POLY is PERM_BLOCK_POLY
-  // MEM_ADDR_POLY is PERM_BLOCK_POLY except number of variables is now total_num_mem_accesses_bound
+  // number of variables is max(total_num_proofs_bound, total_num_mem_accesses_bound) * num_vars
   let perm_poly_num_cons_base = 2;
-  let perm_block_poly_num_non_zero_entries = 4 * block_max_num_proofs_bound;
-  let perm_exec_poly_num_non_zero_entries = 4 * total_num_proofs_bound;
+  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
+  let perm_poly_num_cons = perm_size_bound * perm_poly_num_cons_base;
+  let perm_poly_num_non_zero_entries = perm_size_bound * 4;
   
-  let perm_poly_inst = [block_max_num_proofs_bound, total_num_proofs_bound].map(|entry_size| {
-    let perm_poly_num_cons = perm_poly_num_cons_base * entry_size;
-    let perm_poly_inst = {
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-  
-        let V_valid = 0;
-        let V_cnst = V_valid;
-        let V_x = 1;
-        let V_pi = 2;
-        let V_d = 3;
-  
-        let mut constraint_count = 0;
-  
-        // Need to order the constraints so that they solve the inputs in the front first
-        // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
-        for i in 0..entry_size - 1 {
-          // D
-          (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-            constraint_count, 
-            vec![(i * num_vars + V_x, 1)], 
-            vec![((i + 1) * num_vars + V_pi, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
-            vec![(i * num_vars + V_d, 1)]);
-          constraint_count += 1;
-          // pi
-          (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-            constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
-          // Pad base constraint size to 2
-          constraint_count += 1;
-        }
-        // Last Entry
-        let i = entry_size - 1;
-        // last D is x[k] * 1
+  let perm_poly_inst = {
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      let V_valid = 0;
+      let V_cnst = V_valid;
+      let V_x = 1;
+      let V_pi = 2;
+      let V_d = 3;
+
+      let mut constraint_count = 0;
+
+      // Need to order the constraints so that they solve the inputs in the front first
+      // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
+      for i in 0..perm_size_bound - 1 {
+        // D
         (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
-          constraint_count, vec![(i * num_vars + V_x, 1)], vec![], vec![(i * num_vars + V_d, 1)]);
+          constraint_count, 
+          vec![(i * num_vars + V_x, 1)], 
+          vec![((i + 1) * num_vars + V_pi, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
+          vec![(i * num_vars + V_d, 1)]);
         constraint_count += 1;
-        // last pi is just usual
+        // pi
         (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
           constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
-  
-        (A, B, C)   
-      };
-  
-      let A_list = vec![A.clone()];
-      let B_list = vec![B.clone()];
-      let C_list = vec![C.clone()];
-  
-      let perm_poly_inst = Instance::new(1, perm_poly_num_cons, entry_size * num_vars, &A_list, &B_list, &C_list).unwrap();
-      
-      perm_poly_inst
+        // Pad base constraint size to 2
+        constraint_count += 1;
+      }
+      // Last Entry
+      let i = perm_size_bound - 1;
+      // last D is x[k] * 1
+      (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
+        constraint_count, vec![(i * num_vars + V_x, 1)], vec![], vec![(i * num_vars + V_d, 1)]);
+      constraint_count += 1;
+      // last pi is just usual
+      (A, B, C) = gen_constr(A, B, C, i * num_vars + V_cnst,
+        constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
+
+      (A, B, C)   
     };
+
+    let A_list = vec![A.clone()];
+    let B_list = vec![B.clone()];
+    let C_list = vec![C.clone()];
+
+    let perm_poly_inst = Instance::new(1, perm_poly_num_cons, perm_size_bound * num_vars, &A_list, &B_list, &C_list).unwrap();
+    
     perm_poly_inst
-  });
+  };
 
   // --
   // MEM Instances
@@ -949,7 +942,7 @@ fn produce_r1cs() -> (
     num_vars,
     input_output_cutoff,
     total_num_proofs_bound,
-    block_max_num_proofs_bound,
+    total_num_mem_accesses_bound,
     
     block_num_cons,
     block_num_non_zero_entries,
@@ -976,8 +969,7 @@ fn produce_r1cs() -> (
     perm_root_inst,
     
     perm_poly_num_cons_base,
-    perm_block_poly_num_non_zero_entries,
-    perm_exec_poly_num_non_zero_entries,
+    perm_poly_num_non_zero_entries,
     perm_poly_inst,
 
     block_num_mem_accesses,
@@ -1010,7 +1002,7 @@ fn main() {
     num_vars,
     input_output_cutoff,
     total_num_proofs_bound,
-    block_max_num_proofs_bound,
+    total_num_mem_accesses_bound,
 
     block_num_cons,
     block_num_non_zero_entries,
@@ -1037,8 +1029,7 @@ fn main() {
     perm_root_inst,
     
     perm_poly_num_cons_base,
-    perm_block_poly_num_non_zero_entries,
-    perm_exec_poly_num_non_zero_entries,
+    perm_poly_num_non_zero_entries,
     perm_poly_inst,
     
     block_num_mem_accesses,
@@ -1058,8 +1049,8 @@ fn main() {
     addr_mems_list,
   ) = produce_r1cs();
 
-  let perm_block_poly_num_cons = perm_poly_num_cons_base * block_max_num_proofs_bound;
-  let perm_exec_poly_num_cons = perm_poly_num_cons_base * total_num_proofs_bound;
+  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
+  let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
 
   assert_eq!(block_num_instances, block_vars_matrix.len());
@@ -1074,17 +1065,14 @@ fn main() {
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * num_vars, 1, consis_check_num_non_zero_entries);
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
-  let perm_block_poly_gens = SNARKGens::new(perm_block_poly_num_cons, block_max_num_proofs_bound * num_vars, 1, perm_block_poly_num_non_zero_entries);
-  let perm_exec_poly_gens = SNARKGens::new(perm_exec_poly_num_cons, total_num_proofs_bound * num_vars, 1, perm_exec_poly_num_non_zero_entries);
+  let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances, mem_extract_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
   // for size PROOF * VAR
-  let proofs_times_vars_gens = SNARKGens::new(block_num_cons, block_max_num_proofs_bound * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
-  // for size TOTAL_PROOF * VAR
-  let total_proofs_times_vars_gens = SNARKGens::new(block_num_cons, total_num_proofs_bound * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
+  let proofs_times_vars_gens = SNARKGens::new(block_num_cons, perm_size_bound * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
@@ -1093,8 +1081,7 @@ fn main() {
   let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
-  let (perm_block_poly_comm, perm_block_poly_decomm) = SNARK::encode(&perm_poly_inst[0], &perm_block_poly_gens);
-  let (perm_exec_poly_comm, perm_exec_poly_decomm) = SNARK::encode(&perm_poly_inst[1], &perm_exec_poly_gens);
+  let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
   let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
   let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
 
@@ -1111,7 +1098,6 @@ fn main() {
     input_output_cutoff,
     total_num_proofs_bound,
     block_num_instances,
-    block_max_num_proofs_bound,
     block_max_num_proofs,
     &block_num_proofs,
     &block_inst,
@@ -1139,14 +1125,10 @@ fn main() {
     &perm_root_decomm,
     &perm_root_gens,
     perm_poly_num_cons_base,
-    &perm_poly_inst[0],
-    &perm_block_poly_comm,
-    &perm_block_poly_decomm,
-    &perm_block_poly_gens,
-    &perm_poly_inst[1],
-    &perm_exec_poly_comm,
-    &perm_exec_poly_decomm,
-    &perm_exec_poly_gens,
+    &perm_poly_inst,
+    &perm_poly_comm,
+    &perm_poly_decomm,
+    &perm_poly_gens,
 
     block_num_mem_accesses,
     &mem_extract_inst,
@@ -1154,6 +1136,7 @@ fn main() {
     &mem_extract_decomm,
     &mem_extract_gens,
 
+    total_num_mem_accesses_bound,
     total_num_mem_accesses,
     &mem_addr_comb_inst,
     &mem_addr_comb_comm,
@@ -1168,7 +1151,6 @@ fn main() {
 
     &vars_gens,
     &proofs_times_vars_gens,
-    &total_proofs_times_vars_gens,
     &mut prover_transcript,
   );
 
@@ -1186,7 +1168,6 @@ fn main() {
       input_output_cutoff,
       total_num_proofs_bound,
       block_num_instances, 
-      block_max_num_proofs_bound,
       block_max_num_proofs, 
       &block_num_proofs, 
       block_num_cons, 
@@ -1208,14 +1189,13 @@ fn main() {
       &perm_root_comm,
       &perm_root_gens,
       perm_poly_num_cons_base,
-      &perm_block_poly_comm,
-      &perm_block_poly_gens,
-      &perm_exec_poly_comm,
-      &perm_exec_poly_gens,
+      &perm_poly_comm,
+      &perm_poly_gens,
 
       mem_extract_num_cons,
       &mem_extract_comm,
       &mem_extract_gens,
+      total_num_mem_accesses_bound,
       total_num_mem_accesses,
       mem_addr_comb_num_cons,
       &mem_addr_comb_comm,
@@ -1223,7 +1203,6 @@ fn main() {
 
       &vars_gens,
       &proofs_times_vars_gens,
-      &total_proofs_times_vars_gens,
       &mut verifier_transcript
     ).is_ok());
   println!("proof verification successful!");
