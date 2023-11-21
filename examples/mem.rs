@@ -100,6 +100,9 @@ fn produce_r1cs() -> (
   usize,
   usize,
   Instance,
+  usize,
+  usize,
+  Instance,
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
   Vec<InputsAssignment>,
@@ -736,6 +739,64 @@ fn produce_r1cs() -> (
     mem_extract_inst
   };
 
+  // MEM_COHERE
+  // MEM_CONHERE takes in addr_mem = <v, addr, val, D>
+  // and verifies that
+  // 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
+  // 2. v[k + 1] * (addr[k + 1] - addr[k] - 1) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
+  // 3. v[k + 1] * (addr[k + 1] - addr[k] - 1) * (val[k + 1] - val[k]) = 0: either address difference is 1, or value are the same, unless the next entry is invalid
+  // So we set D = v[k + 1] * (addr[k + 1] - addr[k] - 1)
+  let mem_cohere_num_cons_base = 4;
+  let mem_cohere_num_non_zero_entries = 8 * total_num_mem_accesses_bound;
+  let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound;
+
+  let mem_cohere_inst = {
+    let V_valid = 0;
+    let V_cnst = V_valid;
+    let V_addr = 1;
+    let V_val = 2;
+    let V_D = 3;
+    let width = 4;
+
+    let mut A_list = Vec::new();
+    let mut B_list = Vec::new();
+    let mut C_list = Vec::new();
+    
+    let (A, B, C) = {
+      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+
+      let mut num_cons = 0;
+      for i in 0..total_num_mem_accesses_bound - 1 {
+        // (v[k] - 1) * v[k + 1] = 0
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          num_cons, vec![(i * width + V_valid, 1), (V_cnst, -1)], vec![((i + 1) * width + V_valid, 1)], vec![]);
+        num_cons += 1;
+        // v[k + 1] * (addr[k + 1] - addr[k] - 1) = D[k]
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          num_cons, vec![((i + 1) * width + V_valid, 1)], vec![((i + 1) * width + V_addr, 1), (i * width + V_addr, -1), (V_cnst, -1)], vec![(V_D, 1)]);
+        num_cons += 1;
+        // D[k] * (addr[k + 1] - addr[k]) = 0
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          num_cons, vec![(i * width + V_D, 1)], vec![((i + 1) * width + V_addr, 1), (i * width + V_addr, -1)], vec![]);
+        num_cons += 1;
+        // D[k] * (val[k + 1] - val[k]) = 0
+        (A, B, C) = gen_constr(A, B, C, V_cnst,
+          num_cons, vec![(i * width + V_D, 1)], vec![((i + 1) * width + V_val, 1), (i * width + V_val, -1)], vec![]);
+        num_cons += 1;
+      }
+      (A, B, C)
+    };
+    A_list.push(A);
+    B_list.push(B);
+    C_list.push(C);
+
+    let mem_cohere_inst = Instance::new(1, mem_cohere_num_cons, total_num_mem_accesses_bound * width, &A_list, &B_list, &C_list).unwrap();
+    
+    mem_cohere_inst
+  };
+
   // MEM_BLOCK_POLY is PERM_BLOCK_POLY
 
   // MEM_ADDR_COMB converts (v, addr, val, _) to (v, x, pi, D)
@@ -1040,6 +1101,10 @@ fn produce_r1cs() -> (
     mem_extract_inst,
 
     total_num_mem_accesses,
+    mem_cohere_num_cons_base,
+    mem_cohere_num_non_zero_entries,
+    mem_cohere_inst,
+
     mem_addr_comb_num_cons,
     mem_addr_comb_num_non_zero_entries,
     mem_addr_comb_inst,
@@ -1104,6 +1169,10 @@ fn main() {
     mem_extract_inst,
 
     total_num_mem_accesses,
+    mem_cohere_num_cons_base,
+    mem_cohere_num_non_zero_entries,
+    mem_cohere_inst,
+
     mem_addr_comb_num_cons,
     mem_addr_comb_num_non_zero_entries,
     mem_addr_comb_inst,
@@ -1122,6 +1191,7 @@ fn main() {
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
   let perm_size_bound = total_num_proofs_bound;
   let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
+  let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound;
   let mem_addr_poly_num_cons = mem_addr_poly_num_cons_base * total_num_mem_accesses_bound;
 
   assert_eq!(block_num_instances, block_vars_matrix.len());
@@ -1138,6 +1208,7 @@ fn main() {
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances, mem_extract_num_non_zero_entries);
+  let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound * 4, 1, mem_addr_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
@@ -1155,6 +1226,7 @@ fn main() {
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
   let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
+  let (mem_cohere_comm, mem_cohere_decomm) = SNARK::encode(&mem_cohere_inst, &mem_cohere_gens);
   let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
   let (mem_addr_poly_comm, mem_addr_poly_decomm) = SNARK::encode(&mem_addr_poly_inst, &mem_addr_poly_gens);
 
@@ -1211,6 +1283,12 @@ fn main() {
 
     total_num_mem_accesses_bound,
     total_num_mem_accesses,
+    mem_cohere_num_cons_base,
+    &mem_cohere_inst,
+    &mem_cohere_comm,
+    &mem_cohere_decomm,
+    &mem_cohere_gens,
+
     &mem_addr_comb_inst,
     &mem_addr_comb_comm,
     &mem_addr_comb_decomm,
@@ -1276,6 +1354,9 @@ fn main() {
       &mem_extract_gens,
       total_num_mem_accesses_bound,
       total_num_mem_accesses,
+      mem_cohere_num_cons_base,
+      &mem_cohere_comm,
+      &mem_cohere_gens,
       mem_addr_comb_num_cons,
       &mem_addr_comb_comm,
       &mem_addr_comb_gens,

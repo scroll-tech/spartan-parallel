@@ -686,6 +686,12 @@ impl SNARK {
 
     total_num_mem_accesses_bound: usize,
     total_num_mem_accesses: usize,
+    mem_cohere_num_cons_base: usize,
+    mem_cohere_inst: &Instance,
+    mem_cohere_comm: &ComputationCommitment,
+    mem_cohere_decomm: &ComputationDecommitment,
+    mem_cohere_gens: &SNARKGens,
+
     mem_addr_comb_inst: &Instance,
     mem_addr_comb_comm: &ComputationCommitment,
     mem_addr_comb_decomm: &ComputationDecommitment,
@@ -734,6 +740,7 @@ impl SNARK {
     perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
+    mem_cohere_comm.comm.append_to_transcript(b"consis_comm", transcript);
     mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_addr_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
 
@@ -2316,6 +2323,10 @@ impl SNARK {
 
     total_num_mem_accesses_bound: usize,
     total_num_mem_accesses: usize,
+    mem_cohere_num_cons_base: usize,
+    mem_cohere_comm: &ComputationCommitment,
+    mem_cohere_gens: &SNARKGens,
+
     mem_addr_comb_num_cons: usize,
     mem_addr_comb_comm: &ComputationCommitment,
     mem_addr_comb_gens: &SNARKGens,
@@ -2349,6 +2360,7 @@ impl SNARK {
       perm_root_comm.comm.append_to_transcript(b"consis_comm", transcript);
       perm_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
       mem_extract_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      mem_cohere_comm.comm.append_to_transcript(b"consis_comm", transcript);
       mem_addr_comb_comm.comm.append_to_transcript(b"consis_comm", transcript);
       mem_addr_poly_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
