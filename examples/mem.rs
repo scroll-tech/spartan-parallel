@@ -1296,7 +1296,7 @@ fn main() {
     &perm_poly_decomm,
     &perm_poly_gens,
 
-    block_num_mem_accesses,
+    &block_num_mem_accesses,
     &mem_extract_inst,
     &mem_extract_comm,
     &mem_extract_decomm,

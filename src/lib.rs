@@ -6,14 +6,8 @@
 // TODO: Proof might be incorrect if a block is never executed
 // TODO: Mem Proof might be incorrect if a block contains no mem execution
 // TODO: Maybe we should just use the valid bit as constant?
-// Q: Would it be insecure if an entry has valid = 0 but everything else not 0?
-// A: Shouldn't matter because consistency check will force invalid entries to be 0's
-// Q: What should we do with the constant bit if the entry is invalid?
-// A: Should be set to 0
-// Q: Can we trust that the Prover orders all valid = 1 before valid = 0?
-// A: Yes, because otherwise consistency check wouldn't pass with overwhelming probability
-
-// TODO: Reduce PERM_POLY instances to just one
+// Q: How can we ensure that the Prover does not cheat with fake total_num_mem_accesses?
+// A: Permutation check for memory should fail.
 
 extern crate byteorder;
 extern crate core;
@@ -682,7 +676,7 @@ impl SNARK {
     perm_poly_decomm: &ComputationDecommitment,
     perm_poly_gens: &SNARKGens,
 
-    block_num_mem_accesses: Vec<usize>,
+    block_num_mem_accesses: &Vec<usize>,
     mem_extract_inst: &Instance,
     mem_extract_comm: &ComputationCommitment,
     mem_extract_decomm: &ComputationDecommitment,
@@ -728,7 +722,7 @@ impl SNARK {
     transcript.append_protocol_name(SNARK::protocol_name());
 
     // Currently only support the following case:
-    for n in &block_num_mem_accesses {
+    for n in block_num_mem_accesses {
       assert!(2 * n <= num_vars - 4);
     }
 
