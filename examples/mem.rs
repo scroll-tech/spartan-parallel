@@ -12,41 +12,50 @@
 //!   assert v * v = v                assert v * v = v
 //!   if (v == 1) {                   if (v == 1) {
 //!     assert b == 0                   assert b == 1
-//!     STORE(0, 1)                     LOAD(0, M0)
-//!     STORE(1, 2)                     LOAD(1, M1)
-//!     s = 0                           i = i + M0
-//!     i = 1                           s = s + M1
-//!     if i != 3:                      if i != 3:
-//!       b = 1                           b = 1
-//!     else:                           else:
-//!       b = 2                           b = 2
-//!   }                               }
+//!     assert A0 == 0                  assert A0 == 0
+//!     assert V0 == 1                  LOAD(A0, V0)
+//!     STORE(A0, V0)                   assert A1 == 1
+//!     assert A1 == 1                  LOAD(A1, V1)
+//!     assert V1 == 2                  i = i + V0
+//!     STORE(A1, V1)                   s = s + V1
+//!     s = 0                           if i != 3:
+//!     i = 1                             b = 1
+//!     if i != 3:                      else:
+//!       b = 1                           b = 2
+//!     else:                           }
+//!       b = 2                           
+//!   }
 //! Note: take caution when translating STORE(0, 1) into constraints. If an execution of the block is invalid, this could cause a problem!
 //! 
 //! Converting each block to constraints:
-//! Block 0:                        Block 1:
-//!   v = v * v                       v = v * v
-//!   0 = b0                          0 = v * (b0 - 1)
-//!   0 = i0                          0 = v * (i1 - i0 - M0)
-//!   0 = s0                          0 = v * (s1 - s0 - M1)
-//!   Z1 = (i0 - 3) * Z0              Z1 = (i1 - 3) * Z0
-//!   T0 = v * B0                     T0 = v * B0
-//!   0 = T0 * (Z1 - 1)               0 = T0 * (Z1 - 1)
-//!   0 = T0 * (b1 - 1)               0 = T0 * (b1 - 1)
-//!   T1 = v * (1 - B0)               T1 = v * (1 - B0)
-//!   0 = T1 * (i0 - 3)               0 = T1 * (i1 - 3)
-//!   0 = T1 * (b1 - 2)               0 = T1 * (b1 - 2)
-//!   i1 = i0
-//!   s1 = s0
+//!    Block 0:                        Block 1:
+//!  0   v = v * v                       v = v * v
+//!  1   0 = w - v                       0 = w - v
+//!  2   0 = b0                          0 = b0 - 1
+//!  3   0 = i0                          0 = A0
+//!  4   0 = s0                          0 = A1 - 1
+//!  5   Z1 = (i0 - 3) * Z0              0 = i1 - i0 - V0
+//!  6   0 = A0                          0 = s1 - s0 - V1
+//!  7   0 = V0 - 1                      Z1 = (i1 - 3) * Z0
+//!  8   0 = A1 - 1                      0 = B0 * (Z1 - 1)
+//!  9   0 = V1 - 2                      0 = B0 * (b1 - 1)
+//! 10   0 = B0 * (Z1 - 1)               0 = (1 - B0) * (i1 - 3)
+//! 11   0 = B0 * (b1 - 1)               0 = (1 - B0) * (b1 - 2)
+//! 12   0 = (1 - B0) * (i0 - 3)                         
+//! 13   0 = (1 - B0) * (b1 - 2)               
+//! 14   i1 = i0
+//! 15   s1 = s0
 //! 
 //! Program States
-//!        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
-//! Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
-//! 0      1    0   0   0   0    1   0   0  -3i   1   1   1   0   0   0   0
-//! 1      1    1   0   0   0    1   1   2  -2i   1   1   1   0   1   2   0
-//! 2      1    1   1   2   0    1   2   4  -1i   1   1   1   0   1   2   0
-//! 3      1    1   2   4   0    2   3   6    0   0   0   0   1   1   2   0
-//! 4      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
+//! The first entry of the witness is a copy of the valid bit, followed by a list of addresses and then a list of values
+//! Put all memory states at the front of the witnesses
+//!        0    1   2   3    4    5   6   7     0   1   2   3   4   5   6   7
+//! Exec:  v | b0  i0  s0  | _ | b1  i1  s1  |  w  A0  A1  V0  V1  Z0  Z1  B0
+//! 0      1    0   0   0    0    1   0   0     1   0   1   1   2 -3i   1   1
+//! 1      1    1   0   0    0    1   1   2     1   0   1   1   2 -2i   1   1
+//! 2      1    1   1   2    0    1   2   4     1   0   1   1   2 -1i   1   1
+//! 3      1    1   2   4    0    2   3   6     1   0   1   1   2   0   0   0
+//! 4      0    0   0   0    0    0   0   0     0   0   0   0   0   0   0   0
 //!
 #![allow(clippy::assertions_on_result_states)]
 use std::{ops::Neg, cmp::max};
@@ -71,9 +80,6 @@ fn produce_r1cs() -> (
   usize,
   usize,
   Instance,
-  usize,
-  usize,
-  Instance,
 
   usize,
   Vec<usize>,
@@ -84,14 +90,8 @@ fn produce_r1cs() -> (
   Vec<Vec<VarsAssignment>>,
   Vec<Vec<InputsAssignment>>,
   Vec<InputsAssignment>,
-  Vec<Vec<MemsAssignment>>,
   Vec<MemsAssignment>,
 ) {
-  // bad test cases for debugging
-  // set them to unreachable values to prevent bad tests
-  // let bad_instance = 3;
-  // let bad_proof = 1;
-
   // Separate instances into three lists:
   // BLOCK: correctness within a block
   // CONSIS: consistency between blocks
@@ -146,8 +146,9 @@ fn produce_r1cs() -> (
   let block_num_instances = 2;
 
   // Program States
-  //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
-  // Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
+  // Put all memory states at the front of the witnesses
+  //        0    1   2   3    4    5   6   7     0   1   2   3   4   5   6   7
+  // Exec:  v | b0  i0  s0  | _ | b1  i1  s1  |  w  A0  A1  V0  V1  Z0  Z1  B0
   let block_inst = {
     let num_inputs = num_vars / 2;
 
@@ -159,13 +160,14 @@ fn produce_r1cs() -> (
     let V_b1 = num_inputs + 1;
     let V_i1 = num_inputs + 2;
     let V_s1 = num_inputs + 3;
-    let V_Z0 = num_vars;
-    let V_Z1 = num_vars + 1;
-    let V_B0 = num_vars + 2;
-    let V_T0 = num_vars + 3;
-    let V_T1 = num_vars + 4;
-    let V_M0 = num_vars + 5;
-    let V_M1 = num_vars + 6;
+    let V_w = num_vars;
+    let V_A0 = num_vars + 1;
+    let V_A1 = num_vars + 2;
+    let V_V0 = num_vars + 3;
+    let V_V1 = num_vars + 4;
+    let V_Z0 = num_vars + 5;
+    let V_Z1 = num_vars + 6;
+    let V_B0 = num_vars + 7;
 
     let mut A_list = Vec::new();
     let mut B_list = Vec::new();
@@ -178,51 +180,36 @@ fn produce_r1cs() -> (
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
-      let mut i = 0;
-      // v * v = v
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]);
-      i += 1;
-      // v * (b0 - 1) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_b0, 1), (V_cnst, -1)], vec![]);
-      i += 1;
-      // v * (i1 - i0 - M0) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_i1, 1), (V_i0, -1), (V_M0, -1)], vec![]);
-      i += 1;
-      // v * (s1 - s0 - M1) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_s1, 1), (V_s0, -1), (V_M1, -1)], vec![]);
-      i += 1;
-      // (i1 - 3) * Z0 = Z1
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_i1, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]);
-      i += 1;
-      // v * B0 = T0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_B0, 1)], vec![(V_T0, 1)]);
-      i += 1;
-      // T0 * (Z1 - 1) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_T0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]);
-      i += 1;
-      // T0 * (b1 - 1) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_T0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]);
-      i += 1;
-      // v * (1 - B0) = T1
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_cnst, 1), (V_B0, -1)], vec![(V_T1, 1)]);
-      i += 1;
-      // T1 * (i1 - 3) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_T1, 1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]);
-      i += 1;
-      // T1 * (b1 - 2) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_T1, 1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]);
-
+      let args = [
+        // 0: v * v = v
+        (vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]),
+        // 1: 0 = w - v
+        (vec![], vec![], vec![(V_w, 1), (V_valid, -1)]),
+        // 2: 0 = b0 - 1
+        (vec![], vec![], vec![(V_b0, 1), (V_cnst, -1)]),
+        // 3: 0 = A0
+        (vec![], vec![], vec![(V_A0, 1)]),
+        // 4: 0 = A1 - 1
+        (vec![], vec![], vec![(V_A1, 1), (V_cnst, -1)]),
+        // 5: 0 = i1 - i0 - V0
+        (vec![], vec![], vec![(V_i1, 1), (V_i0, -1), (V_V0, -1)]),
+        // 6: 0 = s1 - s0 - V1
+        (vec![], vec![], vec![(V_s1, 1), (V_s0, -1), (V_V1, -1)]),
+        // 7: (i1 - 3) * Z0 = Z1
+        (vec![(V_i1, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]),
+        // 8: B0 * (Z1 - 1) = 0
+        (vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]),
+        // 9: B0 * (b1 - 1) = 0
+        (vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]),
+        // 10: (1 - B0) * (i1 - 3) = 0
+        (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]),
+        // 11: (1 - B0) * (b1 - 2) = 0
+        (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![])
+      ];
+      for i in 0..args.len() {
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          i, args[i].0.clone(), args[i].1.clone(), args[i].2.clone());
+      }
       (A, B, C)
     };
     A_list.push(A);
@@ -235,51 +222,44 @@ fn produce_r1cs() -> (
       let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
       let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
-      let mut i = 0;
-      // v * v = v
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]);
-      i += 1;
-      // b0 = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_b0, 1)], vec![], vec![]);
-      i += 1;
-      // i0 = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_i0, 1)], vec![], vec![]);
-      i += 1;
-      // s0 = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_s0, 1)], vec![], vec![]);
-      i += 1;
-      // (i0 - 3) * Z0 = Z1
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_i0, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]);
-      i += 1;
-      // v * B0 = T0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_B0, 1)], vec![(V_T0, 1)]);
-      i += 1;
-      // T0 * (Z1 - 1) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_T0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]);
-      i += 1;
-      // T0 * (b1 - 1) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_T0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]);
-      i += 1;
-      // v * (1 - B0) = T1
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_cnst, 1), (V_B0, -1)], vec![(V_T1, 1)]);
-      i += 1;
-      // T1 * (i0 - 3) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_T1, 1)], vec![(V_i0, 1), (V_cnst, -3)], vec![]);
-      i += 1;
-      // T1 * (b1 - 2) = 0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_T1, 1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]);
-
+      let args = [
+        // 0: v * v = v
+        (vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]),
+        // 1: 0 = w - v
+        (vec![], vec![], vec![(V_w, 1), (V_valid, -1)]),
+        // 2: 0 = b0
+        (vec![], vec![], vec![(V_b0, 1)]),
+        // 3: 0 = i0
+        (vec![], vec![], vec![(V_i0, 1)]),
+        // 4: 0 = s0
+        (vec![], vec![], vec![(V_s0, 1)]),
+        // 5: (i0 - 3) * Z0 = Z1
+        (vec![(V_i0, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]),
+        // 6: 0 = A0
+        (vec![], vec![], vec![(V_A0, 1)]),
+        // 7: 0 = V0 - 1
+        (vec![], vec![], vec![(V_V0, 1), (V_cnst, -1)]),
+        // 8: 0 = A1 - 1
+        (vec![], vec![], vec![(V_A1, 1), (V_cnst, -1)]),
+        // 9: 0 = V1 - 2
+        (vec![], vec![], vec![(V_V1, 1), (V_cnst, -2)]),
+        // 10: B0 * (Z1 - 1) = 0
+        (vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]),
+        // 11: B0 * (b1 - 1) = 0
+        (vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]),
+        // 12: (1 - B0) * (i1 - 3) = 0
+        (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]),
+        // 13: (1 - B0) * (b1 - 2) = 0
+        (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]),
+        // 14: 0 = i1 - i0
+        (vec![], vec![], vec![(V_i1, 1), (V_i0, -1)]),
+        // 15: 0 = s1 - s0
+        (vec![], vec![], vec![(V_s1, 1), (V_s0, -1)]),
+      ];
+      for i in 0..args.len() {
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          i, args[i].0.clone(), args[i].1.clone(), args[i].2.clone());
+      }
       (A, B, C)
     };
     A_list.push(A);
@@ -289,120 +269,6 @@ fn produce_r1cs() -> (
     let block_inst = Instance::new(block_num_instances, block_num_cons, 2 * num_vars, &A_list, &B_list, &C_list).unwrap();
     
     block_inst
-  };
-
-  // --
-  // MEM Instances
-  // --
-
-  // MEM_EXTRACT
-  // How many memory accesses are in each block?
-  let block_num_mem_accesses = vec![2, 2];
-  // parameters of the MEM_EXTRACT instance
-  // maximum value among the R1CS instances
-  let mem_extract_num_cons = 8;
-  let mem_extract_num_non_zero_entries = 9;
-
-  // !!!NOTE: we assume that there are fewer memory accesses than witnesses, need to double check whether that is true!!!
-
-  let mem_extract_inst = {
-    let mut A_list = Vec::new();
-    let mut B_list = Vec::new();
-    let mut C_list = Vec::new();
-
-    // MR is r * val for each (addr, val)
-    // MC is the cumulative product of v * (tau - addr - MR)
-    // The final product is stored in x
-    // 0   1   2   3   4   5   6   7    0   1   2   3     4   5   6   7
-    // tau r   _   _   _   _   _   _ |  v   x  pi   D  | MR  MC  MR  MC |
-    // 0   1   2   3   4   5   6   7    0    1   2   3   4    5   6   7
-    // Z0  Z1  B0  T0  T1  M0  M1   _ | v | b0  i0  s0 | _ | b1  i1  s1 |
-    // The prover still needs (addr, val) in block order to evaluate MR and MC
-    let V_tau = 0;
-    let V_r = 1;
-    let V_v = num_vars;
-    let V_x = num_vars + 1;
-    let V_MR = |i: usize| num_vars + 4 + 2 * i;
-    let V_MC = |i: usize| num_vars + 5 + 2 * i;
-    let V_M0 = 2 * num_vars + 5;
-    let V_M1 = 2 * num_vars + 6;
-    let V_valid = 3 * num_vars;
-    let V_cnst = V_valid;
-
-    // Instance 0: block 1
-    // Instances need to be sorted form highest # of execution -> lowest
-    let (A, B, C) = {
-      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-
-      let mut i = 0;
-      // addr = 0, val = M0
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_r, 1)], vec![(V_M0, 1)], vec![(V_MR(0), 1)]);
-      i += 1;
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_tau, 1), (V_MR(0), -1)], vec![(V_MC(0), 1)]);
-      i += 1;
-      // addr = 1, val = M1
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_r, 1)], vec![(V_M1, 1)], vec![(V_MR(1), 1)]);
-      i += 1;
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_MC(0), 1)], vec![(V_tau, 1), (V_cnst, -1), (V_MR(1), -1)], vec![(V_MC(1), 1)]);
-      i += 1;
-      // w3[0]
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![], vec![(V_v, 1)]);
-      i += 1;
-      // w3[1]
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_x, 1)], vec![], vec![(V_MC(1), 1)]); 
-
-      (A, B, C)
-    };
-    A_list.push(A);
-    B_list.push(B);
-    C_list.push(C);
-    
-    // Instance 1: block 0
-    let (A, B, C) = {
-      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-
-      let mut i = 0;
-      // addr = 0, val = 1
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_r, 1)], vec![(V_cnst, 1)], vec![(V_MR(0), 1)]);
-      i += 1;
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![(V_tau, 1), (V_MR(0), -1)], vec![(V_MC(0), 1)]);
-      i += 1;
-      // addr = 1, val = 2
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_r, 1)], vec![(V_cnst, 2)], vec![(V_MR(1), 1)]);
-      i += 1;
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_MC(0), 1)], vec![(V_tau, 1), (V_cnst, -1), (V_MR(1), -1)], vec![(V_MC(1), 1)]);
-      i += 1;
-      // w3[0]
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_valid, 1)], vec![], vec![(V_v, 1)]);
-      i += 1;
-      // w3[1]
-      (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-        i, vec![(V_x, 1)], vec![], vec![(V_MC(1), 1)]); 
-
-      (A, B, C)
-    };
-    A_list.push(A);
-    B_list.push(B);
-    C_list.push(C);
-
-    let mem_extract_inst = Instance::new(block_num_instances, mem_extract_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
-    
-    mem_extract_inst
   };
 
   // --
@@ -420,7 +286,9 @@ fn produce_r1cs() -> (
   let output = vec![three, six];
   // Which block in the execution order is the output block?
   let output_block_index = 3;
-  // How many memory executions are there?
+  // How many memory accesses per block?
+  let block_num_mem_accesses = vec![2, 2];
+  // How many memory accesses are there?
   let total_num_mem_accesses = 8;
 
   // --
@@ -431,104 +299,79 @@ fn produce_r1cs() -> (
     block_vars_matrix, 
     block_inputs_matrix, 
     exec_inputs,
-    block_mems_matrix,
     addr_mems_list
   ) = {
 
     let mut block_vars_matrix = Vec::new();
     let mut block_inputs_matrix = Vec::new();
     let mut exec_inputs = Vec::new();
-    // Mems matrix is of the form (0, 0, 0, 0, addr, val, addr, val, ...)
-    // Skip the first four entries
-    let mut block_mems_matrix = Vec::new();
     let mut addr_mems_list = Vec::new();
 
     // Block 1
-    //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
-    // Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
-    // 0      1    1   0   0   0    1   1   2  -2i   1   1   1   0   1   2   0
-    // 1      1    1   1   2   0    1   2   4  -1i   1   1   1   0   1   2   0
-    // 2      1    1   2   4   0    2   3   6    0   0   0   0   1   1   2   0
-    // 3      0    0   0   0   0    0   0   0    0   0   0   0   0   0   0   0 
-    let (assignment_vars, assignment_inputs, assignment_mems) = {
+    // Exec:  v | b0  i0  s0  | _ | b1  i1  s1  |  w  A0  A1  V0  V1  Z0  Z1  B0
+    // 0      1    1   0   0    0    1   1   2     1   0   1   1   2 -2i   1   1
+    // 1      1    1   1   2    0    1   2   4     1   0   1   1   2 -1i   1   1
+    // 2      1    1   2   4    0    2   3   6     1   0   1   1   2   0   0   0
+    // 3      0    0   0   0    0    0   0   0     0   0   0   0   0   0   0   0
+    let (assignment_vars, assignment_inputs) = {
       let mut assignment_vars = Vec::new();
       let mut assignment_inputs = Vec::new();
-      let mut assignment_mems = Vec::new();
       // Iteration i = 1
-      let vars = vec![Scalar::from(2u32).neg().invert().to_bytes(), one, one, one, zero, one, two, zero];
       let inputs = vec![one, one, zero, zero, zero, one, one, two];
-      let mems = vec![zero, zero, zero, zero, zero, one, one, two];
+      let vars = vec![one, zero, one, one, two, Scalar::from(2u32).neg().invert().to_bytes(), one, one];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
-      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
-      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 2
-      let vars = vec![Scalar::from(1u32).neg().invert().to_bytes(), one, one, one, zero, one, two, zero];
       let inputs = vec![one, one, one, two, zero, one, two, four];
-      let mems = vec![zero, zero, zero, zero, zero, one, one, two];
+      let vars = vec![one, zero, one, one, two, Scalar::from(1u32).neg().invert().to_bytes(), one, one];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
-      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
-      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 3
-      let vars = vec![zero, zero, zero, zero, one, one, two, zero];
       let inputs = vec![one, one, two, four, zero, two, three, six];
-      let mems = vec![zero, zero, zero, zero, zero, one, one, two];
+      let vars = vec![one, zero, one, one, two, zero, zero, zero];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
-      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
-      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 4
       let vars = vec![zero; 8];
       let inputs = vec![zero; 8];
-      let mems = vec![zero; 8];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
-      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
-      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.push(next_block_assignment_inputs);
       
-      (assignment_vars, assignment_inputs, assignment_mems)
+      (assignment_vars, assignment_inputs)
     };
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
-    block_mems_matrix.push(assignment_mems);
 
     // Block 0
-    //        0    1   2   3   4    5   6   7    0   1   2   3   4   5   6   7
-    // Exec:  v | b0  i0  s0 | _ | b1  i1  s1 | Z0  Z1  B0  T0  T1  M0  M1   _
-    // 0      1    0   0   0   0    1   0   0  -3i   1   1   1   0   0   0   0
-    let (assignment_vars, assignment_inputs, assignment_mems) = {
+    // Exec:  v | b0  i0  s0  | _ | b1  i1  s1  |  w  A0  A1  V0  V1  Z0  Z1  B0
+    // 0      1    0   0   0    0    1   0   0     1   0   1   1   2 -3i   1   1
+    let (assignment_vars, assignment_inputs) = {
       let mut assignment_vars = Vec::new();
       let mut assignment_inputs = Vec::new();
-      let mut assignment_mems = Vec::new();
-      let vars = vec![Scalar::from(3u32).neg().invert().to_bytes(), one, one, one, zero, zero, zero, zero];
       let inputs = vec![one, zero, zero, zero, zero, one, zero, zero];
-      let mems = vec![zero, zero, zero, zero, zero, one, one, two];
+      let vars = vec![one, zero, one, one, two, Scalar::from(3u32).neg().invert().to_bytes(), one, one];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
-      let next_block_assignment_mems = MemsAssignment::new(&mems).unwrap();
       assignment_vars.push(next_block_assignment_vars);
       assignment_inputs.push(next_block_assignment_inputs.clone());
-      assignment_mems.push(next_block_assignment_mems);
       exec_inputs.insert(0, next_block_assignment_inputs);
 
-      (assignment_vars, assignment_inputs, assignment_mems)
+      (assignment_vars, assignment_inputs)
     };
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
-    block_mems_matrix.push(assignment_mems);
 
     // Pad exec_inputs with 0
     assert!(consis_num_proofs >= exec_inputs.len());
@@ -551,7 +394,7 @@ fn produce_r1cs() -> (
     }
     addr_mems_list.push(VarsAssignment::new(&vec![one, one, two, zero]).unwrap());
 
-    (block_vars_matrix, block_inputs_matrix, exec_inputs, block_mems_matrix, addr_mems_list)
+    (block_vars_matrix, block_inputs_matrix, exec_inputs, addr_mems_list)
   };
 
   // --
@@ -574,10 +417,6 @@ fn produce_r1cs() -> (
     block_num_non_zero_entries,
     block_inst,
 
-    mem_extract_num_cons,
-    mem_extract_num_non_zero_entries,
-    mem_extract_inst,
-
     block_max_num_proofs,
     block_num_proofs,
     consis_num_proofs,
@@ -587,7 +426,6 @@ fn produce_r1cs() -> (
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
-    block_mems_matrix,
     addr_mems_list,
   )
 }
@@ -610,10 +448,6 @@ fn main() {
     block_num_non_zero_entries,
     block_inst,
 
-    mem_extract_num_cons,
-    mem_extract_num_non_zero_entries,
-    mem_extract_inst,
-
     block_max_num_proofs,
     block_num_proofs,
     consis_num_proofs,
@@ -623,7 +457,6 @@ fn main() {
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
-    block_mems_matrix,
     addr_mems_list,
   ) = produce_r1cs();
 
@@ -656,6 +489,8 @@ fn main() {
   let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(num_vars, total_num_proofs_bound);
 
   // MEM INSTANCES
+  // MEM_EXTRACT
+  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(block_num_instances, num_vars, &block_num_mem_accesses);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound);
   // MEM_BLOCK_POLY is PERM_BLOCK_POLY
@@ -781,7 +616,6 @@ fn main() {
     block_vars_matrix,
     block_inputs_matrix,
     exec_inputs,
-    block_mems_matrix,
     addr_mems_list,
 
     &vars_gens,
@@ -791,59 +625,58 @@ fn main() {
 
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
-  assert!(proof
-    .verify::<false>(
-      input_block_num,
-      output_block_num,
-      &input,
-      &output,
-      output_block_index,
+  assert!(proof.verify::<false>(
+    input_block_num,
+    output_block_num,
+    &input,
+    &output,
+    output_block_index,
 
-      num_vars,
-      total_num_proofs_bound,
-      block_num_instances, 
-      block_max_num_proofs, 
-      &block_num_proofs, 
-      block_num_cons, 
-      &block_comm,
-      &block_gens,
+    num_vars,
+    total_num_proofs_bound,
+    block_num_instances, 
+    block_max_num_proofs, 
+    &block_num_proofs, 
+    block_num_cons, 
+    &block_comm,
+    &block_gens,
 
-      consis_num_proofs, 
-      consis_comb_num_cons, 
-      &consis_comb_comm,
-      &consis_comb_gens,
-      consis_check_num_cons_base, 
-      &consis_check_comm,
-      &consis_check_gens,
+    consis_num_proofs, 
+    consis_comb_num_cons, 
+    &consis_comb_comm,
+    &consis_comb_gens,
+    consis_check_num_cons_base, 
+    &consis_check_comm,
+    &consis_check_gens,
 
-      perm_prelim_num_cons,
-      &perm_prelim_comm,
-      &perm_prelim_gens,
-      perm_root_num_cons,
-      &perm_root_comm,
-      &perm_root_gens,
-      perm_poly_num_cons_base,
-      &perm_poly_comm,
-      &perm_poly_gens,
+    perm_prelim_num_cons,
+    &perm_prelim_comm,
+    &perm_prelim_gens,
+    perm_root_num_cons,
+    &perm_root_comm,
+    &perm_root_gens,
+    perm_poly_num_cons_base,
+    &perm_poly_comm,
+    &perm_poly_gens,
 
-      mem_extract_num_cons,
-      &mem_extract_comm,
-      &mem_extract_gens,
-      total_num_mem_accesses_bound,
-      total_num_mem_accesses,
-      mem_cohere_num_cons_base,
-      &mem_cohere_comm,
-      &mem_cohere_gens,
-      mem_addr_comb_num_cons,
-      &mem_addr_comb_comm,
-      &mem_addr_comb_gens,
-      mem_addr_poly_num_cons_base,
-      &mem_addr_poly_comm,
-      &mem_addr_poly_gens,
+    mem_extract_num_cons,
+    &mem_extract_comm,
+    &mem_extract_gens,
+    total_num_mem_accesses_bound,
+    total_num_mem_accesses,
+    mem_cohere_num_cons_base,
+    &mem_cohere_comm,
+    &mem_cohere_gens,
+    mem_addr_comb_num_cons,
+    &mem_addr_comb_comm,
+    &mem_addr_comb_gens,
+    mem_addr_poly_num_cons_base,
+    &mem_addr_poly_comm,
+    &mem_addr_poly_gens,
 
-      &vars_gens,
-      &proofs_times_vars_gens,
-      &mut verifier_transcript
-    ).is_ok());
+    &vars_gens,
+    &proofs_times_vars_gens,
+    &mut verifier_transcript
+  ).is_ok());
   println!("proof verification successful!");
 }

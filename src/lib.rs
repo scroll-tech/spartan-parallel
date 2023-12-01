@@ -5,7 +5,7 @@
 
 // TODO: Proof might be incorrect if a block is never executed
 // TODO: Mem Proof might be incorrect if a block contains no mem execution
-// TODO: Maybe we should just use the valid bit as constant?
+// TODO: Need to have a "valid" variable in witness as well for memory consistency check
 // Q: How can we ensure that the Prover does not cheat with fake total_num_mem_accesses?
 // A: Permutation check for memory should fail.
 
@@ -37,6 +37,8 @@ mod sumcheck;
 mod timer;
 mod transcript;
 mod unipoly;
+
+use std::cmp::max;
 
 use dense_mlpoly::{DensePolynomial, PolyCommitment, PolyEvalProof};
 use errors::{ProofVerifyError, R1CSError};
@@ -250,33 +252,21 @@ impl Instance {
 
   /// Generates a constraints based on supplied (variable, constant) pairs
   pub fn gen_constr(
-    mut A: Vec<(usize, usize, [u8; 32])>, mut B: Vec<(usize, usize, [u8; 32])>, mut C: Vec<(usize, usize, [u8; 32])>, V_cnst: usize,
+    mut A: Vec<(usize, usize, [u8; 32])>, mut B: Vec<(usize, usize, [u8; 32])>, mut C: Vec<(usize, usize, [u8; 32])>,
     i: usize, args_A: Vec<(usize, isize)>, args_B: Vec<(usize, isize)>, args_C: Vec<(usize, isize)>) -> (
       Vec<(usize, usize, [u8; 32])>, Vec<(usize, usize, [u8; 32])>, Vec<(usize, usize, [u8; 32])>
     ) {
-    let zero = Scalar::zero().to_bytes();
-    let one = Scalar::one().to_bytes();
-    let two = Scalar::from(2u64).to_bytes();
-    let minus_one = Scalar::one().neg().to_bytes();
-    let minus_two = Scalar::from(2u64).neg().to_bytes();
-    let minus_three = Scalar::from(3u64).neg().to_bytes();
-    let int_to_scalar = |i| {
-      match i {
-        0  => zero,
-        1  => one,
-        2  => two,
-        -1 => minus_one,
-        -2 => minus_two,
-        -3 => minus_three,
-        _  => panic!("Unsupported constant!")
+    let int_to_scalar = |i: isize| {
+      let abs_scalar = Scalar::from(i.abs() as u64);
+      if i < 0 {
+        abs_scalar.neg().to_bytes()
+      } else {
+        abs_scalar.to_bytes()
       }
     };
     for vars in &args_A {
       let sc = int_to_scalar(vars.1);
       A.push((i, vars.0, sc));
-    }
-    if args_B.len() == 0 {
-      B.push((i, V_cnst, one));
     }
     for vars in &args_B {
       let sc = int_to_scalar(vars.1);
@@ -322,26 +312,26 @@ impl Instance {
         // For w2
         for i in 1..num_inputs {
           // Dot product for inputs
-          (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             constraint_count, vec![(i, 1)], vec![(num_vars + i, 1)], vec![(2 * num_vars + i, 1)]);
           constraint_count += 1;
           // Dot product for outputs
-          (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             constraint_count, vec![(i, 1)], vec![(num_vars + num_inputs + i, 1)], vec![(2 * num_vars + num_inputs + i, 1)]);
           constraint_count += 1;
         }
         // For w3
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst, // w3[0]
-          constraint_count, vec![(V_valid, 1)], vec![], vec![(3 * num_vars, 1)]);
+        (A, B, C) = Instance::gen_constr(A, B, C, // w3[0]
+          constraint_count, vec![], vec![], vec![(V_valid, 1), (3 * num_vars, -1)]);
         constraint_count += 1;
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst, // w3[1]
+        (A, B, C) = Instance::gen_constr(A, B, C, // w3[1]
           constraint_count, 
           vec![(V_valid, 1)], 
           [vec![(V_cnst, 1)], (1..num_inputs).map(|i| (2 * num_vars + i, 1)).collect()].concat(),
           vec![(3 * num_vars + 1, 1)]
         );
         constraint_count += 1;
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst, // w3[2]
+        (A, B, C) = Instance::gen_constr(A, B, C, // w3[2]
           constraint_count, 
           vec![(V_valid, 1)], 
           [vec![(V_cnst, 1)], (1..num_inputs).map(|i| (2 * num_vars + num_inputs + i, 1)).collect()].concat(),
@@ -387,11 +377,11 @@ impl Instance {
         // R1CS:
         for i in 0..total_num_proofs_bound - 1 {
           // Output matches input
-          (A, B, C) = Instance::gen_constr(A, B, C, 0,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             i, vec![(i * num_vars + V_o, 1), ((i + 1) * num_vars + V_i, -1)], vec![((i + 1) * num_vars + V_valid, 1)], vec![]);
         }
         // Pad A, B, C with dummy entries so their size is multiple of total_num_proofs_bound
-        (A, B, C) = Instance::gen_constr(A, B, C, 0,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           total_num_proofs_bound - 1, vec![(V_cnst, 0); 2], vec![(V_cnst, 0)], vec![]);
         (A, B, C)
       };
@@ -409,8 +399,6 @@ impl Instance {
   /// Generates PERM_PRELIM instance based on parameters
   /// PERM_PRELIM checks the correctness of (r, r^2, ...)
   pub fn gen_perm_prelim_inst(num_vars: usize) -> (usize, usize, Instance) {
-    // !!!DUMMY!!! V_CNST SHOULD NEVER BE USED!!!
-    let V_cnst = 0;
     let perm_prelim_num_cons = num_vars - 2;
     let perm_prelim_num_non_zero_entries = num_vars - 2;
     let perm_prelim_inst = {
@@ -426,7 +414,7 @@ impl Instance {
         let V_r = 1;
   
         for i in 2..num_vars {
-          (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             i - 2, vec![(i - 1, 1)], vec![(V_r, 1)], vec![(i, 1)]);
         }
         (A, B, C)
@@ -459,26 +447,23 @@ impl Instance {
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
   
         let V_tau = 0;
-        // The best way to find a CONSTANT ONE is to peak into the constant term of the first input, which is guaranteed to be valid
-        let V_cnst = num_vars;
-  
         let mut constraint_count = 0;
   
         // correctness of w2
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst, // for i0
-          constraint_count, vec![(num_vars, 1)], vec![], vec![(2 * num_vars, 1)]);
+        (A, B, C) = Instance::gen_constr(A, B, C, // for i0
+          constraint_count, vec![], vec![], vec![(num_vars, 1), (2 * num_vars, -1)]);
         constraint_count += 1;
         for i in 1..num_vars {
-          (A, B, C) = Instance::gen_constr(A, B, C, V_cnst, // for i1..
+          (A, B, C) = Instance::gen_constr(A, B, C, // for i1..
             constraint_count, vec![(num_vars + i, 1)], vec![(i, 1)], vec![(2 * num_vars + i, 1)]);
           constraint_count += 1;
         }
         // correctness of w3[0]
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst, 
-          constraint_count, vec![(num_vars, 1)], vec![], vec![(3 * num_vars, 1)]);
+        (A, B, C) = Instance::gen_constr(A, B, C, 
+          constraint_count, vec![], vec![], vec![(num_vars, 1), (3 * num_vars, -1)]);
         constraint_count += 1;
         // correctness of w3[1]
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst, constraint_count,
+        (A, B, C) = Instance::gen_constr(A, B, C, constraint_count,
             [vec![(V_tau, 1)], (0..num_vars).map(|i| (2 * num_vars + i, -1)).collect()].concat(), 
             vec![(num_vars, 1)], 
             vec![(3 * num_vars + 1, 1)]);
@@ -531,14 +516,14 @@ impl Instance {
         // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
         for i in 0..perm_size_bound - 1 {
           // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))
-          (A, B, C) = Instance::gen_constr(A, B, C, i * num_vars + V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             constraint_count, 
             vec![(i * num_vars + V_x, 1)], 
             vec![((i + 1) * num_vars + V_pi, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
             vec![(i * num_vars + V_d, 1)]);
           constraint_count += 1;
           // pi[k] = v[k] * D[k]
-          (A, B, C) = Instance::gen_constr(A, B, C, i * num_vars + V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
           // Pad base constraint size to 2
           constraint_count += 1;
@@ -547,11 +532,11 @@ impl Instance {
         // Pad A, B, C with dummy entries so their size is multiple of perm_size_bound
         let i = perm_size_bound - 1;
         // last D is x[k] * 1
-        (A, B, C) = Instance::gen_constr(A, B, C, i * num_vars + V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           constraint_count, vec![(i * num_vars + V_x, 1)], vec![(V_cnst, 1), (V_cnst, 0), (V_cnst, 0)], vec![(i * num_vars + V_d, 1)]);
         constraint_count += 1;
         // last pi is just usual
-        (A, B, C) = Instance::gen_constr(A, B, C, i * num_vars + V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
 
         (A, B, C)   
@@ -566,6 +551,77 @@ impl Instance {
       perm_poly_inst
     };
     (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst)
+  }
+
+  /// Generates MEM_EXTRACT instance based on parameters
+  /// MR is r * val for each (addr, val)
+  /// MC is the cumulative product of v * (tau - addr - MR)
+  /// The final product is stored in x
+  /// 0   1   2   3   4   5   6   7    0   1   2   3   4   5   6   7
+  /// tau r   _   _   _   _   _   _ |  w  A0  A1  V0  V1  Z0  Z1  B0
+  /// 0   1   2   3     4   5   6   7  |  _   _   _  
+  /// v   x  pi   D  | MR  MC  MR  MC  |  _   _   _  ...
+  /// All memory accesses should be in the form (A0, V0, A1, V1, ...) at the front of the witnesses
+  /// Input `num_mems_accesses` indicates how many memory accesses are there for each block
+  pub fn gen_mem_extract_inst(num_instances: usize, num_vars: usize, num_mems_accesses: &Vec<usize>) -> (usize, usize, Instance) {
+    let mut mem_extract_num_cons = 0;
+    let mut mem_extract_num_non_zero_entries = 0;
+  
+    let mem_extract_inst = {
+      let mut A_list = Vec::new();
+      let mut B_list = Vec::new();
+      let mut C_list = Vec::new();
+  
+      let V_tau = 0;
+      let V_r = 1;
+      // Valid is now w
+      let V_valid = num_vars;
+      let V_addr = |i: usize| num_vars + 1 + i;
+      let V_val = |b: usize, i: usize| num_vars + 1 + num_mems_accesses[b] + i;
+      let V_v = 2 * num_vars;
+      let V_x = 2 * num_vars + 1;
+      let V_MR = |i: usize| 2 * num_vars + 4 + 2 * i;
+      let V_MC = |i: usize| 2 * num_vars + 5 + 2 * i;
+  
+      for b in 0..num_instances {
+        mem_extract_num_cons = max(mem_extract_num_cons, 2 * num_mems_accesses[b] + 2);
+        mem_extract_num_non_zero_entries = max(mem_extract_num_non_zero_entries, 4 * num_mems_accesses[b] + 4);
+
+        let (A, B, C) = {
+          let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+          let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+          let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+    
+          for i in 0..num_mems_accesses[b] {
+            // addr = A0, val = V0
+            (A, B, C) = Instance::gen_constr(A, B, C,
+              2 * i, vec![(V_r, 1)], vec![(V_val(b, i), 1)], vec![(V_MR(i), 1)]);
+            if i == 0 {
+              (A, B, C) = Instance::gen_constr(A, B, C,
+                1, vec![(V_valid, 1)], vec![(V_tau, 1), (V_addr(i), -1), (V_MR(i), -1)], vec![(V_MC(i), 1)]);
+            } else {
+              (A, B, C) = Instance::gen_constr(A, B, C,
+                2 * i + 1, vec![(V_MC(i - 1), 1)], vec![(V_tau, 1), (V_addr(i), -1), (V_MR(i), -1)], vec![(V_MC(i), 1)]);
+            }
+          }
+          // w3[0]
+          (A, B, C) = Instance::gen_constr(A, B, C,
+             2 * num_mems_accesses[b], vec![], vec![], vec![(V_valid, 1), (V_v, -1)]);
+          // w3[1]
+          (A, B, C) = Instance::gen_constr(A, B, C,
+            2 * num_mems_accesses[b] + 1, vec![], vec![], vec![(V_x, 1), (V_MC(num_mems_accesses[b] - 1), -1)]); 
+          (A, B, C)
+        };
+        A_list.push(A);
+        B_list.push(B);
+        C_list.push(C);
+      }
+  
+      let mem_extract_inst = Instance::new(num_instances, mem_extract_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
+      
+      mem_extract_inst
+    };
+    (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst)
   }
 
   /// Generates MEM_COHERE instance based on parameters
@@ -600,33 +656,33 @@ impl Instance {
         let mut num_cons = 0;
         for i in 0..total_num_mem_accesses_bound - 1 {
           // (v[k] - 1) * v[k + 1] = 0
-          (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             num_cons, vec![(i * width + V_valid, 1), (i * width + V_cnst, -1)], vec![((i + 1) * width + V_valid, 1)], vec![]);
           num_cons += 1;
           // v[k + 1] * (addr[k + 1] - addr[k] - 1) = D[k]
-          (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             num_cons, vec![((i + 1) * width + V_valid, 1)], vec![((i + 1) * width + V_addr, 1), (i * width + V_addr, -1), (i * width + V_cnst, -1)], vec![(i * width + V_D, 1)]);
           num_cons += 1;
           // D[k] * (addr[k + 1] - addr[k]) = 0
-          (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             num_cons, vec![(i * width + V_D, 1)], vec![((i + 1) * width + V_addr, 1), (i * width + V_addr, -1)], vec![]);
           num_cons += 1;
           // D[k] * (val[k + 1] - val[k]) = 0
-          (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             num_cons, vec![(i * width + V_D, 1)], vec![((i + 1) * width + V_val, 1), (i * width + V_val, -1)], vec![]);
           num_cons += 1;
         }
         // Pad A, B, C with dummy entries so their size is multiple of total_num_mem_accesses_bound
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           num_cons, vec![(V_cnst, 0); 2], vec![(V_cnst, 0)], vec![]);
         num_cons += 1;
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 3], vec![(V_cnst, 0)]);
         num_cons += 1;
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 2], vec![(V_cnst, 0)]);
         num_cons += 1;
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 2], vec![(V_cnst, 0)]);
         (A, B, C)
       };
@@ -661,7 +717,6 @@ impl Instance {
       let V_v = width;
       let V_x = width + 1;
       let V_valid = 2 * width;
-      let V_cnst = V_valid;
       let V_addr = 2 * width + 1;
       let V_val = 2 * width + 2;
       let V_MR = 3 * width;
@@ -672,13 +727,13 @@ impl Instance {
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
         // MR = r * val
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           0, vec![(V_r, 1)], vec![(V_val, 1)], vec![(V_MR, 1)]);
         // w1[0] = v
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
-          1, vec![(V_v, 1)], vec![], vec![(V_valid, 1)]);
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          1, vec![], vec![], vec![(V_v, 1), (V_valid, -1)]);
         // w1[1] = x = v * (tau - addr - MR)
-        (A, B, C) = Instance::gen_constr(A, B, C, V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           2, vec![(V_v, 1)], vec![(V_tau, 1), (V_addr, -1), (V_MR, -1)], vec![(V_x, 1)]);
         (A, B, C)
       };
@@ -720,14 +775,14 @@ impl Instance {
         // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
         for i in 0..total_num_mem_accesses_bound - 1 {
           // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))
-          (A, B, C) = Instance::gen_constr(A, B, C, i * width + V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             constraint_count, 
             vec![(i * width + V_x, 1)], 
             vec![((i + 1) * width + V_pi, 1), (i * width + V_cnst, 1), ((i + 1) * width + V_valid, -1)], 
             vec![(i * width + V_d, 1)]);
           constraint_count += 1;
           // pi[k] = v[k] * D[k]
-          (A, B, C) = Instance::gen_constr(A, B, C, i * width + V_cnst,
+          (A, B, C) = Instance::gen_constr(A, B, C,
             constraint_count, vec![(i * width + V_valid, 1)], vec![(i * width + V_d, 1)], vec![(i * width + V_pi, 1)]);
           // Pad base constraint size to 2
           constraint_count += 1;
@@ -736,11 +791,11 @@ impl Instance {
         // Pad A, B, C with dummy entries so their size is multiple of total_num_mem_accesses_bound
         let i = total_num_mem_accesses_bound - 1;
         // last D is x[k] * 1
-        (A, B, C) = Instance::gen_constr(A, B, C, i * width + V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           constraint_count, vec![(i * width + V_x, 1)], vec![(V_cnst, 1), (V_cnst, 0), (V_cnst, 0)], vec![(i * width + V_d, 1)]);
         constraint_count += 1;
         // last pi is just usual
-        (A, B, C) = Instance::gen_constr(A, B, C, i * width + V_cnst,
+        (A, B, C) = Instance::gen_constr(A, B, C,
           constraint_count, vec![(i * width + V_valid, 1)], vec![(i * width + V_d, 1)], vec![(i * width + V_pi, 1)]);
 
         (A, B, C)   
@@ -1210,8 +1265,6 @@ impl SNARK {
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
     exec_inputs_list: Vec<InputsAssignment>,
-    // The prover does not commit block_mems_mat; instead, it uses it to compute mem_extract_w1
-    block_mems_mat: Vec<Vec<MemsAssignment>>,
     addr_mems_list: Vec<MemsAssignment>,
 
     vars_gens: &R1CSGens,
@@ -1252,7 +1305,6 @@ impl SNARK {
     let block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let block_inputs_mat = block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
-    let block_mems_mat = block_mems_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let addr_mems_list = addr_mems_list.into_iter().map(|v| v.assignment).collect_vec();
 
     // Commit io
@@ -1609,24 +1661,27 @@ impl SNARK {
       // FOR MEM
       // w1 is (v, x, pi, D, MR, MC, MR, MC, ...)
       let mut mem_block_w1 = Vec::new();
+      let V_addr = |i: usize| 1 + i;
+      let V_val = |b: usize, i: usize| 1 + block_num_mem_accesses[b] + i;
+      let V_MR = |i: usize| 4 + 2 * i;
+      let V_MC = |i: usize| 5 + 2 * i;
       for p in 0..block_num_instances {
         mem_block_w1.push(vec![Vec::new(); block_num_proofs[p]]);
         for q in (0..block_num_proofs[p]).rev() {
           mem_block_w1[p][q] = vec![Scalar::zero(); num_vars];
-          mem_block_w1[p][q][0] = block_inputs_mat[p][q][0];
+          mem_block_w1[p][q][0] = block_vars_mat[p][q][0];
           // Compute MR, MC
-          for x in 0..block_num_mem_accesses[p] {
-            let i = 2 * x + 4;
+          for i in 0..block_num_mem_accesses[p] {
             // MR = r * val
-            mem_block_w1[p][q][i] = comb_r * block_mems_mat[p][q][i + 1];
+            mem_block_w1[p][q][V_MR(i)] = comb_r * block_vars_mat[p][q][V_val(p, i)];
             // MC = v * (tau - addr - MR)
-            let t = comb_tau - block_mems_mat[p][q][i] - mem_block_w1[p][q][i];
-            mem_block_w1[p][q][i + 1] = 
-              if x == 0 { block_inputs_mat[p][q][0] * t }
-              else { mem_block_w1[p][q][i - 1] * t };
+            let t = comb_tau - block_vars_mat[p][q][V_addr(i)] - mem_block_w1[p][q][V_MR(i)];
+            mem_block_w1[p][q][V_MC(i)] = 
+              if i == 0 { block_vars_mat[p][q][0] * t }
+              else { mem_block_w1[p][q][V_MC(i - 1)] * t };
           }
           // Compute x
-          mem_block_w1[p][q][1] = mem_block_w1[p][q][4 + 2 * (block_num_mem_accesses[p] - 1) + 1];
+          mem_block_w1[p][q][1] = mem_block_w1[p][q][V_MC(block_num_mem_accesses[p] - 1)];
           // Compute D and pi
           if q != block_num_proofs[p] - 1 {
             mem_block_w1[p][q][3] = mem_block_w1[p][q][1] * (mem_block_w1[p][q + 1][2] + Scalar::one() - mem_block_w1[p][q + 1][0]);
@@ -2365,7 +2420,7 @@ impl SNARK {
     let (mem_extract_r1cs_sat_proof, mem_extract_challenges) = {
       let (proof, mem_extract_challenges) = {
         R1CSProof::prove(
-          4,
+          3,
           1,
           block_num_instances,
           block_max_num_proofs,
@@ -2373,8 +2428,8 @@ impl SNARK {
           num_vars,
           &mem_extract_inst.inst,
           &vars_gens,
-          vec![&perm_w0, &mem_block_w1, &block_vars_mat, &block_inputs_mat],
-          vec![&perm_poly_w0, &mem_block_poly_w1_list, &block_poly_vars_list, &block_poly_inputs_list],
+          vec![&perm_w0, &block_vars_mat, &mem_block_w1],
+          vec![&perm_poly_w0, &block_poly_vars_list, &mem_block_poly_w1_list],
           transcript,
           &mut random_tape,
         )
@@ -3346,7 +3401,7 @@ impl SNARK {
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
       let mem_extract_challenges = self.mem_extract_r1cs_sat_proof.verify(
-        4,
+        3,
         1,
         block_num_instances,
         block_max_num_proofs,
@@ -3355,7 +3410,7 @@ impl SNARK {
         mem_extract_num_cons,
         &vars_gens,
         &self.mem_extract_inst_evals,
-        vec![&self.perm_comm_w0, &self.mem_block_comm_w1_list, &self.block_comm_vars_list, &self.block_comm_inputs_list],
+        vec![&self.perm_comm_w0, &self.block_comm_vars_list, &self.mem_block_comm_w1_list],
         transcript,
       )?;
       timer_sat_proof.stop();

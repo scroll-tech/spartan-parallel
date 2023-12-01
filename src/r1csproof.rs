@@ -190,7 +190,8 @@ impl R1CSProof {
   // A generic R1CS prover that enables data-parallelism on instances
   pub fn prove(
     // How many sections does each Z vector have?
-    // num_witness secs can be 1, 2, or 4
+    // num_witness_secs can be 1, 2, 3, or 4
+    // if num_witness_secs is 3, w3 is just 0s
     num_witness_secs: usize,
     // How many of these witnesses secs are short?
     // A short witness sect has just one copy, versus a long sect which has num_instances * num_proofs different versions
@@ -216,11 +217,11 @@ impl R1CSProof {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
     // Assert num_witness_secs is valid
-    assert!(num_witness_secs == 1 || num_witness_secs == 2 || num_witness_secs == 4);
+    assert!(num_witness_secs >= 1 && num_witness_secs <= 4);
     assert_eq!(num_witness_secs, w_mat.len());
     assert_eq!(num_witness_secs, poly_w_list.len());
-    // Currently, only support the case of num_witness_secs = 4 && num_shorts = 1
-    assert!(num_shorts == 0 || num_shorts == 1 && num_witness_secs == 4);
+    // Currently, only support the case of num_witness_secs >= 3 && num_shorts = 1
+    assert!(num_shorts == 0 || num_shorts == 1 && num_witness_secs >= 3);
 
     // Assert everything is a power of 2
     assert_eq!(num_instances, num_instances.next_power_of_two());
@@ -261,9 +262,12 @@ impl R1CSProof {
           let q_w = if w < num_shorts { 0 } else { q };
           z_mat[p][q].extend(w_mat[w][p_w][q_w].clone());
         }
+        if num_witness_secs == 3 {
+          z_mat[p][q].extend(vec![Scalar::zero(); num_inputs]);
+        }
       }
     }
-    let z_len = num_inputs * num_witness_secs;
+    let z_len = if num_witness_secs == 3 { num_inputs * 4 } else { num_inputs * num_witness_secs };
 
     // derive the verifier's challenge \tau
     let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
@@ -450,6 +454,27 @@ impl R1CSProof {
               ).collect()),
             [rq_short, &ry[1..]].concat()
           ),
+          (3, 0) => (
+            DensePolynomial::new(
+              (0..num_proofs[p] * num_inputs).map(
+                |i| {
+                  (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * poly_w_list[0][p][i]
+                        + (Scalar::one() - ry[0]) * ry[1] * poly_w_list[1][p][i]
+                        + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p][i]
+                }
+              ).collect()),
+            [rq_short, &ry[2..]].concat()
+          ),
+          (3, 1) => (
+            DensePolynomial::new(
+              (0..num_proofs[p] * num_inputs).map(
+                |i| {
+                  (Scalar::one() - ry[0]) * ry[1] * poly_w_list[1][p][i]
+                        + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p][i]
+                }
+              ).collect()),
+            [rq_short, &ry[2..]].concat()
+          ),
           (4, 0) => (
             DensePolynomial::new(
               (0..num_proofs[p] * num_inputs).map(
@@ -467,8 +492,8 @@ impl R1CSProof {
               (0..num_proofs[p] * num_inputs).map(
                 |i| {
                   (Scalar::one() - ry[0]) * ry[1] * poly_w_list[1][p][i]
-                    + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p][i]
-                    + ry[0] * ry[1] * poly_w_list[3][p][i]
+                        + ry[0] * (Scalar::one() - ry[1]) * poly_w_list[2][p][i]
+                        + ry[0] * ry[1] * poly_w_list[3][p][i]
                 }
               ).collect()),
             [rq_short, &ry[2..]].concat()
@@ -498,7 +523,8 @@ impl R1CSProof {
       (_, 0) => {
         (eval_short_vars_at_ry, proof_eval_short_vars_at_ry, comm_short_vars_at_ry) = (None, None, None);
       },
-      (4, 1) => {
+      (_, 1) => {
+        assert!(num_witness_secs == 3 || num_witness_secs == 4);
         let poly = &poly_w_list[0][0];
         let e = poly_w_list[0][0].evaluate(&ry[2..]);
         let (p, c) = PolyEvalProof::prove(
@@ -523,7 +549,7 @@ impl R1CSProof {
     // So we need to multiply each entry by (1 - rq0)(1 - rq1)...
     for p in 0..num_instances {
       if num_shorts > 0 {
-        assert_eq!(num_witness_secs, 4);
+        assert!(num_witness_secs == 3 || num_witness_secs == 4);
         assert_eq!(num_shorts, 1);
         eval_vars_at_ry_list[p] += (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * eval_short_vars_at_ry.unwrap();
       }
@@ -601,10 +627,10 @@ impl R1CSProof {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
     // Assert num_witness_secs is valid
-    assert!(num_witness_secs == 1 || num_witness_secs == 2 || num_witness_secs == 4);
+    assert!(num_witness_secs >= 1 && num_witness_secs <= 4);
     assert_eq!(num_witness_secs, comm_w_list.len());
 
-    let z_len = num_inputs * num_witness_secs;
+    let z_len = if num_witness_secs == 3 { num_inputs * 4 } else { num_inputs * num_witness_secs };
     let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), max_num_proofs.log_2(), z_len.log_2());
 
     // derive the verifier's challenge tau
@@ -734,13 +760,34 @@ impl R1CSProof {
             },
             [rq_short, &ry[1..]].concat()
           ),
+          (3, 0) => (
+            PolyCommitment {
+              C: (0..comm_w_list[0][p].C.len()).map(
+                |i| ((Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * comm_w_list[0][p].C[i].decompress().unwrap()
+                         + (Scalar::one() - ry[0]) * ry[1] * comm_w_list[1][p].C[i].decompress().unwrap()
+                         + ry[0] * (Scalar::one() - ry[1]) * comm_w_list[2][p].C[i].decompress().unwrap()
+                ).compress()
+              ).collect()
+            },
+            [rq_short, &ry[2..]].concat()
+          ),
+          (3, 1) => (
+            PolyCommitment {
+              C: (0..comm_w_list[1][p].C.len()).map(
+                |i| ((Scalar::one() - ry[0]) * ry[1] * comm_w_list[1][p].C[i].decompress().unwrap()
+                         + ry[0] * (Scalar::one() - ry[1]) * comm_w_list[2][p].C[i].decompress().unwrap()
+                ).compress()
+              ).collect()
+            },
+            [rq_short, &ry[2..]].concat()
+          ),
           (4, 0) => (
             PolyCommitment {
               C: (0..comm_w_list[0][p].C.len()).map(
                 |i| ((Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * comm_w_list[0][p].C[i].decompress().unwrap()
                          + (Scalar::one() - ry[0]) * ry[1] * comm_w_list[1][p].C[i].decompress().unwrap()
-                         + (ry[0] * (Scalar::one() - ry[1]) * comm_w_list[2][p].C[i].decompress().unwrap()
-                         + ry[0] * ry[1] * comm_w_list[3][p].C[i].decompress().unwrap())
+                         + ry[0] * (Scalar::one() - ry[1]) * comm_w_list[2][p].C[i].decompress().unwrap()
+                         + ry[0] * ry[1] * comm_w_list[3][p].C[i].decompress().unwrap()
                 ).compress()
               ).collect()
             },
@@ -750,8 +797,8 @@ impl R1CSProof {
             PolyCommitment {
               C: (0..comm_w_list[1][p].C.len()).map(
                 |i| ((Scalar::one() - ry[0]) * ry[1] * comm_w_list[1][p].C[i].decompress().unwrap()
-                         + (ry[0] * (Scalar::one() - ry[1]) * comm_w_list[2][p].C[i].decompress().unwrap()
-                         + ry[0] * ry[1] * comm_w_list[3][p].C[i].decompress().unwrap())
+                         + ry[0] * (Scalar::one() - ry[1]) * comm_w_list[2][p].C[i].decompress().unwrap()
+                         + ry[0] * ry[1] * comm_w_list[3][p].C[i].decompress().unwrap()
                 ).compress()
               ).collect()
             },
@@ -772,7 +819,8 @@ impl R1CSProof {
 
     match (num_witness_secs, num_shorts) {
       (_, 0) => {},
-      (4, 1) => {
+      (_, 1) => {
+        assert!(num_witness_secs == 3 || num_witness_secs == 4);
         self.proof_eval_short_vars_at_ry.as_ref().unwrap().verify(
           &gens.gens_pc,
           transcript,
@@ -788,7 +836,7 @@ impl R1CSProof {
     let mut expected_comm_vars_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
     for p in 0..num_instances {
       if num_shorts > 0 {
-        assert_eq!(num_witness_secs, 4);
+        assert!(num_witness_secs == 3 || num_witness_secs == 4);
         assert_eq!(num_shorts, 1);
         expected_comm_vars_list[p] += (Scalar::one() - ry[0]) * (Scalar::one() - ry[1]) * self.comm_short_vars_at_ry.unwrap().decompress().unwrap();
       }
