@@ -5,9 +5,9 @@
 
 // TODO: Proof might be incorrect if a block is never executed
 // TODO: Mem Proof might be incorrect if a block contains no mem execution
-// TODO: Need to have a "valid" variable in witness as well for memory consistency check
 // Q: How can we ensure that the Prover does not cheat with fake total_num_mem_accesses?
 // A: Permutation check for memory should fail.
+// Q: We wouldn't know the number of executions during compile time, how to order the blocks?
 
 extern crate byteorder;
 extern crate core;
@@ -279,6 +279,52 @@ impl Instance {
     (A, B, C)
   }
   
+  /// Generates BLOCK instances based on inputs
+  pub fn gen_block_inst(
+    num_instances: usize, 
+    num_vars: usize, 
+    args: &Vec<Vec<(Vec<(usize, isize)>, Vec<(usize, isize)>, Vec<(usize, isize)>)>>,
+  ) -> (usize, usize, Instance) {
+    assert_eq!(num_instances, args.len());
+
+    let mut block_num_cons = 0;
+    let mut block_num_non_zero_entries = 0;
+
+    let mut A_list = Vec::new();
+    let mut B_list = Vec::new();
+    let mut C_list = Vec::new();
+    for arg in args {
+      // Check if num_cons > block_num_cons
+      block_num_cons = max(block_num_cons, arg.len());
+      let mut tmp_nnz_A = 0;
+      let mut tmp_nnz_B = 0;
+      let mut tmp_nnz_C = 0;
+      let (A, B, C) = {
+        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+  
+        for i in 0..args.len() {
+          tmp_nnz_A += arg[i].0.len();
+          tmp_nnz_B += arg[i].1.len();
+          tmp_nnz_C += arg[i].2.len();
+          (A, B, C) = Instance::gen_constr(A, B, C,
+            i, arg[i].0.clone(), arg[i].1.clone(), arg[i].2.clone());
+        }
+        (A, B, C)
+      };
+      // Recalculate num_non_zero_entries
+      block_num_non_zero_entries = max(max(max(block_num_non_zero_entries, tmp_nnz_A), tmp_nnz_B), tmp_nnz_C);
+      A_list.push(A);
+      B_list.push(B);
+      C_list.push(C);
+    }
+    block_num_cons = block_num_cons.next_power_of_two();
+    
+    let block_inst = Instance::new(num_instances, block_num_cons, 2 * num_vars, &A_list, &B_list, &C_list).unwrap();
+    (block_num_cons, block_num_non_zero_entries, block_inst)
+  }
+
   /// Generates CONSIS_COMB instance based on parameters
   /// CONSIS_COMB takes in 4 witness lists as inputs:
   /// - perm_w0: <tau, r, r^2, r^3, ...>, see PERM_PRELIM below
@@ -564,6 +610,8 @@ impl Instance {
   /// All memory accesses should be in the form (A0, V0, A1, V1, ...) at the front of the witnesses
   /// Input `num_mems_accesses` indicates how many memory accesses are there for each block
   pub fn gen_mem_extract_inst(num_instances: usize, num_vars: usize, num_mems_accesses: &Vec<usize>) -> (usize, usize, Instance) {
+    assert_eq!(num_instances, num_mems_accesses.len());
+    
     let mut mem_extract_num_cons = 0;
     let mut mem_extract_num_non_zero_entries = 0;
   
@@ -920,7 +968,7 @@ impl IOProofs {
     output_block_num: Scalar,
     input: Vec<Scalar>,
     output: Vec<Scalar>,
-    output_block_index: usize,
+    output_exec_num: usize,
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape
@@ -945,7 +993,7 @@ impl IOProofs {
     let (output_valid_proof, _comm) = PolyEvalProof::prove(
       exec_poly_inputs,
       None,
-      &to_bin_array(output_block_index * num_vars),
+      &to_bin_array(output_exec_num * num_vars),
       &Scalar::one(),
       None,
       &vars_gens.gens_pc,
@@ -967,7 +1015,7 @@ impl IOProofs {
     let (output_block_num_proof, _comm) = PolyEvalProof::prove(
       exec_poly_inputs,
       None,
-      &to_bin_array(output_block_index * num_vars + num_vars / 2 + 1),
+      &to_bin_array(output_exec_num * num_vars + num_vars / 2 + 1),
       &output_block_num,
       None,
       &vars_gens.gens_pc,
@@ -992,7 +1040,7 @@ impl IOProofs {
       let (output_correctness_proof, _comm) = PolyEvalProof::prove(
         exec_poly_inputs,
         None,
-        &to_bin_array(output_block_index * num_vars + num_vars / 2 + 2 + i),
+        &to_bin_array(output_exec_num * num_vars + num_vars / 2 + 2 + i),
         &output[i],
         None,
         &vars_gens.gens_pc,
@@ -1020,7 +1068,7 @@ impl IOProofs {
     output_block_num: Scalar,
     input: Vec<Scalar>,
     output: Vec<Scalar>,
-    output_block_index: usize,
+    output_exec_num: usize,
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
@@ -1041,7 +1089,7 @@ impl IOProofs {
     self.output_valid_proof.verify_plain(
       &vars_gens.gens_pc,
       transcript,
-      &to_bin_array(output_block_index * num_vars),
+      &to_bin_array(output_exec_num * num_vars),
       &Scalar::one(),
       comm_poly_inputs,
     )?;
@@ -1057,7 +1105,7 @@ impl IOProofs {
     self.output_block_num_proof.verify_plain(
       &vars_gens.gens_pc,
       transcript,
-      &to_bin_array(output_block_index * num_vars + num_vars / 2 + 1),
+      &to_bin_array(output_exec_num * num_vars + num_vars / 2 + 1),
       &output_block_num,
       comm_poly_inputs,
     )?;
@@ -1073,7 +1121,7 @@ impl IOProofs {
       self.output_correctness_proof_list[i].verify_plain(
         &vars_gens.gens_pc,
         transcript,
-        &to_bin_array(output_block_index * num_vars + num_vars / 2 + 2 + i),
+        &to_bin_array(output_exec_num * num_vars + num_vars / 2 + 2 + i),
         &output[i],
         comm_poly_inputs,
       )?;
@@ -1196,7 +1244,7 @@ impl SNARK {
     output_block_num: usize,
     input: &Vec<[u8; 32]>,
     output: &Vec<[u8; 32]>,
-    output_block_index: usize,
+    output_exec_num: usize,
 
     num_vars: usize,
     total_num_proofs_bound: usize,
@@ -2808,7 +2856,7 @@ impl SNARK {
       output_block_num,
       input,
       output,
-      output_block_index,
+      output_exec_num,
       vars_gens,
       transcript,
       &mut random_tape
@@ -2909,7 +2957,7 @@ impl SNARK {
     output_block_num: usize,
     input: &Vec<[u8; 32]>,
     output: &Vec<[u8; 32]>,
-    output_block_index: usize,
+    output_exec_num: usize,
 
     num_vars: usize,
     total_num_proofs_bound: usize,
@@ -3644,7 +3692,7 @@ impl SNARK {
       output_block_num,
       input,
       output,
-      output_block_index,
+      output_exec_num,
       vars_gens,
       transcript
     )?;

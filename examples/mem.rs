@@ -64,33 +64,41 @@ use curve25519_dalek::scalar::Scalar;
 use libspartan::{Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
 
+// Everything provided by the frontend
+struct CompileTimeKnowledge {
+  block_num_instances: usize,
+  num_vars: usize,
+  total_num_proofs_bound: usize,
+  block_num_mem_accesses: Vec<usize>,
+  total_num_mem_accesses_bound: usize,
+
+  args: Vec<Vec<(Vec<(usize, isize)>, Vec<(usize, isize)>, Vec<(usize, isize)>)>>,
+
+  input_block_num: usize,
+  output_block_num: usize
+}
+
+// Everything provided by the prover
+struct RunTimeKnowledge {
+  block_max_num_proofs: usize,
+  block_num_proofs: Vec<usize>,
+  consis_num_proofs: usize,
+  total_num_mem_accesses: usize,
+
+  block_vars_matrix: Vec<Vec<VarsAssignment>>,
+  block_inputs_matrix: Vec<Vec<InputsAssignment>>,
+  exec_inputs: Vec<InputsAssignment>,
+  addr_mems_list: Vec<MemsAssignment>,
+
+  input: Vec<[u8; 32]>,
+  output: Vec<[u8; 32]>,
+  output_exec_num: usize
+}
+
 #[allow(non_snake_case)]
 fn produce_r1cs() -> (
-  usize,
-  usize,
-  Vec<[u8; 32]>,
-  Vec<[u8; 32]>,
-  usize,
-
-  usize,
-  usize,
-  usize,
-  usize,
-
-  usize,
-  usize,
-  Instance,
-
-  usize,
-  Vec<usize>,
-  usize,
-  Vec<usize>,
-  usize,
-
-  Vec<Vec<VarsAssignment>>,
-  Vec<Vec<InputsAssignment>>,
-  Vec<InputsAssignment>,
-  Vec<MemsAssignment>,
+  CompileTimeKnowledge,
+  RunTimeKnowledge
 ) {
   // Separate instances into three lists:
   // BLOCK: correctness within a block
@@ -138,10 +146,6 @@ fn produce_r1cs() -> (
   // BLOCK Instances
   // --
 
-  // parameters of the BLOCK instance
-  // maximum value among the R1CS instances
-  let block_num_cons = 16;
-  let block_num_non_zero_entries = 21;
   // Number of R1CS instances
   let block_num_instances = 2;
 
@@ -149,7 +153,7 @@ fn produce_r1cs() -> (
   // Put all memory states at the front of the witnesses
   //        0    1   2   3    4    5   6   7     0   1   2   3   4   5   6   7
   // Exec:  v | b0  i0  s0  | _ | b1  i1  s1  |  w  A0  A1  V0  V1  Z0  Z1  B0
-  let block_inst = {
+  let args = {
     let num_inputs = num_vars / 2;
 
     let V_valid = 0;
@@ -169,106 +173,75 @@ fn produce_r1cs() -> (
     let V_Z1 = num_vars + 6;
     let V_B0 = num_vars + 7;
 
-    let mut A_list = Vec::new();
-    let mut B_list = Vec::new();
-    let mut C_list = Vec::new();
-
+    let mut args = Vec::new();
     // Instance 0: block 1
     // Instances need to be sorted form highest # of execution -> lowest
-    let (A, B, C) = {
-      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-
-      let args = [
-        // 0: v * v = v
-        (vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]),
-        // 1: 0 = w - v
-        (vec![], vec![], vec![(V_w, 1), (V_valid, -1)]),
-        // 2: 0 = b0 - 1
-        (vec![], vec![], vec![(V_b0, 1), (V_cnst, -1)]),
-        // 3: 0 = A0
-        (vec![], vec![], vec![(V_A0, 1)]),
-        // 4: 0 = A1 - 1
-        (vec![], vec![], vec![(V_A1, 1), (V_cnst, -1)]),
-        // 5: 0 = i1 - i0 - V0
-        (vec![], vec![], vec![(V_i1, 1), (V_i0, -1), (V_V0, -1)]),
-        // 6: 0 = s1 - s0 - V1
-        (vec![], vec![], vec![(V_s1, 1), (V_s0, -1), (V_V1, -1)]),
-        // 7: (i1 - 3) * Z0 = Z1
-        (vec![(V_i1, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]),
-        // 8: B0 * (Z1 - 1) = 0
-        (vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]),
-        // 9: B0 * (b1 - 1) = 0
-        (vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]),
-        // 10: (1 - B0) * (i1 - 3) = 0
-        (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]),
-        // 11: (1 - B0) * (b1 - 2) = 0
-        (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![])
-      ];
-      for i in 0..args.len() {
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          i, args[i].0.clone(), args[i].1.clone(), args[i].2.clone());
-      }
-      (A, B, C)
-    };
-    A_list.push(A);
-    B_list.push(B);
-    C_list.push(C);
-    
+    let arg = vec![
+      // 0: v * v = v
+      (vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]),
+      // 1: 0 = w - v
+      (vec![], vec![], vec![(V_w, 1), (V_valid, -1)]),
+      // 2: 0 = b0 - 1
+      (vec![], vec![], vec![(V_b0, 1), (V_cnst, -1)]),
+      // 3: 0 = A0
+      (vec![], vec![], vec![(V_A0, 1)]),
+      // 4: 0 = A1 - 1
+      (vec![], vec![], vec![(V_A1, 1), (V_cnst, -1)]),
+      // 5: 0 = i1 - i0 - V0
+      (vec![], vec![], vec![(V_i1, 1), (V_i0, -1), (V_V0, -1)]),
+      // 6: 0 = s1 - s0 - V1
+      (vec![], vec![], vec![(V_s1, 1), (V_s0, -1), (V_V1, -1)]),
+      // 7: (i1 - 3) * Z0 = Z1
+      (vec![(V_i1, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]),
+      // 8: B0 * (Z1 - 1) = 0
+      (vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]),
+      // 9: B0 * (b1 - 1) = 0
+      (vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]),
+      // 10: (1 - B0) * (i1 - 3) = 0
+      (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]),
+      // 11: (1 - B0) * (b1 - 2) = 0
+      (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![])
+    ];
+    args.push(arg);
+      
     // Instance 1: block 0
-    let (A, B, C) = {
-      let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-      let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+    let arg = vec![
+      // 0: v * v = v
+      (vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]),
+      // 1: 0 = w - v
+      (vec![], vec![], vec![(V_w, 1), (V_valid, -1)]),
+      // 2: 0 = b0
+      (vec![], vec![], vec![(V_b0, 1)]),
+      // 3: 0 = i0
+      (vec![], vec![], vec![(V_i0, 1)]),
+      // 4: 0 = s0
+      (vec![], vec![], vec![(V_s0, 1)]),
+      // 5: (i0 - 3) * Z0 = Z1
+      (vec![(V_i0, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]),
+      // 6: 0 = A0
+      (vec![], vec![], vec![(V_A0, 1)]),
+      // 7: 0 = V0 - 1
+      (vec![], vec![], vec![(V_V0, 1), (V_cnst, -1)]),
+      // 8: 0 = A1 - 1
+      (vec![], vec![], vec![(V_A1, 1), (V_cnst, -1)]),
+      // 9: 0 = V1 - 2
+      (vec![], vec![], vec![(V_V1, 1), (V_cnst, -2)]),
+      // 10: B0 * (Z1 - 1) = 0
+      (vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]),
+      // 11: B0 * (b1 - 1) = 0
+      (vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]),
+      // 12: (1 - B0) * (i1 - 3) = 0
+      (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]),
+      // 13: (1 - B0) * (b1 - 2) = 0
+      (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]),
+      // 14: 0 = i1 - i0
+      (vec![], vec![], vec![(V_i1, 1), (V_i0, -1)]),
+      // 15: 0 = s1 - s0
+      (vec![], vec![], vec![(V_s1, 1), (V_s0, -1)]),
+    ];
+    args.push(arg);
 
-      let args = [
-        // 0: v * v = v
-        (vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]),
-        // 1: 0 = w - v
-        (vec![], vec![], vec![(V_w, 1), (V_valid, -1)]),
-        // 2: 0 = b0
-        (vec![], vec![], vec![(V_b0, 1)]),
-        // 3: 0 = i0
-        (vec![], vec![], vec![(V_i0, 1)]),
-        // 4: 0 = s0
-        (vec![], vec![], vec![(V_s0, 1)]),
-        // 5: (i0 - 3) * Z0 = Z1
-        (vec![(V_i0, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]),
-        // 6: 0 = A0
-        (vec![], vec![], vec![(V_A0, 1)]),
-        // 7: 0 = V0 - 1
-        (vec![], vec![], vec![(V_V0, 1), (V_cnst, -1)]),
-        // 8: 0 = A1 - 1
-        (vec![], vec![], vec![(V_A1, 1), (V_cnst, -1)]),
-        // 9: 0 = V1 - 2
-        (vec![], vec![], vec![(V_V1, 1), (V_cnst, -2)]),
-        // 10: B0 * (Z1 - 1) = 0
-        (vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]),
-        // 11: B0 * (b1 - 1) = 0
-        (vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]),
-        // 12: (1 - B0) * (i1 - 3) = 0
-        (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]),
-        // 13: (1 - B0) * (b1 - 2) = 0
-        (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]),
-        // 14: 0 = i1 - i0
-        (vec![], vec![], vec![(V_i1, 1), (V_i0, -1)]),
-        // 15: 0 = s1 - s0
-        (vec![], vec![], vec![(V_s1, 1), (V_s0, -1)]),
-      ];
-      for i in 0..args.len() {
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          i, args[i].0.clone(), args[i].1.clone(), args[i].2.clone());
-      }
-      (A, B, C)
-    };
-    A_list.push(A);
-    B_list.push(B);
-    C_list.push(C);
-
-    let block_inst = Instance::new(block_num_instances, block_num_cons, 2 * num_vars, &A_list, &B_list, &C_list).unwrap();
-    
-    block_inst
+    args
   };
 
   // --
@@ -285,7 +258,7 @@ fn produce_r1cs() -> (
   let input = vec![zero, zero];
   let output = vec![three, six];
   // Which block in the execution order is the output block?
-  let output_block_index = 3;
+  let output_exec_num = 3;
   // How many memory accesses per block?
   let block_num_mem_accesses = vec![2, 2];
   // How many memory accesses are there?
@@ -402,65 +375,55 @@ fn produce_r1cs() -> (
   // --
 
   (
-    input_block_num,
-    output_block_num,
-    input,
-    output,
-    output_block_index,
+    // COMPILE TIME KNOWLEDGE
+    CompileTimeKnowledge {
+      block_num_instances,
+      num_vars,
+      total_num_proofs_bound,
+      block_num_mem_accesses,
+      total_num_mem_accesses_bound,
 
-    block_num_instances,
-    num_vars,
-    total_num_proofs_bound,
-    total_num_mem_accesses_bound,
-    
-    block_num_cons,
-    block_num_non_zero_entries,
-    block_inst,
+      args,
+      
+      input_block_num,
+      output_block_num
+    },
 
-    block_max_num_proofs,
-    block_num_proofs,
-    consis_num_proofs,
-    block_num_mem_accesses,
-    total_num_mem_accesses,
+    // RUNTIME KNOWLEDGE
+    RunTimeKnowledge {
+      block_max_num_proofs,
+      block_num_proofs,
+      consis_num_proofs,
+      total_num_mem_accesses,
 
-    block_vars_matrix,
-    block_inputs_matrix,
-    exec_inputs,
-    addr_mems_list,
+      block_vars_matrix,
+      block_inputs_matrix,
+      exec_inputs,
+      addr_mems_list,
+
+      input,
+      output,
+      output_exec_num
+    }
   )
 }
 
 fn main() {
   // produce an R1CS instance
-  let (
-    input_block_num,
-    output_block_num,
-    input,
-    output,
-    output_block_index,
+  let (ctk, rtk) = produce_r1cs();
+  let block_num_instances = ctk.block_num_instances;
+  let num_vars = ctk.num_vars;
+  let total_num_proofs_bound = ctk.total_num_proofs_bound;
+  let block_num_mem_accesses = ctk.block_num_mem_accesses;
+  let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound;
 
-    block_num_instances,
-    num_vars,
-    total_num_proofs_bound,
-    total_num_mem_accesses_bound,
-    
-    block_num_cons,
-    block_num_non_zero_entries,
-    block_inst,
-
-    block_max_num_proofs,
-    block_num_proofs,
-    consis_num_proofs,
-    block_num_mem_accesses,
-    total_num_mem_accesses,
-
-    block_vars_matrix,
-    block_inputs_matrix,
-    exec_inputs,
-    addr_mems_list,
-  ) = produce_r1cs();
+  let block_vars_matrix = rtk.block_vars_matrix;
+  let block_inputs_matrix = rtk.block_inputs_matrix;
 
   // Generate all remaining instances
+
+  // BLOCK INSTANCES
+  let (block_num_cons, block_num_non_zero_entries, block_inst) = Instance::gen_block_inst(block_num_instances, num_vars, &ctk.args);
 
   // CONSIS INSTANCES
   // CONSIS is consisted of two instances
@@ -547,23 +510,23 @@ fn main() {
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
   let proof = SNARK::prove(
-    input_block_num,
-    output_block_num,
-    &input,
-    &output,
-    output_block_index,
+    ctk.input_block_num,
+    ctk.output_block_num,
+    &rtk.input,
+    &rtk.output,
+    rtk.output_exec_num,
     
     num_vars,
     total_num_proofs_bound,
     block_num_instances,
-    block_max_num_proofs,
-    &block_num_proofs,
+    rtk.block_max_num_proofs,
+    &rtk.block_num_proofs,
     &block_inst,
     &block_comm,
     &block_decomm,
     &block_gens,
     
-    consis_num_proofs,
+    rtk.consis_num_proofs,
     &consis_comb_inst,
     &consis_comb_comm,
     &consis_comb_decomm,
@@ -595,7 +558,7 @@ fn main() {
     &mem_extract_gens,
 
     total_num_mem_accesses_bound,
-    total_num_mem_accesses,
+    rtk.total_num_mem_accesses,
     mem_cohere_num_cons_base,
     &mem_cohere_inst,
     &mem_cohere_comm,
@@ -615,8 +578,8 @@ fn main() {
 
     block_vars_matrix,
     block_inputs_matrix,
-    exec_inputs,
-    addr_mems_list,
+    rtk.exec_inputs,
+    rtk.addr_mems_list,
 
     &vars_gens,
     &proofs_times_vars_gens,
@@ -626,22 +589,22 @@ fn main() {
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof.verify::<false>(
-    input_block_num,
-    output_block_num,
-    &input,
-    &output,
-    output_block_index,
+    ctk.input_block_num,
+    ctk.output_block_num,
+    &rtk.input,
+    &rtk.output,
+    rtk.output_exec_num,
 
     num_vars,
     total_num_proofs_bound,
     block_num_instances, 
-    block_max_num_proofs, 
-    &block_num_proofs, 
+    rtk.block_max_num_proofs, 
+    &rtk.block_num_proofs, 
     block_num_cons, 
     &block_comm,
     &block_gens,
 
-    consis_num_proofs, 
+    rtk.consis_num_proofs, 
     consis_comb_num_cons, 
     &consis_comb_comm,
     &consis_comb_gens,
@@ -663,7 +626,7 @@ fn main() {
     &mem_extract_comm,
     &mem_extract_gens,
     total_num_mem_accesses_bound,
-    total_num_mem_accesses,
+    rtk.total_num_mem_accesses,
     mem_cohere_num_cons_base,
     &mem_cohere_comm,
     &mem_cohere_gens,
