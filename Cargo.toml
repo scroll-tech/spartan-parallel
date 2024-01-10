@@ -11,7 +11,7 @@ license-file = "LICENSE"
 keywords = ["zkSNARKs", "cryptography", "proofs"]
 
 [dependencies]
-curve25519-dalek = { version = "3.2.0", features = [
+curve25519-dalek = { version = "3.2.1", features = [
     "serde",
     "u64_backend",
     "alloc",
@@ -32,6 +32,9 @@ flate2 = { version = "1.0.14" }
 
 [dev-dependencies]
 criterion = "0.3.1"
+
+[patch.crates-io]
+curve25519-dalek = { path = "../curve25519-dalek" }
 
 [lib]
 name = "libspartan"

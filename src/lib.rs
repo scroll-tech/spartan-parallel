@@ -86,7 +86,6 @@ impl Assignment {
       }
       Ok(vec_scalar)
     };
-
     let assignment_scalar = bytes_to_scalar(assignment);
 
     // check for any parsing errors
