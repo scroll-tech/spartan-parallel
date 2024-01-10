@@ -306,17 +306,21 @@ impl RunTimeKnowledge {
 }
 
 fn main() {
-  let ctk = CompileTimeKnowledge::read_from_file("2pc_demo".to_string()).unwrap();
+  let mut ctk = CompileTimeKnowledge::read_from_file("2pc_demo".to_string()).unwrap();
   let rtk = RunTimeKnowledge::read_from_file("2pc_demo".to_string()).unwrap();
   
-  let block_num_instances = ctk.block_num_instances;
+  let block_num_instances = ctk.block_num_instances.next_power_of_two();
   let num_vars = ctk.num_vars;
-  let total_num_proofs_bound = ctk.total_num_proofs_bound;
+  assert_eq!(num_vars, num_vars.next_power_of_two());
+  let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound;
 
   let block_vars_matrix = rtk.block_vars_matrix;
   let block_inputs_matrix = rtk.block_inputs_matrix;
+
+  // Pad entries in ctk and rtk
+  ctk.args.extend(vec![Vec::new(); block_num_instances - ctk.args.len()]);
 
   // Generate all remaining instances
 

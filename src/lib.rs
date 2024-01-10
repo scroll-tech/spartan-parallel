@@ -303,7 +303,7 @@ impl Instance {
         let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
   
-        for i in 0..args.len() {
+        for i in 0..arg.len() {
           tmp_nnz_A += arg[i].0.len();
           tmp_nnz_B += arg[i].1.len();
           tmp_nnz_C += arg[i].2.len();
