@@ -4,7 +4,7 @@
 use std::{cmp::max, fs::File, io::BufReader};
 use std::io::BufRead;
 
-use libspartan::{Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
+use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
 
 // Convert a string of numbers separated by spaces into a vector
@@ -88,16 +88,20 @@ impl CompileTimeKnowledge {
         if split[0] == "A".to_string() {
           args[inst_counter].push((Vec::new(), Vec::new(), Vec::new()));
         }
-        if split.len() >= 3 {
+        let mut var = 1;
+        let mut val = 2;
+        while val < split.len() {
           if split[0] == "A".to_string() {
-            args[inst_counter][cons_counter].0.push((split[1].parse::<usize>().unwrap(), split[2].parse::<isize>().unwrap()));
+            args[inst_counter][cons_counter].0.push((split[var].parse::<usize>().unwrap(), split[val].parse::<isize>().unwrap()));
           }
           if split[0] == "B".to_string() {
-            args[inst_counter][cons_counter].1.push((split[1].parse::<usize>().unwrap(), split[2].parse::<isize>().unwrap()));
+            args[inst_counter][cons_counter].1.push((split[var].parse::<usize>().unwrap(), split[val].parse::<isize>().unwrap()));
           }
           if split[0] == "C".to_string() {
-            args[inst_counter][cons_counter].2.push((split[1].parse::<usize>().unwrap(), split[2].parse::<isize>().unwrap()));
+            args[inst_counter][cons_counter].2.push((split[var].parse::<usize>().unwrap(), split[val].parse::<isize>().unwrap()));
           }
+          var += 2;
+          val += 2;
         }
         if split[0] == "C".to_string() {
           cons_counter += 1;
@@ -248,11 +252,19 @@ impl RunTimeKnowledge {
     };
 
     let addr_mems_list: Vec<MemsAssignment> = {
-      let addr_mems_list = vec![Vec::new()];
+      let mut addr_mems_list = vec![Vec::new()];
       buffer.clear();
       reader.read_line(&mut buffer)?;
+      
+      let mut access_counter = 0;
       while buffer != "INPUTS\n".to_string() {
-        // TODO!
+        if buffer == format!("ACCESS {}\n", access_counter + 1) {
+          access_counter += 1;
+          addr_mems_list.push(Vec::new());
+        } else if buffer == format!("ACCESS 0\n") {
+        } else {
+          addr_mems_list[access_counter].push(string_to_bytes(buffer.clone()));
+        }
         buffer.clear();
         reader.read_line(&mut buffer)?;
       }
@@ -308,7 +320,7 @@ impl RunTimeKnowledge {
 fn main() {
   let mut ctk = CompileTimeKnowledge::read_from_file("2pc_demo".to_string()).unwrap();
   let rtk = RunTimeKnowledge::read_from_file("2pc_demo".to_string()).unwrap();
-  
+
   let block_num_instances = ctk.block_num_instances.next_power_of_two();
   let num_vars = ctk.num_vars;
   assert_eq!(num_vars, num_vars.next_power_of_two());
@@ -490,7 +502,7 @@ fn main() {
 
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
-  assert!(proof.verify::<false>(
+  assert!(proof.verify::<true>(
     ctk.input_block_num,
     ctk.output_block_num,
     &rtk.input,

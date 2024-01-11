@@ -61,7 +61,7 @@
 use std::{ops::Neg, cmp::max};
 
 use curve25519_dalek::scalar::Scalar;
-use libspartan::{Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
+use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
 
 // Everything provided by the frontend

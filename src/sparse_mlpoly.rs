@@ -485,7 +485,7 @@ impl SparseMatPolynomial {
     let mut Mz_list = vec![vec![Scalar::zero(); base_num_rows]; num_proofs];
     // Based on the construction of PERM_POLY and CONSIS_CHECK,
     // We don't need to scan through every non-zero entry of the instance
-    // Only the first (num_proofs / (max_num_proofs_bound - 1)) fraction of entries will correspond to non-zero values in Z
+    // Only the first (num_proofs / max_num_proofs_bound) fraction of entries will correspond to non-zero values in Z
     for i in 0..self.M.len() * num_proofs / max_num_proofs_bound {
       let row = self.M[i].row;
       // No need to evaluate constraints beyond num_proofs * base_num_rows
@@ -517,8 +517,8 @@ impl SparseMatPolynomial {
     M_evals
   }
 
-  // Only compute the first max_num_proofs / (max_num_proofs_bound - 1) entries
-  // num_cols is already num_vars * max_num_proofs / (max_num_proofs_bound - 1)
+  // Only compute the first max_num_proofs / max_num_proofs_bound entries
+  // num_cols is already num_vars * max_num_proofs / max_num_proofs_bound
   pub fn compute_eval_table_sparse_single(
     &self,
     rx: &[Scalar],

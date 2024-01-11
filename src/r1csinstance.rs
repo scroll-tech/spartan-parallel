@@ -464,8 +464,8 @@ impl R1CSInstance {
     (evals_A_list, evals_B_list, evals_C_list)
   }
 
-  // Only compute the first max_num_proofs / (max_num_proofs_bound - 1) entries
-  // num_cols is already num_vars * max_num_proofs / (max_num_proofs_bound - 1)
+  // Only compute the first max_num_proofs / max_num_proofs_bound entries
+  // num_cols is already num_vars * max_num_proofs / max_num_proofs_bound
   pub fn compute_eval_table_sparse_single(
     &self,
     num_instances: usize,
@@ -477,7 +477,7 @@ impl R1CSInstance {
   ) -> (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>) {
     assert!(self.num_instances == 1 || self.num_instances == num_instances);
     assert_eq!(num_rows, self.num_cons);
-    assert!(num_cols <= self.num_vars * max_num_proofs / (max_num_proofs_bound - 1));
+    assert!(num_cols <= self.num_vars * max_num_proofs / max_num_proofs_bound);
 
     let mut evals_A_list = Vec::new();
     let mut evals_B_list = Vec::new();
