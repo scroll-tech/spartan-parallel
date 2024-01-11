@@ -101,7 +101,6 @@ impl EqualityProof {
 
     let C1 = v1.commit(s1, gens_n).compress();
     C1.append_to_transcript(b"C1", transcript);
-
     let C2 = v2.commit(s2, gens_n).compress();
     C2.append_to_transcript(b"C2", transcript);
 
