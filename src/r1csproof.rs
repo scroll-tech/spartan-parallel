@@ -419,8 +419,6 @@ impl R1CSProof {
     );
     timer_sc_proof_phase2.stop();
 
-    println!("P: {:?}", eq_p_rp_poly[0]);
-
     // Separate ry into rp and ry
     let (rp, ry) = ry.split_at(num_rounds_p);
     let rp = rp.to_vec();
@@ -640,8 +638,6 @@ impl R1CSProof {
     let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
     let tau_x = transcript.challenge_vector(b"challenge_tau_x", num_rounds_x);
 
-    println!("AAA");
-
     // verify the first sum-check instance
     let claim_phase1 = Scalar::zero()
       .commit(&Scalar::zero(), &gens.gens_sc.gens_1)
@@ -705,8 +701,6 @@ impl R1CSProof {
       &comm_claim_post_phase1,
     )?;
 
-    println!("BBB");
-
     // derive three public challenges and then derive a joint claim
     let r_A = transcript.challenge_scalar(b"challenge_Az");
     let r_B = transcript.challenge_scalar(b"challenge_Bz");
@@ -739,18 +733,15 @@ impl R1CSProof {
     let (rp, ry) = ry.split_at(num_rounds_p);
     let rp = rp.to_vec();
     let ry = ry.to_vec();
+    // println!("RP: {:?}", rp);
+    // println!("RY: {:?}", ry);
 
     // An Eq function to match p with rp
-    println!("{}", rp.len());
-    println!("{}", rp_round1.len());
-    // TODO: THIS CONSTRUCTION IS INCORRECT!
+    // println!("{}", rp.len());
+    // println!("{}", rp_round1.len());
     let p_rp_poly_bound_ry: Scalar = (0..rp.len())
       .map(|i| rp[i] * rp_round1[i] + (Scalar::one() - rp[i]) * (Scalar::one() - rp_round1[i]))
       .product();
-
-    println!("V: {:?}", p_rp_poly_bound_ry);
-
-    println!("CCC");  
 
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
@@ -830,8 +821,6 @@ impl R1CSProof {
       )?;
     }
 
-    println!("DDD"); 
-
     match (num_witness_secs, num_shorts) {
       (_, 0) => {},
       (_, 1) => {
@@ -846,8 +835,6 @@ impl R1CSProof {
       },
       _ => panic!("PROOF Failed: Unsupported (num_witness_secs, num_shorts) pair: ({}, {})", num_witness_secs, num_shorts)
     }
-
-    println!("EEE"); 
 
     // Then on rp
     let mut expected_comm_vars_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
@@ -865,8 +852,6 @@ impl R1CSProof {
     let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_comm_vars_list).compress();
     assert_eq!(expected_comm_vars_at_ry, self.comm_vars_at_ry);
 
-    println!("FFF"); 
-
     // compute commitment to eval_Z_at_ry = (Scalar::one() - ry[0]) * self.eval_vars_at_ry + ry[0] * poly_input_eval
     let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();
 
@@ -881,8 +866,6 @@ impl R1CSProof {
       &expected_claim_post_phase2,
       &comm_claim_post_phase2,
     )?;
-
-    println!("GGG");
 
     Ok([rp, rq_rev, rx, ry])
   }

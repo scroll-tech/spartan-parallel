@@ -99,12 +99,12 @@ impl EqPolynomial {
       size *= 2;
       for i in (0..size).rev().step_by(base_size * 2) {
         // copy each element from the prior iteration twice
-        let scalar = evals[i / (base_size * 2)];
+        let scalar = evals[i / 2];
+        let high = scalar * self.r[j];
+        let low = scalar - high;
         for k in 0..base_size {
-          evals[i - k] = scalar * self.r[j];
-        }
-        for k in 0..base_size {
-          evals[i - base_size - k] = scalar - evals[i - k];
+          evals[i - k] = high;
+          evals[i - base_size - k] = low;
         }
       }
     }
