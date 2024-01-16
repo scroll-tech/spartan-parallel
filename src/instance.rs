@@ -524,9 +524,9 @@ impl Instance {
           // w3[0]
           (A, B, C) = Instance::gen_constr(A, B, C,
             2 * num_mems_accesses[b], vec![], vec![], vec![(V_valid, 1), (V_v, -1)]);
+          // w3[1]
           // If the block contains no memory accesses, then set V_x to 1
           if num_mems_accesses[b] == 0 {
-            // w3[1]
             (A, B, C) = Instance::gen_constr(A, B, C,
               2 * num_mems_accesses[b] + 1, vec![], vec![], vec![(V_x, 1), (V_v, -1)]);
           } else {

@@ -42,6 +42,7 @@ struct CompileTimeKnowledge {
 
   args: Vec<Vec<(Vec<(usize, isize)>, Vec<(usize, isize)>, Vec<(usize, isize)>)>>,
 
+  func_input_width: usize,
   input_block_num: usize,
   output_block_num: usize
 }
@@ -110,6 +111,9 @@ impl CompileTimeKnowledge {
     }
     buffer.clear();
     reader.read_line(&mut buffer)?;
+    let func_input_width = buffer.trim().parse::<usize>().unwrap();
+    buffer.clear();
+    reader.read_line(&mut buffer)?;
     let input_block_num = buffer.trim().parse::<usize>().unwrap();
     buffer.clear();
     reader.read_line(&mut buffer)?;
@@ -122,6 +126,7 @@ impl CompileTimeKnowledge {
       block_num_mem_accesses,
       total_num_proofs_bound,
       args,
+      func_input_width,
       input_block_num,
       output_block_num
     })
@@ -141,7 +146,7 @@ struct RunTimeKnowledge {
   addr_mems_list: Vec<MemsAssignment>,
 
   input: Vec<[u8; 32]>,
-  output: Vec<[u8; 32]>,
+  output: [u8; 32],
   output_exec_num: usize
 }
 
@@ -311,7 +316,7 @@ impl RunTimeKnowledge {
       addr_mems_list,
     
       input: func_inputs,
-      output: func_outputs,
+      output: func_outputs[0],
       output_exec_num
     })
   }
@@ -365,15 +370,16 @@ fn main() {
   let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(num_vars, total_num_proofs_bound);
 
   // MEM INSTANCES
+  let total_num_mem_accesses_bound_padded = if total_num_mem_accesses_bound == 0 {1} else {total_num_mem_accesses_bound};
   // MEM_EXTRACT
   let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(block_num_instances, num_vars, &block_num_mem_accesses);
   // MEM_COHERE
-  let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound);
+  let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound_padded);
   // MEM_BLOCK_POLY is PERM_BLOCK_POLY
   // MEM_ADDR_COMB
   let (mem_addr_comb_num_cons, mem_addr_comb_num_non_zero_entries, mem_addr_comb_inst) = Instance::gen_mem_addr_comb_inst();
   // MEM_ADDR_POLY
-  let (mem_addr_poly_num_cons_base, mem_addr_poly_num_non_zero_entries, mem_addr_poly_inst) = Instance::gen_mem_addr_poly_inst(total_num_mem_accesses_bound);
+  let (mem_addr_poly_num_cons_base, mem_addr_poly_num_non_zero_entries, mem_addr_poly_inst) = Instance::gen_mem_addr_poly_inst(total_num_mem_accesses_bound_padded);
 
   // --
   // INSTANCE PREPROCESSING
@@ -381,8 +387,8 @@ fn main() {
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
   let perm_size_bound = total_num_proofs_bound;
   let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
-  let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound;
-  let mem_addr_poly_num_cons = mem_addr_poly_num_cons_base * total_num_mem_accesses_bound;
+  let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound_padded;
+  let mem_addr_poly_num_cons = mem_addr_poly_num_cons_base * total_num_mem_accesses_bound_padded;
 
   assert_eq!(block_num_instances, block_vars_matrix.len());
   assert_eq!(block_num_instances, block_inputs_matrix.len());
@@ -398,14 +404,14 @@ fn main() {
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances, mem_extract_num_non_zero_entries);
-  let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound * 4, 1, mem_cohere_num_non_zero_entries);
+  let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
-  let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound * 4, 1, mem_addr_poly_num_non_zero_entries);
+  let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_addr_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
   // for size PROOF * VAR
-  let proofs_times_vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound) * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
+  let proofs_times_vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
@@ -425,6 +431,7 @@ fn main() {
   let proof = SNARK::prove(
     ctk.input_block_num,
     ctk.output_block_num,
+    ctk.func_input_width,
     &rtk.input,
     &rtk.output,
     rtk.output_exec_num,
@@ -501,9 +508,10 @@ fn main() {
 
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
-  assert!(proof.verify::<true>(
+  assert!(proof.verify::<false>(
     ctk.input_block_num,
     ctk.output_block_num,
+    ctk.func_input_width,
     &rtk.input,
     &rtk.output,
     rtk.output_exec_num,
