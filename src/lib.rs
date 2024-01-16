@@ -5,9 +5,8 @@
 
 // TODO: Proof might be incorrect if a block is never executed
 // TODO: Mem Proof might be incorrect if a block contains no mem execution
-// Q: How can we ensure that the Prover does not cheat with fake total_num_mem_accesses?
-// A: Permutation check for memory should fail.
-// Q: We wouldn't know the number of executions during compile time, how to order the blocks?
+// TODO: Try to add Maybe's to reduce the work for unexecuted blocks
+// Q: We wouldn't know the number of executions during compile time, how to order the blocks? (Also what if P provides the wrong number of execution?)
 
 extern crate byteorder;
 extern crate core;
@@ -466,7 +465,7 @@ impl SNARK {
 
     block_num_instances: usize,
     block_max_num_proofs: usize,
-    block_num_proofs: &Vec<usize>,
+    mut block_num_proofs: Vec<usize>,
     block_inst: &Instance,
     block_comm: &ComputationCommitment,
     block_decomm: &ComputationDecommitment,
@@ -536,7 +535,7 @@ impl SNARK {
     transcript: &mut Transcript,
   ) -> Self {
     let timer_prove = Timer::new("SNARK::prove");
-
+    
     // we create a Transcript object seeded with a random Scalar
     // to aid the prover produce its randomness
     let mut random_tape = RandomTape::new(b"proof");
@@ -547,6 +546,33 @@ impl SNARK {
     for n in block_num_mem_accesses {
       assert!(2 * n <= num_vars - 4);
     }
+
+    // --
+    // PREPROCESSING
+    // --
+    // unwrap the assignments
+    let mut block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
+    let mut block_inputs_mat = block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
+    let mut exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
+    let addr_mems_list = addr_mems_list.into_iter().map(|v| v.assignment).collect_vec();
+
+    // For every block that is not executed, pad an invalid input to it for commitment and sumcheck
+    let block_num_proofs_unpadded = block_num_proofs.clone();
+    let dummy_input = vec![Scalar::zero(); num_vars];
+    for i in 0..block_num_instances {
+      if block_num_proofs[i] == 0 {
+        block_num_proofs[i] = 1;
+        assert_eq!(block_vars_mat[i].len(), 0);
+        block_vars_mat[i].push(dummy_input.clone());
+        assert_eq!(block_inputs_mat[i].len(), 0);
+        block_inputs_mat[i].push(dummy_input.clone());
+      }
+    }
+    let block_num_proofs = &block_num_proofs;
+
+    // Pad exec_inputs with dummys so the length is a power of 2
+    exec_inputs_list.extend(vec![dummy_input; consis_num_proofs.next_power_of_two() - consis_num_proofs]);
+    let consis_num_proofs = consis_num_proofs.next_power_of_two();
 
     // --
     // COMMITMENTS
@@ -564,12 +590,6 @@ impl SNARK {
     mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_addr_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
 
-    // unwrap the assignments
-    let block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
-    let block_inputs_mat = block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
-    let exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
-    let addr_mems_list = addr_mems_list.into_iter().map(|v| v.assignment).collect_vec();
-
     // Commit io
     let input_block_num = Scalar::from(input_block_num as u64);
     let output_block_num = Scalar::from(output_block_num as u64);
@@ -583,7 +603,7 @@ impl SNARK {
     // Commit num_proofs
     let timer_commit = Timer::new("metacommit");
     Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
-    for n in block_num_proofs {
+    for n in &block_num_proofs_unpadded {
       Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
     }
     timer_commit.stop();
@@ -1497,8 +1517,8 @@ impl SNARK {
       let r1cs_eval_proof = {
         let proof = R1CSEvalProof::prove(
           &perm_poly_decomm.decomm,
-          &rx,
-          &ry,
+          rx,
+          ry,
           &inst_evals,
           &perm_poly_gens.gens_r1cs_eval,
           transcript,
@@ -2182,7 +2202,7 @@ impl SNARK {
     total_num_proofs_bound: usize,
     block_num_instances: usize,
     block_max_num_proofs: usize,
-    block_num_proofs: &Vec<usize>,
+    block_num_proofs: Vec<usize>,
     block_num_cons: usize,
     block_comm: &ComputationCommitment,
     block_gens: &SNARKGens,
@@ -2238,6 +2258,14 @@ impl SNARK {
     assert!(consis_num_proofs > 0);
 
     // --
+    // PREPROCESSING
+    // --
+    // During verification, we pad the number of execution of every unexecuted block to 1
+    let block_num_proofs_unpadded = block_num_proofs.clone();
+    let block_num_proofs = &block_num_proofs.iter().map(|i| if *i == 0 {1} else {*i}).collect();
+    let consis_num_proofs = consis_num_proofs.next_power_of_two();
+
+    // --
     // COMMITMENTS
     // --
 
@@ -2267,7 +2295,7 @@ impl SNARK {
       // Commit num_proofs
       let timer_commit = Timer::new("metacommit");
       Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
-      for n in block_num_proofs {
+      for n in &block_num_proofs_unpadded {
         Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
       }
       timer_commit.stop();
@@ -2310,7 +2338,6 @@ impl SNARK {
     // --
     // BLOCK CORRECTNESS
     // --
-
     if DEBUG {println!("BLOCK CORRECTNESS")};
     {
       let timer_sat_proof = Timer::new("verify_sat_proof");
@@ -2558,15 +2585,18 @@ impl SNARK {
       // COMPUTE POLY FOR PERM_BLOCK
       let mut perm_block_poly_bound_tau = Scalar::one();
       for p in 0..block_num_instances {
-        let r_len = (block_num_proofs[p] * num_vars).log_2();
-        self.proof_eval_perm_block_prod_list[p].verify_plain(
-          &proofs_times_vars_gens.gens_pc,
-          transcript,
-          &[vec![Scalar::zero(); r_len - 2], vec![Scalar::one(); 2]].concat(),
-          &self.perm_block_poly_list[p],
-          &self.perm_block_comm_w3_list[p],
-        )?;
-        perm_block_poly_bound_tau *= self.perm_block_poly_list[p];
+          let r_len = (block_num_proofs[p] * num_vars).log_2();
+          self.proof_eval_perm_block_prod_list[p].verify_plain(
+            &proofs_times_vars_gens.gens_pc,
+            transcript,
+            &[vec![Scalar::zero(); r_len - 2], vec![Scalar::one(); 2]].concat(),
+            &self.perm_block_poly_list[p],
+            &self.perm_block_comm_w3_list[p],
+          )?;
+        // Only multuply the root if the block has been executed
+        if block_num_proofs_unpadded[p] > 0 {
+          perm_block_poly_bound_tau *= self.perm_block_poly_list[p];
+        }
       }
       perm_block_poly_bound_tau
     };

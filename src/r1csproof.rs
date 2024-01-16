@@ -733,15 +733,11 @@ impl R1CSProof {
     let (rp, ry) = ry.split_at(num_rounds_p);
     let rp = rp.to_vec();
     let ry = ry.to_vec();
-    // println!("RP: {:?}", rp);
-    // println!("RY: {:?}", ry);
 
     // An Eq function to match p with rp
-    // println!("{}", rp.len());
-    // println!("{}", rp_round1.len());
     let p_rp_poly_bound_ry: Scalar = (0..rp.len())
       .map(|i| rp[i] * rp_round1[i] + (Scalar::one() - rp[i]) * (Scalar::one() - rp_round1[i]))
-      .product();
+      .product(); 
 
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
@@ -1063,16 +1059,22 @@ impl R1CSProof {
 
     // Construct Z_poly evaluated on rp within runtime bound
     // Here we have p length-q*y Z, want to bind to rp
-    let mut z = vec![Scalar::zero(); max_input_rows * base_input_size];
-    let rp_len = num_proofs.log_2();
-    for p in 0..num_proofs {
-      let prod = |i: usize| [Scalar::one() - rp[i], rp[i]];
-      let p_bin = (0..rp_len).rev().map(|i| prod(i)[(p >> i) & 1]).fold(Scalar::one(), |a, b| a * b);
-      for x in 0..z_list[p].len() {
-        z[x] += z_list[p][x]* p_bin;
+    let mut n = num_proofs / 2;
+    let mut z_list = z_list.clone();
+    for r in &rp {
+      for p in 0..n {
+        for x in 0..z_list[p].len() {
+          z_list[p][x] *= Scalar::one() - r;
+        }
+        let gap = z_list[p].len() / z_list[p + n].len();
+        for x in 0..z_list[p + n].len() {
+          let z_high = z_list[p + n][x];
+          z_list[p][x * gap] += r * z_high;
+        }
       }
+      n /= 2;
     }
-    let mut Z_poly = DensePolynomial::new(z);
+    let mut Z_poly = DensePolynomial::new(z_list[0].clone());
 
     // Sumcheck 2: (rA + rB + rC) * Z = e
     let (sc_proof_phase2, ry, claims_phase2, blind_claim_postsc2) = R1CSProof::prove_phase_two_single(
@@ -1177,7 +1179,7 @@ impl R1CSProof {
         proof_eval_vars_at_ry_list,
         proof_eq_sc_phase2
       },
-      [rp, [vec![Scalar::zero(); pad], rx].concat(), [vec![Scalar::zero(); pad], ry].concat()]
+      [rp.clone(), [vec![Scalar::zero(); pad], rx].concat(), [vec![Scalar::zero(); pad], ry].concat()]
     )
   }
 
@@ -1328,6 +1330,7 @@ impl R1CSProof {
     let (eval_A_r, eval_B_r, eval_C_r) = evals;
     let expected_claim_post_phase2 =
       ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry).compress();
+
     // verify proof that expected_claim_post_phase2 == claim_post_phase2
     self.proof_eq_sc_phase2.verify(
       &gens.gens_sc.gens_1,

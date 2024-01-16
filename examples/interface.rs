@@ -331,11 +331,10 @@ fn main() {
   let block_vars_matrix = rtk.block_vars_matrix;
   let block_inputs_matrix = rtk.block_inputs_matrix;
 
-  // Pad entries in ctk and rtk
+  // Pad entries in ctk
   ctk.args.extend(vec![Vec::new(); block_num_instances - ctk.args.len()]);
 
-  // Generate all remaining instances
-
+  // --
   // BLOCK INSTANCES
   let (block_num_cons, block_num_non_zero_entries, block_inst) = Instance::gen_block_inst(block_num_instances, num_vars, &ctk.args);
 
@@ -434,7 +433,7 @@ fn main() {
     total_num_proofs_bound,
     block_num_instances,
     rtk.block_max_num_proofs,
-    &rtk.block_num_proofs,
+    rtk.block_num_proofs.clone(),
     &block_inst,
     &block_comm,
     &block_decomm,
@@ -513,7 +512,7 @@ fn main() {
     total_num_proofs_bound,
     block_num_instances, 
     rtk.block_max_num_proofs, 
-    &rtk.block_num_proofs, 
+    rtk.block_num_proofs, 
     block_num_cons, 
     &block_comm,
     &block_gens,
