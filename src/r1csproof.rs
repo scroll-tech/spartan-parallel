@@ -1066,10 +1066,9 @@ impl R1CSProof {
         for x in 0..z_list[p].len() {
           z_list[p][x] *= Scalar::one() - r;
         }
-        let gap = z_list[p].len() / z_list[p + n].len();
         for x in 0..z_list[p + n].len() {
           let z_high = z_list[p + n][x];
-          z_list[p][x * gap] += r * z_high;
+          z_list[p][x] += r * z_high;
         }
       }
       n /= 2;

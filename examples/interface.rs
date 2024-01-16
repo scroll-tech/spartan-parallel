@@ -43,7 +43,9 @@ struct CompileTimeKnowledge {
   args: Vec<Vec<(Vec<(usize, isize)>, Vec<(usize, isize)>, Vec<(usize, isize)>)>>,
 
   func_input_width: usize,
+  input_offset: usize,
   input_block_num: usize,
+  output_offset: usize,
   output_block_num: usize
 }
 
@@ -114,7 +116,13 @@ impl CompileTimeKnowledge {
     let func_input_width = buffer.trim().parse::<usize>().unwrap();
     buffer.clear();
     reader.read_line(&mut buffer)?;
+    let input_offset = buffer.trim().parse::<usize>().unwrap();
+    buffer.clear();
+    reader.read_line(&mut buffer)?;
     let input_block_num = buffer.trim().parse::<usize>().unwrap();
+    buffer.clear();
+    reader.read_line(&mut buffer)?;
+    let output_offset = buffer.trim().parse::<usize>().unwrap();
     buffer.clear();
     reader.read_line(&mut buffer)?;
     let output_block_num = buffer.trim().parse::<usize>().unwrap();
@@ -127,7 +135,9 @@ impl CompileTimeKnowledge {
       total_num_proofs_bound,
       args,
       func_input_width,
+      input_offset,
       input_block_num,
+      output_offset,
       output_block_num
     })
   }
@@ -432,6 +442,8 @@ fn main() {
     ctk.input_block_num,
     ctk.output_block_num,
     ctk.func_input_width,
+    ctk.input_offset,
+    ctk.output_offset,
     &rtk.input,
     &rtk.output,
     rtk.output_exec_num,
@@ -512,6 +524,8 @@ fn main() {
     ctk.input_block_num,
     ctk.output_block_num,
     ctk.func_input_width,
+    ctk.input_offset,
+    ctk.output_offset,
     &rtk.input,
     &rtk.output,
     rtk.output_exec_num,

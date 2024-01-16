@@ -74,7 +74,10 @@ struct CompileTimeKnowledge {
 
   args: Vec<Vec<(Vec<(usize, isize)>, Vec<(usize, isize)>, Vec<(usize, isize)>)>>,
 
+  func_input_width: usize,
+  input_offset: usize,
   input_block_num: usize,
+  output_offset: usize,
   output_block_num: usize
 }
 
@@ -91,7 +94,7 @@ struct RunTimeKnowledge {
   addr_mems_list: Vec<MemsAssignment>,
 
   input: Vec<[u8; 32]>,
-  output: Vec<[u8; 32]>,
+  output: [u8; 32],
   output_exec_num: usize
 }
 
@@ -256,7 +259,7 @@ fn produce_r1cs() -> (
   let consis_num_proofs: usize = 8;
   // What is the input and the output?
   let input = vec![zero, zero];
-  let output = vec![three, six];
+  let output = three;
   // Which block in the execution order is the output block?
   let output_exec_num = 3;
   // How many memory accesses per block?
@@ -385,7 +388,10 @@ fn produce_r1cs() -> (
 
       args,
       
+      func_input_width: 2,
+      input_offset: 2,
       input_block_num,
+      output_offset: 2,
       output_block_num
     },
 
@@ -512,6 +518,9 @@ fn main() {
   let proof = SNARK::prove(
     ctk.input_block_num,
     ctk.output_block_num,
+    ctk.func_input_width,
+    ctk.input_offset,
+    ctk.output_offset,
     &rtk.input,
     &rtk.output,
     rtk.output_exec_num,
@@ -591,6 +600,9 @@ fn main() {
   assert!(proof.verify::<false>(
     ctk.input_block_num,
     ctk.output_block_num,
+    ctk.func_input_width,
+    ctk.input_offset,
+    ctk.output_offset,
     &rtk.input,
     &rtk.output,
     rtk.output_exec_num,
