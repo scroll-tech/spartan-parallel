@@ -488,7 +488,7 @@ impl Instance {
   /// tau r   _   _   _   _   _   _ |  w  A0  A1  V0  V1  Z0  Z1  B0
   /// 0   1   2   3     4   5   6   7  |  _   _   _  
   /// v   x  pi   D  | MR  MC  MR  MC  |  _   _   _  ...
-  /// All memory accesses should be in the form (A0, V0, A1, V1, ...) at the front of the witnesses
+  /// All memory accesses should be in the form (A0, A1, ... V0, V1, ...) at the front of the witnesses
   /// Input `num_mems_accesses` indicates how many memory accesses are there for each block
   pub fn gen_mem_extract_inst(num_instances: usize, num_vars: usize, num_mems_accesses: &Vec<usize>) -> (usize, usize, Instance) {
     assert_eq!(num_instances, num_mems_accesses.len());
@@ -509,8 +509,8 @@ impl Instance {
       let V_val = |b: usize, i: usize| num_vars + 1 + num_mems_accesses[b] + i;
       let V_v = 2 * num_vars;
       let V_x = 2 * num_vars + 1;
-      let V_MR = |i: usize| 2 * num_vars + 4 + 2 * i;
-      let V_MC = |i: usize| 2 * num_vars + 5 + 2 * i;
+      let V_MR = |i: usize| 2 * num_vars + 4 + i;
+      let V_MC = |b: usize, i: usize| 2 * num_vars + 4 + num_mems_accesses[b] + i;
   
       for b in 0..num_instances {
         mem_extract_num_cons = max(mem_extract_num_cons, 2 * num_mems_accesses[b] + 2);
@@ -536,15 +536,15 @@ impl Instance {
                 2 * i, vec![(V_r, 1)], vec![(V_val(b, i), 1)], vec![(V_MR(i), 1)]);
               if i == 0 {
                 (A, B, C) = Instance::gen_constr(A, B, C,
-                  1, vec![(V_valid, 1)], vec![(V_tau, 1), (V_addr(i), -1), (V_MR(i), -1)], vec![(V_MC(i), 1)]);
+                  1, vec![(V_valid, 1)], vec![(V_tau, 1), (V_addr(i), -1), (V_MR(i), -1)], vec![(V_MC(b, i), 1)]);
               } else {
                 (A, B, C) = Instance::gen_constr(A, B, C,
-                  2 * i + 1, vec![(V_MC(i - 1), 1)], vec![(V_tau, 1), (V_addr(i), -1), (V_MR(i), -1)], vec![(V_MC(i), 1)]);
+                  2 * i + 1, vec![(V_MC(b, i - 1), 1)], vec![(V_tau, 1), (V_addr(i), -1), (V_MR(i), -1)], vec![(V_MC(b, i), 1)]);
               }
             }
             // w3[1]
             (A, B, C) = Instance::gen_constr(A, B, C,
-              2 * num_mems_accesses[b] + 1, vec![], vec![], vec![(V_x, 1), (V_MC(num_mems_accesses[b] - 1), -1)]);
+              2 * num_mems_accesses[b] + 1, vec![], vec![], vec![(V_x, 1), (V_MC(b, num_mems_accesses[b] - 1), -1)]);
             }
           (A, B, C)
         };
@@ -564,9 +564,9 @@ impl Instance {
   /// MEM_COHERE takes in addr_mem = <v, addr, val, D>
   /// and verifies that
   /// 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
-  /// 2. v[k + 1] * (addr[k + 1] - addr[k] - 1) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
-  /// 3. v[k + 1] * (addr[k + 1] - addr[k] - 1) * (val[k + 1] - val[k]) = 0: either address difference is 1, or value are the same, unless the next entry is invalid
-  /// So we set D = v[k + 1] * (addr[k + 1] - addr[k] - 1)
+  /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
+  /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (val[k + 1] - val[k]) = 0: either address difference is 1, or value are the same, unless the next entry is invalid
+  /// So we set D = v[k + 1] * (1 - addr[k + 1] + addr[k])
   pub fn gen_mem_cohere_inst(total_num_mem_accesses_bound: usize) -> (usize, usize, Instance) {
     let mem_cohere_num_cons_base = 4;
     let mem_cohere_num_non_zero_entries = 8 * total_num_mem_accesses_bound;
@@ -595,9 +595,9 @@ impl Instance {
           (A, B, C) = Instance::gen_constr(A, B, C,
             num_cons, vec![(i * width + V_valid, 1), (i * width + V_cnst, -1)], vec![((i + 1) * width + V_valid, 1)], vec![]);
           num_cons += 1;
-          // v[k + 1] * (addr[k + 1] - addr[k] - 1) = D[k]
+          // v[k + 1] * (1 - addr[k + 1] + addr[k]) = D[k]
           (A, B, C) = Instance::gen_constr(A, B, C,
-            num_cons, vec![((i + 1) * width + V_valid, 1)], vec![((i + 1) * width + V_addr, 1), (i * width + V_addr, -1), (i * width + V_cnst, -1)], vec![(i * width + V_D, 1)]);
+            num_cons, vec![((i + 1) * width + V_valid, 1)], vec![(i * width + V_cnst, 1), ((i + 1) * width + V_addr, -1), (i * width + V_addr, 1)], vec![(i * width + V_D, 1)]);
           num_cons += 1;
           // D[k] * (addr[k + 1] - addr[k]) = 0
           (A, B, C) = Instance::gen_constr(A, B, C,

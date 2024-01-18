@@ -360,13 +360,13 @@ fn produce_r1cs() -> (
     // Both can only be generated at proving time
 
     // Memory accesses in address order: (v, addr, val, D)
-    // where D[k] = v[k + 1] * (addr[k + 1] - addr[k] - 1)
+    // where D[k] = v[k + 1] * (1 - addr[k + 1] - addr[k])
     for _ in 0..3 {
-      addr_mems_list.push(VarsAssignment::new(&vec![one, zero, one, minus_one]).unwrap());
+      addr_mems_list.push(VarsAssignment::new(&vec![one, zero, one, one]).unwrap());
     }
     addr_mems_list.push(VarsAssignment::new(&vec![one, zero, one, zero]).unwrap());
     for _ in 0..3 {
-      addr_mems_list.push(VarsAssignment::new(&vec![one, one, two, minus_one]).unwrap());
+      addr_mems_list.push(VarsAssignment::new(&vec![one, one, two, one]).unwrap());
     }
     addr_mems_list.push(VarsAssignment::new(&vec![one, one, two, zero]).unwrap());
 

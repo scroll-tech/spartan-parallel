@@ -341,7 +341,7 @@ fn main() {
   assert_eq!(num_vars, num_vars.next_power_of_two());
   let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
-  let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound;
+  let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound.next_power_of_two();
 
   let block_vars_matrix = rtk.block_vars_matrix;
   let block_inputs_matrix = rtk.block_inputs_matrix;

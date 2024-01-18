@@ -3,8 +3,6 @@
 #![deny(missing_docs)]
 #![allow(clippy::assertions_on_result_states)]
 
-// TODO: Proof might be incorrect if a block is never executed
-// TODO: Mem Proof might be incorrect if a block contains no mem execution
 // TODO: Try to add Maybe's to reduce the work for unexecuted blocks
 // TODO: Need to think about what exactly should be included in the input and output
 // Q: We wouldn't know the number of executions during compile time, how to order the blocks? (Also what if P provides the wrong number of execution?)
@@ -591,7 +589,7 @@ impl SNARK {
     let mut block_vars_mat = block_vars_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let mut block_inputs_mat = block_inputs_mat.into_iter().map(|a| a.into_iter().map(|v| v.assignment).collect_vec()).collect_vec();
     let mut exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
-    let addr_mems_list = addr_mems_list.into_iter().map(|v| v.assignment).collect_vec();
+    let mut addr_mems_list = addr_mems_list.into_iter().map(|v| v.assignment).collect_vec();
 
     // For every block that is not executed, pad an invalid input to it for commitment and sumcheck
     let block_num_proofs_unpadded = block_num_proofs.clone();
@@ -610,6 +608,11 @@ impl SNARK {
     // Pad exec_inputs with dummys so the length is a power of 2
     exec_inputs_list.extend(vec![dummy_input; consis_num_proofs.next_power_of_two() - consis_num_proofs]);
     let consis_num_proofs = consis_num_proofs.next_power_of_two();
+
+    // Pad addr_mems with dummys so the length is a power of 2
+    let dummy_input = vec![Scalar::zero(); 4];
+    addr_mems_list.extend(vec![dummy_input; total_num_mem_accesses.next_power_of_two() - total_num_mem_accesses]);
+    let total_num_mem_accesses = total_num_mem_accesses.next_power_of_two();
 
     // --
     // COMMITMENTS
@@ -1016,8 +1019,8 @@ impl SNARK {
         let mut mem_block_w1 = Vec::new();
         let V_addr = |i: usize| 1 + i;
         let V_val = |b: usize, i: usize| 1 + block_num_mem_accesses[b] + i;
-        let V_MR = |i: usize| 4 + 2 * i;
-        let V_MC = |i: usize| 5 + 2 * i;
+        let V_MR = |i: usize| 4 + i;
+        let V_MC = |b: usize, i: usize| 4 + block_num_mem_accesses[b] + i;
         for p in 0..block_num_instances {
           mem_block_w1.push(vec![Vec::new(); block_num_proofs[p]]);
           for q in (0..block_num_proofs[p]).rev() {
@@ -1029,9 +1032,9 @@ impl SNARK {
               mem_block_w1[p][q][V_MR(i)] = comb_r * block_vars_mat[p][q][V_val(p, i)];
               // MC = v * (tau - addr - MR)
               let t = comb_tau - block_vars_mat[p][q][V_addr(i)] - mem_block_w1[p][q][V_MR(i)];
-              mem_block_w1[p][q][V_MC(i)] = 
+              mem_block_w1[p][q][V_MC(p, i)] = 
                 if i == 0 { block_vars_mat[p][q][0] * t }
-                else { mem_block_w1[p][q][V_MC(i - 1)] * t };
+                else { mem_block_w1[p][q][V_MC(p, i - 1)] * t };
             }
             if block_num_mem_accesses[p] == 0 {
               // Set x, pi, D to 1
@@ -1040,7 +1043,7 @@ impl SNARK {
               mem_block_w1[p][q][3] = mem_block_w1[p][q][0];
             } else {
               // Compute x
-              mem_block_w1[p][q][1] = mem_block_w1[p][q][V_MC(block_num_mem_accesses[p] - 1)];
+              mem_block_w1[p][q][1] = mem_block_w1[p][q][V_MC(p, block_num_mem_accesses[p] - 1)];
               // Compute D and pi
               if q != block_num_proofs[p] - 1 {
                 mem_block_w1[p][q][3] = mem_block_w1[p][q][1] * (mem_block_w1[p][q + 1][2] + Scalar::one() - mem_block_w1[p][q + 1][0]);
@@ -2378,6 +2381,7 @@ impl SNARK {
     let block_num_proofs_unpadded = block_num_proofs.clone();
     let block_num_proofs = &block_num_proofs.iter().map(|i| if *i == 0 {1} else {*i}).collect();
     let consis_num_proofs = consis_num_proofs.next_power_of_two();
+    let total_num_mem_accesses = total_num_mem_accesses.next_power_of_two();
 
     // --
     // COMMITMENTS
