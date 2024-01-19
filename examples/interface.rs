@@ -40,7 +40,7 @@ struct CompileTimeKnowledge {
   block_num_mem_accesses: Vec<usize>,
   total_num_mem_accesses_bound: usize,
 
-  args: Vec<Vec<(Vec<(usize, isize)>, Vec<(usize, isize)>, Vec<(usize, isize)>)>>,
+  args: Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
 
   func_input_width: usize,
   input_offset: usize,
@@ -80,36 +80,47 @@ impl CompileTimeKnowledge {
     buffer.clear();
     reader.read_line(&mut buffer)?;
     assert_eq!(buffer, "INST 0\n".to_string());
+    buffer.clear();
+    reader.read_line(&mut buffer)?;
+    assert_eq!(buffer, format!("A\n"));
+    args[inst_counter].push((Vec::new(), Vec::new(), Vec::new()));
+    // Use mat to indicate which matrix we are dealing with
+    // 0 - A; 1 - B; 2 - C
+    let mut mat = 0;
+    buffer.clear();
+    reader.read_line(&mut buffer)?;
     while buffer != format!("INST_END\n") {
-      buffer.clear();
-      reader.read_line(&mut buffer)?;
       if buffer == format!("INST {}\n", inst_counter + 1) {
         inst_counter += 1;
+        buffer.clear();
+        reader.read_line(&mut buffer)?;
+        assert_eq!(buffer, format!("A\n"));
+        args[inst_counter].push((Vec::new(), Vec::new(), Vec::new()));
         cons_counter = 0;
+        mat = 0;
+      } else if buffer == format!("A\n") {
+        args[inst_counter].push((Vec::new(), Vec::new(), Vec::new()));
+        cons_counter += 1;
+        mat = 0;
+      } else if buffer == format!("B\n") {
+        mat = 1;
+      } else if buffer == format!("C\n") {
+        mat = 2;
       } else {
-        let split: Vec<String> = buffer.split(' ').map(|i| i.to_string().trim().to_string()).collect();
-        if split[0] == "A".to_string() {
-          args[inst_counter].push((Vec::new(), Vec::new(), Vec::new()));
-        }
-        let mut var = 1;
-        let mut val = 2;
-        while val < split.len() {
-          if split[0] == "A".to_string() {
-            args[inst_counter][cons_counter].0.push((split[var].parse::<usize>().unwrap(), split[val].parse::<isize>().unwrap()));
-          }
-          if split[0] == "B".to_string() {
-            args[inst_counter][cons_counter].1.push((split[var].parse::<usize>().unwrap(), split[val].parse::<isize>().unwrap()));
-          }
-          if split[0] == "C".to_string() {
-            args[inst_counter][cons_counter].2.push((split[var].parse::<usize>().unwrap(), split[val].parse::<isize>().unwrap()));
-          }
-          var += 2;
-          val += 2;
-        }
-        if split[0] == "C".to_string() {
-          cons_counter += 1;
+        // Must be a line of a single number denoting variable and a [u8; 32] denoting the coefficient
+        let var = buffer.trim().parse::<usize>().unwrap();
+        buffer.clear();
+        reader.read_line(&mut buffer)?;
+        let val = string_to_bytes(buffer.clone());
+        match mat {
+          0 => { args[inst_counter][cons_counter].0.push((var, val)); }
+          1 => { args[inst_counter][cons_counter].1.push((var, val)); }
+          2 => { args[inst_counter][cons_counter].2.push((var, val)); }
+          _ => { panic!("Invalid matrix: {}", mat) }
         }
       }
+      buffer.clear();
+      reader.read_line(&mut buffer)?;
     }
     buffer.clear();
     reader.read_line(&mut buffer)?;

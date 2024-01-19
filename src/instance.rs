@@ -131,12 +131,20 @@ impl Instance {
     Ok(Instance { inst, digest })
   }
 
-  /// Generates a constraints based on supplied (variable, constant) pairs
-  pub fn gen_constr(
-    mut A: Vec<(usize, usize, [u8; 32])>, mut B: Vec<(usize, usize, [u8; 32])>, mut C: Vec<(usize, usize, [u8; 32])>,
-    i: usize, args_A: Vec<(usize, isize)>, args_B: Vec<(usize, isize)>, args_C: Vec<(usize, isize)>) -> (
-      Vec<(usize, usize, [u8; 32])>, Vec<(usize, usize, [u8; 32])>, Vec<(usize, usize, [u8; 32])>
-    ) {
+  // Generates a constraints based on supplied (variable, constant) pairs
+  fn gen_constr(
+    mut A: Vec<(usize, usize, [u8; 32])>, 
+    mut B: Vec<(usize, usize, [u8; 32])>, 
+    mut C: Vec<(usize, usize, [u8; 32])>,
+    i: usize, 
+    args_A: Vec<(usize, isize)>, 
+    args_B: Vec<(usize, isize)>, 
+    args_C: Vec<(usize, isize)>
+  ) -> (
+      Vec<(usize, usize, [u8; 32])>, 
+      Vec<(usize, usize, [u8; 32])>, 
+      Vec<(usize, usize, [u8; 32])>
+  ) {
     let int_to_scalar = |i: isize| {
       let abs_scalar = Scalar::from(i.abs() as u64);
       if i < 0 {
@@ -159,12 +167,38 @@ impl Instance {
     }
     (A, B, C)
   }
+
+  // gen_constr from byte lists
+  fn gen_constr_bytes(
+    mut A: Vec<(usize, usize, [u8; 32])>, 
+    mut B: Vec<(usize, usize, [u8; 32])>, 
+    mut C: Vec<(usize, usize, [u8; 32])>,
+    i: usize, 
+    args_A: Vec<(usize, [u8; 32])>, 
+    args_B: Vec<(usize, [u8; 32])>, 
+    args_C: Vec<(usize, [u8; 32])>
+  ) -> (
+      Vec<(usize, usize, [u8; 32])>, 
+      Vec<(usize, usize, [u8; 32])>, 
+      Vec<(usize, usize, [u8; 32])>
+  ) {
+    for vars in &args_A {
+      A.push((i, vars.0, vars.1));
+    }
+    for vars in &args_B {
+      B.push((i, vars.0, vars.1));
+    }
+    for vars in &args_C {
+      C.push((i, vars.0, vars.1));
+    }
+    (A, B, C)
+  }
   
   /// Generates BLOCK instances based on inputs
   pub fn gen_block_inst(
     num_instances: usize, 
     num_vars: usize, 
-    args: &Vec<Vec<(Vec<(usize, isize)>, Vec<(usize, isize)>, Vec<(usize, isize)>)>>,
+    args: &Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
   ) -> (usize, usize, Instance) {
     assert_eq!(num_instances, args.len());
 
@@ -189,7 +223,7 @@ impl Instance {
           tmp_nnz_A += arg[i].0.len();
           tmp_nnz_B += arg[i].1.len();
           tmp_nnz_C += arg[i].2.len();
-          (A, B, C) = Instance::gen_constr(A, B, C,
+          (A, B, C) = Instance::gen_constr_bytes(A, B, C,
             i, arg[i].0.clone(), arg[i].1.clone(), arg[i].2.clone());
         }
         (A, B, C)

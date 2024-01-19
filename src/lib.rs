@@ -4,7 +4,7 @@
 #![allow(clippy::assertions_on_result_states)]
 
 // TODO: Try to add Maybe's to reduce the work for unexecuted blocks
-// TODO: Need to think about what exactly should be included in the input and output
+// TODO: Could be beneficial to commit blocks separately
 // Q: We wouldn't know the number of executions during compile time, how to order the blocks? (Also what if P provides the wrong number of execution?)
 
 extern crate byteorder;

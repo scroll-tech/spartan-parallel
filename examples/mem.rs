@@ -72,7 +72,7 @@ struct CompileTimeKnowledge {
   block_num_mem_accesses: Vec<usize>,
   total_num_mem_accesses_bound: usize,
 
-  args: Vec<Vec<(Vec<(usize, isize)>, Vec<(usize, isize)>, Vec<(usize, isize)>)>>,
+  args: Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
 
   func_input_width: usize,
   input_offset: usize,
@@ -115,6 +115,8 @@ fn produce_r1cs() -> (
   // Separate vars into three lists
   // BLOCK, CONSIS, PERM
 
+  let minus_three = Scalar::from(3u32).neg().to_bytes();
+  let minus_two = Scalar::from(2u32).neg().to_bytes();
   let minus_one = Scalar::from(1u32).neg().to_bytes();
   let zero = Scalar::zero().to_bytes();
   let one = Scalar::one().to_bytes();
@@ -181,66 +183,66 @@ fn produce_r1cs() -> (
     // Instances need to be sorted form highest # of execution -> lowest
     let arg = vec![
       // 0: v * v = v
-      (vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]),
+      (vec![(V_valid, one)], vec![(V_valid, one)], vec![(V_valid, one)]),
       // 1: 0 = w - v
-      (vec![], vec![], vec![(V_w, 1), (V_valid, -1)]),
+      (vec![], vec![], vec![(V_w, one), (V_valid, minus_one)]),
       // 2: 0 = b0 - 1
-      (vec![], vec![], vec![(V_b0, 1), (V_cnst, -1)]),
+      (vec![], vec![], vec![(V_b0, one), (V_cnst, minus_one)]),
       // 3: 0 = A0
-      (vec![], vec![], vec![(V_A0, 1)]),
+      (vec![], vec![], vec![(V_A0, one)]),
       // 4: 0 = A1 - 1
-      (vec![], vec![], vec![(V_A1, 1), (V_cnst, -1)]),
+      (vec![], vec![], vec![(V_A1, one), (V_cnst, minus_one)]),
       // 5: 0 = i1 - i0 - V0
-      (vec![], vec![], vec![(V_i1, 1), (V_i0, -1), (V_V0, -1)]),
+      (vec![], vec![], vec![(V_i1, one), (V_i0, minus_one), (V_V0, minus_one)]),
       // 6: 0 = s1 - s0 - V1
-      (vec![], vec![], vec![(V_s1, 1), (V_s0, -1), (V_V1, -1)]),
+      (vec![], vec![], vec![(V_s1, one), (V_s0, minus_one), (V_V1, minus_one)]),
       // 7: (i1 - 3) * Z0 = Z1
-      (vec![(V_i1, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]),
+      (vec![(V_i1, one), (V_cnst, minus_three)], vec![(V_Z0, one)], vec![(V_Z1, one)]),
       // 8: B0 * (Z1 - 1) = 0
-      (vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]),
+      (vec![(V_B0, one)], vec![(V_Z1, one), (V_cnst, minus_one)], vec![]),
       // 9: B0 * (b1 - 1) = 0
-      (vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]),
+      (vec![(V_B0, one)], vec![(V_b1, one), (V_cnst, minus_one)], vec![]),
       // 10: (1 - B0) * (i1 - 3) = 0
-      (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]),
+      (vec![(V_cnst, one), (V_B0, minus_one)], vec![(V_i1, one), (V_cnst, minus_three)], vec![]),
       // 11: (1 - B0) * (b1 - 2) = 0
-      (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![])
+      (vec![(V_cnst, one), (V_B0, minus_one)], vec![(V_b1, one), (V_cnst, minus_two)], vec![])
     ];
     args.push(arg);
       
     // Instance 1: block 0
     let arg = vec![
       // 0: v * v = v
-      (vec![(V_valid, 1)], vec![(V_valid, 1)], vec![(V_valid, 1)]),
+      (vec![(V_valid, one)], vec![(V_valid, one)], vec![(V_valid, one)]),
       // 1: 0 = w - v
-      (vec![], vec![], vec![(V_w, 1), (V_valid, -1)]),
+      (vec![], vec![], vec![(V_w, one), (V_valid, minus_one)]),
       // 2: 0 = b0
-      (vec![], vec![], vec![(V_b0, 1)]),
+      (vec![], vec![], vec![(V_b0, one)]),
       // 3: 0 = i0
-      (vec![], vec![], vec![(V_i0, 1)]),
+      (vec![], vec![], vec![(V_i0, one)]),
       // 4: 0 = s0
-      (vec![], vec![], vec![(V_s0, 1)]),
+      (vec![], vec![], vec![(V_s0, one)]),
       // 5: (i0 - 3) * Z0 = Z1
-      (vec![(V_i0, 1), (V_cnst, -3)], vec![(V_Z0, 1)], vec![(V_Z1, 1)]),
+      (vec![(V_i0, one), (V_cnst, minus_three)], vec![(V_Z0, one)], vec![(V_Z1, one)]),
       // 6: 0 = A0
-      (vec![], vec![], vec![(V_A0, 1)]),
+      (vec![], vec![], vec![(V_A0, one)]),
       // 7: 0 = V0 - 1
-      (vec![], vec![], vec![(V_V0, 1), (V_cnst, -1)]),
+      (vec![], vec![], vec![(V_V0, one), (V_cnst, minus_one)]),
       // 8: 0 = A1 - 1
-      (vec![], vec![], vec![(V_A1, 1), (V_cnst, -1)]),
+      (vec![], vec![], vec![(V_A1, one), (V_cnst, minus_one)]),
       // 9: 0 = V1 - 2
-      (vec![], vec![], vec![(V_V1, 1), (V_cnst, -2)]),
+      (vec![], vec![], vec![(V_V1, one), (V_cnst, minus_two)]),
       // 10: B0 * (Z1 - 1) = 0
-      (vec![(V_B0, 1)], vec![(V_Z1, 1), (V_cnst, -1)], vec![]),
+      (vec![(V_B0, one)], vec![(V_Z1, one), (V_cnst, minus_one)], vec![]),
       // 11: B0 * (b1 - 1) = 0
-      (vec![(V_B0, 1)], vec![(V_b1, 1), (V_cnst, -1)], vec![]),
+      (vec![(V_B0, one)], vec![(V_b1, one), (V_cnst, minus_one)], vec![]),
       // 12: (1 - B0) * (i1 - 3) = 0
-      (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_i1, 1), (V_cnst, -3)], vec![]),
+      (vec![(V_cnst, one), (V_B0, minus_one)], vec![(V_i1, one), (V_cnst, minus_three)], vec![]),
       // 13: (1 - B0) * (b1 - 2) = 0
-      (vec![(V_cnst, 1), (V_B0, -1)], vec![(V_b1, 1), (V_cnst, -2)], vec![]),
+      (vec![(V_cnst, one), (V_B0, minus_one)], vec![(V_b1, one), (V_cnst, minus_two)], vec![]),
       // 14: 0 = i1 - i0
-      (vec![], vec![], vec![(V_i1, 1), (V_i0, -1)]),
+      (vec![], vec![], vec![(V_i1, one), (V_i0, minus_one)]),
       // 15: 0 = s1 - s0
-      (vec![], vec![], vec![(V_s1, 1), (V_s0, -1)]),
+      (vec![], vec![], vec![(V_s1, one), (V_s0, minus_one)]),
     ];
     args.push(arg);
 
