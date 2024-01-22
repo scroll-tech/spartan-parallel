@@ -7,6 +7,8 @@ use std::io::BufRead;
 use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
 
+const BENCHMARK_NAME: &str = "2pc_loop_addition";
+
 // Convert a string of numbers separated by spaces into a vector
 fn string_to_vec(buffer: String) -> Vec<usize> {
   let split: Vec<String> = buffer.split(' ').map(|i| i.to_string().trim().to_string()).collect();
@@ -344,21 +346,21 @@ impl RunTimeKnowledge {
 }
 
 fn main() {
-  let mut ctk = CompileTimeKnowledge::read_from_file("2pc_demo".to_string()).unwrap();
-  let rtk = RunTimeKnowledge::read_from_file("2pc_demo".to_string()).unwrap();
+  let mut ctk = CompileTimeKnowledge::read_from_file(BENCHMARK_NAME.to_string()).unwrap();
+  let rtk = RunTimeKnowledge::read_from_file(BENCHMARK_NAME.to_string()).unwrap();
 
   let block_num_instances = ctk.block_num_instances.next_power_of_two();
   let num_vars = ctk.num_vars;
   assert_eq!(num_vars, num_vars.next_power_of_two());
   let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
-  let block_num_mem_accesses = ctk.block_num_mem_accesses;
+  let mut block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound.next_power_of_two();
 
-  let block_vars_matrix = rtk.block_vars_matrix;
-  let block_inputs_matrix = rtk.block_inputs_matrix;
-
-  // Pad entries in ctk
+  // Pad entries in ctk and block_num_mem_accesses
+  assert!(ctk.args.len() <= block_num_instances);
+  assert!(block_num_mem_accesses.len() <= block_num_instances);
   ctk.args.extend(vec![Vec::new(); block_num_instances - ctk.args.len()]);
+  block_num_mem_accesses.extend(vec![0; block_num_instances - block_num_mem_accesses.len()]);
 
   // --
   // BLOCK INSTANCES
@@ -411,12 +413,6 @@ fn main() {
   let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound_padded;
   let mem_addr_poly_num_cons = mem_addr_poly_num_cons_base * total_num_mem_accesses_bound_padded;
 
-  assert_eq!(block_num_instances, block_vars_matrix.len());
-  assert_eq!(block_num_instances, block_inputs_matrix.len());
-  for p in 0..block_num_instances {
-    assert_eq!(block_vars_matrix[p].len(), block_inputs_matrix[p].len());
-  }
-
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
   let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_vars, 1, consis_comb_num_non_zero_entries);
@@ -447,6 +443,22 @@ fn main() {
   let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
   let (mem_addr_poly_comm, mem_addr_poly_decomm) = SNARK::encode(&mem_addr_poly_inst, &mem_addr_poly_gens);
 
+  // Witness preprocess
+  let mut block_num_proofs = rtk.block_num_proofs;
+  let mut block_vars_matrix = rtk.block_vars_matrix;
+  let mut block_inputs_matrix = rtk.block_inputs_matrix;
+
+  // All dummy blocks are executed 0 times
+  assert!(block_num_proofs.len() <= block_num_instances);
+  assert!(block_vars_matrix.len() <= block_num_instances);
+  assert!(block_inputs_matrix.len() == block_vars_matrix.len());
+  for p in 0..block_vars_matrix.len() {
+    assert_eq!(block_vars_matrix[p].len(), block_inputs_matrix[p].len());
+  }
+  block_num_proofs.extend(vec![0; block_num_instances - block_num_proofs.len()]);
+  block_vars_matrix.extend(vec![Vec::new(); block_num_instances - block_vars_matrix.len()]);
+  block_inputs_matrix.extend(vec![Vec::new(); block_num_instances - block_inputs_matrix.len()]);
+
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
   let proof = SNARK::prove(
@@ -463,7 +475,7 @@ fn main() {
     total_num_proofs_bound,
     block_num_instances,
     rtk.block_max_num_proofs,
-    rtk.block_num_proofs.clone(),
+    block_num_proofs.clone(),
     &block_inst,
     &block_comm,
     &block_decomm,
@@ -545,7 +557,7 @@ fn main() {
     total_num_proofs_bound,
     block_num_instances, 
     rtk.block_max_num_proofs, 
-    rtk.block_num_proofs, 
+    block_num_proofs, 
     block_num_cons, 
     &block_comm,
     &block_gens,

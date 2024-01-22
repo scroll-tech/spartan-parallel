@@ -3083,6 +3083,7 @@ impl SNARK {
     // --
     // IO_PROOFS
     // --
+    if DEBUG {println!("IO PROOFS")};
     self.io_proof.verify(
       &self.exec_comm_inputs[0],
       num_vars,
