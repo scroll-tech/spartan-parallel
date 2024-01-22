@@ -5,6 +5,7 @@
 
 // TODO: Try to add Maybe's to reduce the work for unexecuted blocks
 // TODO: Could be beneficial to commit blocks separately
+// TODO: Can we let number of constraints vary for different blocks?
 // Q: We wouldn't know the number of executions during compile time, how to order the blocks? (Also what if P provides the wrong number of execution?)
 
 extern crate byteorder;

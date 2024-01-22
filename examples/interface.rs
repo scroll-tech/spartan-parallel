@@ -25,11 +25,12 @@ fn string_to_vec(buffer: String) -> Vec<usize> {
 fn string_to_bytes(buffer: String) -> [u8; 32] {
   let split: Vec<String> = buffer.split(' ').map(|i| i.to_string().trim().to_string()).collect();
   let mut list = [0; 32];
-  for i in 0..32 {
-    let s = &split[i];
+  let mut count = 0;
+  for s in &split {
     if s != "" {
-      list[i] = s.parse::<u8>().unwrap();
+      list[count] = s.parse::<u8>().unwrap();
     }
+    count += 1;
   }
   list
 }
