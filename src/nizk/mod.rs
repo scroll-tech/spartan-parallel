@@ -108,6 +108,7 @@ impl EqualityProof {
     alpha.append_to_transcript(b"alpha", transcript);
 
     let c = transcript.challenge_scalar(b"c");
+
     let z = c * (s1 - s2) + r;
 
     (EqualityProof { alpha, z }, C1, C2)

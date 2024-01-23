@@ -223,8 +223,7 @@ impl R1CSProof {
     // Currently, only support the case of num_witness_secs >= 3 && num_shorts = 1
     assert!(num_shorts == 0 || num_shorts == 1 && num_witness_secs >= 3);
 
-    // Assert everything is a power of 2
-    assert_eq!(num_instances, num_instances.next_power_of_two());
+    // Assert everything is a power of 2, except num_instances
     assert_eq!(max_num_proofs, max_num_proofs.next_power_of_two());
     for p in num_proofs {
       assert_eq!(*p, p.next_power_of_two());
@@ -271,7 +270,7 @@ impl R1CSProof {
 
     // derive the verifier's challenge \tau
     let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_y) = 
-      (num_instances.log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
+      (num_instances.next_power_of_two().log_2(), max_num_proofs.log_2(), num_cons.log_2(), z_len.log_2());
     let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
     let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
     let tau_x = transcript.challenge_vector(b"challenge_tau_x", num_rounds_x);
@@ -436,9 +435,8 @@ impl R1CSProof {
     let comm_short_vars_at_ry: Option<CompressedRistretto>;
     let timer_polyeval = Timer::new("polyeval");
 
-    // poly_long
+    // poly_long, witness is different for each block
     for p in 0..num_instances {
-
       let (combined_poly, r) = {
         // if num_proofs[p] < max_num_proofs, then only the last few entries of rq needs to be binded
         let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
@@ -518,7 +516,7 @@ impl R1CSProof {
       proof_eval_vars_at_ry_list.push(proof_eval_vars_at_ry);
       comm_vars_at_ry_list.push(comm_vars_at_ry);
     }
-    // poly_short
+    // poly_short, witness is the same for all blocks
     match (num_witness_secs, num_shorts) {
       (_, 0) => {
         (eval_short_vars_at_ry, proof_eval_short_vars_at_ry, comm_short_vars_at_ry) = (None, None, None);
@@ -631,7 +629,7 @@ impl R1CSProof {
     assert_eq!(num_witness_secs, comm_w_list.len());
 
     let z_len = if num_witness_secs == 3 { num_inputs * 4 } else { num_inputs * num_witness_secs };
-    let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.log_2(), max_num_proofs.log_2(), z_len.log_2());
+    let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.next_power_of_two().log_2(), max_num_proofs.log_2(), z_len.log_2());
 
     // derive the verifier's challenge tau
     let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
@@ -737,7 +735,7 @@ impl R1CSProof {
     // An Eq function to match p with rp
     let p_rp_poly_bound_ry: Scalar = (0..rp.len())
       .map(|i| rp[i] * rp_round1[i] + (Scalar::one() - rp[i]) * (Scalar::one() - rp_round1[i]))
-      .product(); 
+      .product();
 
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
@@ -831,7 +829,6 @@ impl R1CSProof {
       },
       _ => panic!("PROOF Failed: Unsupported (num_witness_secs, num_shorts) pair: ({}, {})", num_witness_secs, num_shorts)
     }
-
     // Then on rp
     let mut expected_comm_vars_list: Vec<RistrettoPoint> = self.comm_vars_at_ry_list.iter().map(|i| i.decompress().unwrap()).collect();
     for p in 0..num_instances {
@@ -844,8 +841,8 @@ impl R1CSProof {
         expected_comm_vars_list[p] *= Scalar::one() - rq[q];
       }
     }
-    let EQ_p = EqPolynomial::new(rp.clone()).evals();
-    let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_comm_vars_list).compress();
+    let EQ_p = &EqPolynomial::new(rp.clone()).evals()[..num_instances];
+    let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(EQ_p, expected_comm_vars_list).compress();
     assert_eq!(expected_comm_vars_at_ry, self.comm_vars_at_ry);
 
     // compute commitment to eval_Z_at_ry = (Scalar::one() - ry[0]) * self.eval_vars_at_ry + ry[0] * poly_input_eval
@@ -855,6 +852,7 @@ impl R1CSProof {
     let (eval_A_r, eval_B_r, eval_C_r) = evals;
     let expected_claim_post_phase2 =
       ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry * p_rp_poly_bound_ry).compress();
+
     // verify proof that expected_claim_post_phase2 == claim_post_phase2
     self.proof_eq_sc_phase2.verify(
       &gens.gens_sc.gens_1,
@@ -900,13 +898,12 @@ impl R1CSProof {
     // --
 
     // Assert meta values are correct
-    assert_eq!(num_proofs, input_rows.len());
-    assert_eq!(num_proofs, num_proofs.next_power_of_two());
+    assert!(num_proofs <= input_rows.len());
     assert_eq!(base_input_size, base_input_size.next_power_of_two());
     assert_eq!(max_input_rows, max_input_rows.next_power_of_two());
     assert_eq!(w_mat.len(), num_proofs);
     assert!(inst.get_num_cons() >= max_input_rows * base_constraint_size);
-    for i in 0..input_rows.len() {
+    for i in 0..num_proofs {
       let input = input_rows[i];
       assert!(input <= max_input_rows);
       assert_eq!(input, input.next_power_of_two());
@@ -924,7 +921,7 @@ impl R1CSProof {
 
     // derive the verifier's challenge tau
     let (num_rounds_p, num_rounds_q, num_rounds_xb, num_rounds_yb) = 
-      (num_proofs.log_2(), max_input_rows.log_2(), base_constraint_size.log_2(), base_input_size.log_2());
+      (num_proofs.next_power_of_two().log_2(), max_input_rows.log_2(), base_constraint_size.log_2(), base_input_size.log_2());
     let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
     let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
     let tau_xb = transcript.challenge_vector(b"challenge_tau_x", num_rounds_xb);
@@ -1059,16 +1056,18 @@ impl R1CSProof {
 
     // Construct Z_poly evaluated on rp within runtime bound
     // Here we have p length-q*y Z, want to bind to rp
-    let mut n = num_proofs / 2;
+    let mut n = num_proofs.next_power_of_two() / 2;
     let mut z_list = z_list.clone();
     for r in &rp {
       for p in 0..n {
         for x in 0..z_list[p].len() {
           z_list[p][x] *= Scalar::one() - r;
         }
-        for x in 0..z_list[p + n].len() {
-          let z_high = z_list[p + n][x];
-          z_list[p][x] += r * z_high;
+        if p + n < num_proofs {
+          for x in 0..z_list[p + n].len() {
+            let z_high = z_list[p + n][x];
+            z_list[p][x] += r * z_high;
+          }
         }
       }
       n /= 2;
@@ -1201,7 +1200,7 @@ impl R1CSProof {
 
     // derive the verifier's challenge tau
     let (num_rounds_p, num_rounds_q, num_rounds_xb, num_rounds_yb) = 
-      (num_proofs.log_2(), max_input_rows.log_2(), base_constraint_size.log_2(), base_input_size.log_2());
+      (num_proofs.next_power_of_two().log_2(), max_input_rows.log_2(), base_constraint_size.log_2(), base_input_size.log_2());
     let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
     let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
     let tau_xb = transcript.challenge_vector(b"challenge_tau_x", num_rounds_xb);
@@ -1319,8 +1318,8 @@ impl R1CSProof {
         expected_comm_vars_list[p] *= Scalar::one() - ry[q];
       }
     }
-    let EQ_p = EqPolynomial::new(rp.clone()).evals();
-    let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(&EQ_p, expected_comm_vars_list).compress();
+    let EQ_p = &EqPolynomial::new(rp.clone()).evals()[..num_proofs];
+    let expected_comm_vars_at_ry = GroupElement::vartime_multiscalar_mul(EQ_p, expected_comm_vars_list).compress();
     assert_eq!(expected_comm_vars_at_ry, self.comm_vars_at_ry);
 
     let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();

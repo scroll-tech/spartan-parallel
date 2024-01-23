@@ -145,7 +145,10 @@ impl IdentityPolynomial {
 }
 
 impl DensePolynomial {
-  pub fn new(Z: Vec<Scalar>) -> Self {
+  pub fn new(mut Z: Vec<Scalar>) -> Self {
+    // If length of Z is not a power of 2, append Z with 0
+    let zero = Scalar::zero();
+    Z.extend(vec![zero; Z.len().next_power_of_two() - Z.len()]);
     DensePolynomial {
       num_vars: Z.len().log_2(),
       len: Z.len(),

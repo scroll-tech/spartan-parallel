@@ -347,21 +347,26 @@ impl RunTimeKnowledge {
 }
 
 fn main() {
-  let mut ctk = CompileTimeKnowledge::read_from_file(BENCHMARK_NAME.to_string()).unwrap();
+  let ctk = CompileTimeKnowledge::read_from_file(BENCHMARK_NAME.to_string()).unwrap();
   let rtk = RunTimeKnowledge::read_from_file(BENCHMARK_NAME.to_string()).unwrap();
 
-  let block_num_instances = ctk.block_num_instances.next_power_of_two();
+  // --
+  // INSTANCE PREPROCESSING
+  // --
+  let block_num_instances = ctk.block_num_instances;
   let num_vars = ctk.num_vars;
   assert_eq!(num_vars, num_vars.next_power_of_two());
   let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
-  let mut block_num_mem_accesses = ctk.block_num_mem_accesses;
+  let block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound.next_power_of_two();
 
-  // Pad entries in ctk and block_num_mem_accesses
-  assert!(ctk.args.len() <= block_num_instances);
-  assert!(block_num_mem_accesses.len() <= block_num_instances);
-  ctk.args.extend(vec![Vec::new(); block_num_instances - ctk.args.len()]);
-  block_num_mem_accesses.extend(vec![0; block_num_instances - block_num_mem_accesses.len()]);
+  assert!(ctk.args.len() == block_num_instances);
+  assert!(block_num_mem_accesses.len() == block_num_instances);
+  for n in &block_num_mem_accesses {
+    assert!(2 * n <= num_vars - 4);
+  }
+  // If output_block_num < block_num_instances, the prover can cheat by executing the program multiple times
+  assert!(ctk.output_block_num >= block_num_instances);
 
   // --
   // BLOCK INSTANCES
@@ -406,7 +411,7 @@ fn main() {
   let (mem_addr_poly_num_cons_base, mem_addr_poly_num_non_zero_entries, mem_addr_poly_inst) = Instance::gen_mem_addr_poly_inst(total_num_mem_accesses_bound_padded);
 
   // --
-  // INSTANCE PREPROCESSING
+  // COMMITMENT PREPROCESSING
   // --
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
   let perm_size_bound = total_num_proofs_bound;
@@ -427,38 +432,36 @@ fn main() {
   let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_addr_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
-  let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
+  let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   // for size PROOF * VAR
   let proofs_times_vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
 
   // create a commitment to the R1CS instance
   // TODO: change to encoding all r1cs instances
-  let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
+  let (block_comm, block_decomm) = SNARK::multi_encode(&block_inst, &block_gens);
   let (consis_comb_comm, consis_comb_decomm) = SNARK::encode(&consis_comb_inst, &consis_comb_gens);
   let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
-  let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
+  let (mem_extract_comm, mem_extract_decomm) = SNARK::multi_encode(&mem_extract_inst, &mem_extract_gens);
   let (mem_cohere_comm, mem_cohere_decomm) = SNARK::encode(&mem_cohere_inst, &mem_cohere_gens);
   let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
   let (mem_addr_poly_comm, mem_addr_poly_decomm) = SNARK::encode(&mem_addr_poly_inst, &mem_addr_poly_gens);
 
-  // Witness preprocess
-  let mut block_num_proofs = rtk.block_num_proofs;
-  let mut block_vars_matrix = rtk.block_vars_matrix;
-  let mut block_inputs_matrix = rtk.block_inputs_matrix;
+  // --
+  // WITNESS PREPROCESSING
+  // --
+  let block_num_proofs = rtk.block_num_proofs;
+  let block_vars_matrix = rtk.block_vars_matrix;
+  let block_inputs_matrix = rtk.block_inputs_matrix;
 
-  // All dummy blocks are executed 0 times
-  assert!(block_num_proofs.len() <= block_num_instances);
-  assert!(block_vars_matrix.len() <= block_num_instances);
-  assert!(block_inputs_matrix.len() == block_vars_matrix.len());
+  assert!(block_num_proofs.len() == block_num_instances);
+  assert!(block_vars_matrix.len() == block_num_instances);
+  assert!(block_inputs_matrix.len() == block_num_instances);
   for p in 0..block_vars_matrix.len() {
     assert_eq!(block_vars_matrix[p].len(), block_inputs_matrix[p].len());
   }
-  block_num_proofs.extend(vec![0; block_num_instances - block_num_proofs.len()]);
-  block_vars_matrix.extend(vec![Vec::new(); block_num_instances - block_vars_matrix.len()]);
-  block_inputs_matrix.extend(vec![Vec::new(); block_num_instances - block_inputs_matrix.len()]);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");

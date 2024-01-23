@@ -22,7 +22,6 @@ impl Instance {
     B: &Vec<Vec<(usize, usize, [u8; 32])>>,
     C: &Vec<Vec<(usize, usize, [u8; 32])>>,
   ) -> Result<Instance, R1CSError> {
-    let num_instances_padded = num_instances.next_power_of_two();
     let (num_vars_padded, num_cons_padded) = {
       let num_vars_padded = {
         let mut num_vars_padded = num_vars;
@@ -118,7 +117,7 @@ impl Instance {
     }
 
     let inst = R1CSInstance::new(
-      num_instances_padded,
+      num_instances,
       num_cons_padded,
       num_vars_padded,
       &A_scalar_list,

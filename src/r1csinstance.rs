@@ -17,17 +17,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct R1CSInstance {
+  // num_instances DOES NOT need to be a power of 2!
   num_instances: usize,
+  // num_cons and num_vars need to be power of 2
   num_cons: usize,
   num_vars: usize,
   // List of individual A, B, C for matrix multiplication
   A_list: Vec<SparseMatPolynomial>,
   B_list: Vec<SparseMatPolynomial>,
   C_list: Vec<SparseMatPolynomial>,
-  // Concat all A's into a (p * x) by q matrix for commitment and evaluation
-  A_poly: SparseMatPolynomial,
-  B_poly: SparseMatPolynomial,
-  C_poly: SparseMatPolynomial,
 }
 
 pub struct R1CSCommitmentGens {
@@ -95,9 +93,6 @@ impl R1CSInstance {
     // Timer::print(&format!("number_non-zero_entries_B {}", B.len()));
     // Timer::print(&format!("number_non-zero_entries_C {}", C.len()));
 
-    // check that num_instances is a power of 2
-    assert_eq!(num_instances.next_power_of_two(), num_instances);
-
     // check that num_cons is a power of 2
     assert_eq!(num_cons.next_power_of_two(), num_cons);
 
@@ -109,7 +104,6 @@ impl R1CSInstance {
     assert_eq!(B_list.len(), C_list.len());
 
     // no errors, so create polynomials
-    let num_poly_vars_px = (num_instances * num_cons).log_2();
     let num_poly_vars_x = num_cons.log_2();
     let num_poly_vars_y = num_vars.log_2();
 
@@ -158,9 +152,6 @@ impl R1CSInstance {
       A_list: poly_A_list,
       B_list: poly_B_list,
       C_list: poly_C_list,
-      A_poly: SparseMatPolynomial::new(num_poly_vars_px, num_poly_vars_y, mat_A),
-      B_poly: SparseMatPolynomial::new(num_poly_vars_px, num_poly_vars_y, mat_B),
-      C_poly: SparseMatPolynomial::new(num_poly_vars_px, num_poly_vars_y, mat_C)
     }
   }
 
@@ -297,7 +288,6 @@ impl R1CSInstance {
 
     (inst, Z[..num_vars].to_vec(), Z[num_vars + 1..].to_vec())
   }
-  */
 
   pub fn is_sat(&self, vars: &Vec<Vec<Vec<Scalar>>>, input: &Vec<Vec<Vec<Scalar>>>) -> bool {
     assert_eq!(vars.len(), self.num_instances);
@@ -340,6 +330,7 @@ impl R1CSInstance {
     }
     return true;
   }
+  */
 
   // Az(p, q, x) <- A(p, x) * z(p, q, x), where we require p for A and z are the same
   // Return Az, Bz, Cz as DensePolynomialPqx
@@ -359,6 +350,7 @@ impl R1CSInstance {
     let mut Bz = Vec::new();
     let mut Cz = Vec::new();
 
+    // Non-zero instances
     for p in 0..num_instances {
       let p_inst = if self.num_instances == 1 { 0 } else { p };
 
@@ -376,6 +368,7 @@ impl R1CSInstance {
         Cz[p].push(self.C_list[p_inst].multiply_vec(num_rows, num_cols, z));
       }
     }
+    
     (
       DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
       DensePolynomialPqx::new_rev(&Bz, num_proofs, max_num_proofs),
@@ -404,6 +397,7 @@ impl R1CSInstance {
     let mut Bz = Vec::new();
     let mut Cz = Vec::new();
     
+    // Non-zero instances
     for p in 0..num_instances {
       let z = &z_list[p];
       assert!(num_proofs[p] <= max_num_proofs);
@@ -412,27 +406,11 @@ impl R1CSInstance {
       Bz.push(self.B_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
       Cz.push(self.C_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
     }
+
     (
       DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
       DensePolynomialPqx::new_rev(&Bz, num_proofs, max_num_proofs),
       DensePolynomialPqx::new_rev(&Cz, num_proofs, max_num_proofs)
-    )
-  }
-
-  pub fn multiply_vec(
-    &self,
-    p: usize,
-    num_rows: usize,
-    num_cols: usize,
-    z: &[Scalar],
-  ) -> (DensePolynomial, DensePolynomial, DensePolynomial) {
-    assert_eq!(num_rows, self.num_cons);
-    assert_eq!(z.len(), num_cols);
-    assert!(num_cols > self.num_vars);
-    (
-      DensePolynomial::new(self.A_list[p].multiply_vec(num_rows, num_cols, z)),
-      DensePolynomial::new(self.B_list[p].multiply_vec(num_rows, num_cols, z)),
-      DensePolynomial::new(self.C_list[p].multiply_vec(num_rows, num_cols, z)),
     )
   }
 
@@ -450,15 +428,30 @@ impl R1CSInstance {
     let mut evals_A_list = Vec::new();
     let mut evals_B_list = Vec::new();
     let mut evals_C_list = Vec::new();
-    for p in 0..num_instances {
-      let p_inst = if self.num_instances == 1 { 0 } else { p };
-
-      let evals_A = self.A_list[p_inst].compute_eval_table_sparse(evals, num_rows, num_cols);
-      let evals_B = self.B_list[p_inst].compute_eval_table_sparse(evals, num_rows, num_cols);
-      let evals_C = self.C_list[p_inst].compute_eval_table_sparse(evals, num_rows, num_cols);
-      evals_A_list.extend(evals_A);
-      evals_B_list.extend(evals_B);
-      evals_C_list.extend(evals_C);
+    // If num_instances is 1, copy it for num_instances.next_power_of_two()
+    if self.num_instances == 1 {
+      let evals_A = self.A_list[0].compute_eval_table_sparse(evals, num_rows, num_cols);
+      let evals_B = self.B_list[0].compute_eval_table_sparse(evals, num_rows, num_cols);
+      let evals_C = self.C_list[0].compute_eval_table_sparse(evals, num_rows, num_cols);
+      evals_A_list = vec![evals_A; num_instances.next_power_of_two()].concat();
+      evals_B_list = vec![evals_B; num_instances.next_power_of_two()].concat();
+      evals_C_list = vec![evals_C; num_instances.next_power_of_two()].concat();
+    } else {
+      // Non-zero instances
+      for p in 0..num_instances {
+        let evals_A = self.A_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
+        let evals_B = self.B_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
+        let evals_C = self.C_list[p].compute_eval_table_sparse(evals, num_rows, num_cols);
+        evals_A_list.extend(evals_A);
+        evals_B_list.extend(evals_B);
+        evals_C_list.extend(evals_C);
+      }
+      // Zero instances
+      for _ in num_instances..num_instances.next_power_of_two() {
+        evals_A_list.extend(vec![Scalar::zero(); num_cols]);
+        evals_B_list.extend(vec![Scalar::zero(); num_cols]);
+        evals_C_list.extend(vec![Scalar::zero(); num_cols]);
+      }
     }
 
     (evals_A_list, evals_B_list, evals_C_list)
@@ -482,28 +475,96 @@ impl R1CSInstance {
     let mut evals_A_list = Vec::new();
     let mut evals_B_list = Vec::new();
     let mut evals_C_list = Vec::new();
-    for p in 0..num_instances {
-      let p_inst = if self.num_instances == 1 { 0 } else { p };
 
-      let evals_A = self.A_list[p_inst].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
-      let evals_B = self.B_list[p_inst].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
-      let evals_C = self.C_list[p_inst].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
-      evals_A_list.extend(evals_A);
-      evals_B_list.extend(evals_B);
-      evals_C_list.extend(evals_C);
+    // If num_instances is 1, copy it for num_instances.next_power_of_two()
+    if self.num_instances == 1 {
+      let evals_A = self.A_list[0].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+      let evals_B = self.B_list[0].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+      let evals_C = self.C_list[0].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+      evals_A_list = vec![evals_A; num_instances.next_power_of_two()].concat();
+      evals_B_list = vec![evals_B; num_instances.next_power_of_two()].concat();
+      evals_C_list = vec![evals_C; num_instances.next_power_of_two()].concat();
+    } else {
+      // Non-zero instances
+      for p in 0..num_instances {
+        let evals_A = self.A_list[p].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+        let evals_B = self.B_list[p].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+        let evals_C = self.C_list[p].compute_eval_table_sparse_single(evals, max_num_proofs, max_num_proofs_bound, num_rows, num_cols);
+        evals_A_list.extend(evals_A);
+        evals_B_list.extend(evals_B);
+        evals_C_list.extend(evals_C);
+      }
+      // Zero instances
+      for _ in num_instances..num_instances.next_power_of_two() {
+        evals_A_list.extend(vec![Scalar::zero(); num_cols]);
+        evals_B_list.extend(vec![Scalar::zero(); num_cols]);
+        evals_C_list.extend(vec![Scalar::zero(); num_cols]);
+      }
     }
 
     (evals_A_list, evals_B_list, evals_C_list)
   }
 
+  pub fn multi_evaluate(&self, rp: &[Scalar], rx: &[Scalar], ry: &[Scalar]) -> 
+  (
+    Vec<(Scalar, Scalar, Scalar)>, // Each individual block
+    (Scalar, Scalar, Scalar)    // Combined, bound to rp
+  ) {
+    let mut a_evals = Vec::new();
+    let mut b_evals = Vec::new();
+    let mut c_evals = Vec::new();
+    let mut eval_list = Vec::new();
+    // Evaluate each individual poly on [rx, ry]
+    for i in 0..self.num_instances {
+      let evals = SparseMatPolynomial::multi_evaluate(&[&self.A_list[i], &self.B_list[i], &self.C_list[i]], rx, ry);
+      eval_list.push((evals[0].clone(), evals[1].clone(), evals[2].clone()));
+      a_evals.push(evals[0]);
+      b_evals.push(evals[1]);
+      c_evals.push(evals[2]);
+    }
+    // Bind A, B, C to rp
+    let a_eval = DensePolynomial::new(a_evals).evaluate(rp);
+    let b_eval = DensePolynomial::new(b_evals).evaluate(rp);
+    let c_eval = DensePolynomial::new(c_evals).evaluate(rp);
+    let eval_bound_rp = (a_eval, b_eval, c_eval);
 
-  pub fn evaluate(&self, rp: &[Scalar], rx: &[Scalar], ry: &[Scalar]) -> (Scalar, Scalar, Scalar) {
-    let evals = SparseMatPolynomial::multi_evaluate(&[&self.A_poly, &self.B_poly, &self.C_poly], &[rp, rx].concat(), ry);
+    (eval_list, eval_bound_rp)
+  }
+
+  // Used if there is only one instance
+  pub fn evaluate(&self, rx: &[Scalar], ry: &[Scalar]) -> (Scalar, Scalar, Scalar) {
+    assert_eq!(self.num_instances, 1);
+
+    let evals = SparseMatPolynomial::multi_evaluate(&[&self.A_list[0], &self.B_list[0], &self.C_list[0]], rx, ry);
     (evals[0], evals[1], evals[2])
   }
 
+  pub fn multi_commit(&self, gens: &R1CSCommitmentGens) -> (Vec<R1CSCommitment>, Vec<R1CSDecommitment>) {
+    let mut r1cs_comm_list = Vec::new();
+    let mut r1cs_decomm_list = Vec::new();
+
+    for i in 0..self.num_instances {
+      let (comm, dense) = SparseMatPolynomial::multi_commit(&[&self.A_list[i], &self.B_list[i], &self.C_list[i]], &gens.gens);
+      let r1cs_comm = R1CSCommitment {
+        num_cons: self.num_instances * self.num_cons,
+        num_vars: self.num_vars,
+        comm,
+      };
+
+      let r1cs_decomm = R1CSDecommitment { dense };
+
+      r1cs_comm_list.push(r1cs_comm);
+      r1cs_decomm_list.push(r1cs_decomm);
+    }
+
+    (r1cs_comm_list, r1cs_decomm_list)
+  }
+
+  // Used if there is only one instance
   pub fn commit(&self, gens: &R1CSCommitmentGens) -> (R1CSCommitment, R1CSDecommitment) {
-    let (comm, dense) = SparseMatPolynomial::multi_commit(&[&self.A_poly, &self.B_poly, &self.C_poly], &gens.gens);
+    assert_eq!(self.num_instances, 1);
+
+    let (comm, dense) = SparseMatPolynomial::multi_commit(&[&self.A_list[0], &self.B_list[0], &self.C_list[0]], &gens.gens);
     let r1cs_comm = R1CSCommitment {
       num_cons: self.num_instances * self.num_cons,
       num_vars: self.num_vars,

@@ -35,8 +35,12 @@ fn rev_bits(q: usize, max_num_proofs: usize) -> usize {
 impl DensePolynomialPqx {
   // Assume z_mat is of form (p, q_rev, x), construct DensePoly
   pub fn new(z_mat: &Vec<Vec<Vec<Scalar>>>, num_proofs: &Vec<usize>, max_num_proofs: usize) -> Self {
-      let num_instances = z_mat.len();
+      let num_instances = z_mat.len().next_power_of_two();
       let num_inputs = z_mat[0][0].len();
+      // If num_instances is not a power of 2, append z_mat with 0
+      let mut z_mat = z_mat.clone();
+      let zero = Scalar::zero();
+      z_mat.extend(vec![vec![vec![zero; num_inputs]]; num_instances - z_mat.len()]);
       DensePolynomialPqx {
         num_vars_q: max_num_proofs.log_2(),
         num_vars_p: num_instances.log_2(),
@@ -45,7 +49,7 @@ impl DensePolynomialPqx {
         num_proofs: num_proofs.clone(),
         max_num_proofs,
         num_inputs,
-        Z: z_mat.clone()
+        Z: z_mat
       }
     }
 
@@ -68,6 +72,12 @@ impl DensePolynomialPqx {
               Z[p][q_rev].push(z_mat[p][q][x].clone());
           }
       }
+    }
+    // If num_instances is not a power of 2, append Z with 0
+    let num_instances = num_instances.next_power_of_two();
+    let zero = Scalar::zero();
+    for _ in z_mat.len()..num_instances {
+      Z.push(vec![vec![zero; num_inputs]]);
     }
     DensePolynomialPqx {
       num_vars_q: max_num_proofs.log_2(),
