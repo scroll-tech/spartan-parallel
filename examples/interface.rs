@@ -3,11 +3,10 @@
 #![allow(clippy::assertions_on_result_states)]
 use std::{cmp::max, fs::File, io::BufReader};
 use std::io::BufRead;
+use std::env;
 
 use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
-
-const BENCHMARK_NAME: &str = "2pc_loop_addition";
 
 // Convert a string of numbers separated by spaces into a vector
 fn string_to_vec(buffer: String) -> Vec<usize> {
@@ -347,30 +346,31 @@ impl RunTimeKnowledge {
 }
 
 fn main() {
-  let ctk = CompileTimeKnowledge::read_from_file(BENCHMARK_NAME.to_string()).unwrap();
-  let rtk = RunTimeKnowledge::read_from_file(BENCHMARK_NAME.to_string()).unwrap();
+  let benchmark_name = &env::args().collect::<Vec<String>>()[1];
+  let ctk = CompileTimeKnowledge::read_from_file(benchmark_name.to_string()).unwrap();
+  let rtk = RunTimeKnowledge::read_from_file(benchmark_name.to_string()).unwrap();
 
   // --
   // INSTANCE PREPROCESSING
   // --
-  let block_num_instances = ctk.block_num_instances;
+  let block_num_instances_bound = ctk.block_num_instances;
   let num_vars = ctk.num_vars;
   assert_eq!(num_vars, num_vars.next_power_of_two());
   let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound.next_power_of_two();
 
-  assert!(ctk.args.len() == block_num_instances);
-  assert!(block_num_mem_accesses.len() == block_num_instances);
+  assert!(ctk.args.len() == block_num_instances_bound);
+  assert!(block_num_mem_accesses.len() == block_num_instances_bound);
   for n in &block_num_mem_accesses {
     assert!(2 * n <= num_vars - 4);
   }
   // If output_block_num < block_num_instances, the prover can cheat by executing the program multiple times
-  assert!(ctk.output_block_num >= block_num_instances);
+  assert!(ctk.output_block_num >= block_num_instances_bound);
 
   // --
   // BLOCK INSTANCES
-  let (block_num_cons, block_num_non_zero_entries, block_inst) = Instance::gen_block_inst(block_num_instances, num_vars, &ctk.args);
+  let (block_num_cons, block_num_non_zero_entries, mut block_inst) = Instance::gen_block_inst(block_num_instances_bound, num_vars, &ctk.args);
 
   // CONSIS INSTANCES
   // CONSIS is consisted of two instances
@@ -401,7 +401,7 @@ fn main() {
   // MEM INSTANCES
   let total_num_mem_accesses_bound_padded = if total_num_mem_accesses_bound == 0 {1} else {total_num_mem_accesses_bound};
   // MEM_EXTRACT
-  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(block_num_instances, num_vars, &block_num_mem_accesses);
+  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mut mem_extract_inst) = Instance::gen_mem_extract_inst(block_num_instances_bound, num_vars, &block_num_mem_accesses);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound_padded);
   // MEM_BLOCK_POLY is PERM_BLOCK_POLY
@@ -420,19 +420,19 @@ fn main() {
   let mem_addr_poly_num_cons = mem_addr_poly_num_cons_base * total_num_mem_accesses_bound_padded;
 
   // produce public parameters
-  let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
+  let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound, block_num_non_zero_entries);
   let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_vars, 1, consis_comb_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * num_vars, 1, consis_check_num_non_zero_entries);
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
-  let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances, mem_extract_num_non_zero_entries);
+  let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances_bound, mem_extract_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_addr_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
-  let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
+  let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   // for size PROOF * VAR
   let proofs_times_vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
 
@@ -456,9 +456,9 @@ fn main() {
   let block_vars_matrix = rtk.block_vars_matrix;
   let block_inputs_matrix = rtk.block_inputs_matrix;
 
-  assert!(block_num_proofs.len() == block_num_instances);
-  assert!(block_vars_matrix.len() == block_num_instances);
-  assert!(block_inputs_matrix.len() == block_num_instances);
+  assert!(block_num_proofs.len() <= block_num_instances_bound);
+  assert!(block_vars_matrix.len() <= block_num_instances_bound);
+  assert!(block_inputs_matrix.len() <= block_num_instances_bound);
   for p in 0..block_vars_matrix.len() {
     assert_eq!(block_vars_matrix[p].len(), block_inputs_matrix[p].len());
   }
@@ -477,10 +477,10 @@ fn main() {
     
     num_vars,
     total_num_proofs_bound,
-    block_num_instances,
+    block_num_instances_bound,
     rtk.block_max_num_proofs,
-    block_num_proofs.clone(),
-    &block_inst,
+    &block_num_proofs,
+    &mut block_inst,
     &block_comm,
     &block_decomm,
     &block_gens,
@@ -511,7 +511,7 @@ fn main() {
     &perm_poly_gens,
 
     &block_num_mem_accesses,
-    &mem_extract_inst,
+    &mut mem_extract_inst,
     &mem_extract_comm,
     &mem_extract_decomm,
     &mem_extract_gens,
@@ -559,9 +559,9 @@ fn main() {
 
     num_vars,
     total_num_proofs_bound,
-    block_num_instances, 
+    block_num_instances_bound, 
     rtk.block_max_num_proofs, 
-    block_num_proofs, 
+    &block_num_proofs, 
     block_num_cons, 
     &block_comm,
     &block_gens,

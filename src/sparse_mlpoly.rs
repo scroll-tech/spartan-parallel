@@ -13,11 +13,10 @@ use super::scalar::Scalar;
 use super::timer::Timer;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use core::cmp::Ordering;
-use std::cmp::min;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SparseMatEntry {
   row: usize,
   col: usize,
@@ -30,7 +29,7 @@ impl SparseMatEntry {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SparseMatPolynomial {
   num_vars_x: usize,
   num_vars_y: usize,

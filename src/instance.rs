@@ -130,6 +130,13 @@ impl Instance {
     Ok(Instance { inst, digest })
   }
 
+  /// Sort the instances based on index
+  // index[i] = j => the original jth entry should now be at the ith position
+  pub fn sort(&mut self, num_instances: usize, index: &Vec<usize>) {
+    self.inst.sort(num_instances, index);
+    self.digest = self.inst.get_digest();
+  }
+
   // Generates a constraints based on supplied (variable, constant) pairs
   fn gen_constr(
     mut A: Vec<(usize, usize, [u8; 32])>, 

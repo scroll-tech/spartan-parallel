@@ -41,6 +41,8 @@ mod timer;
 mod transcript;
 mod unipoly;
 
+use std::cmp::Ordering;
+
 use instance::Instance;
 use dense_mlpoly::{DensePolynomial, PolyCommitment, PolyEvalProof};
 use errors::{ProofVerifyError, R1CSError};
@@ -423,9 +425,9 @@ pub struct SNARK {
   io_proof: IOProofs
 }
 
-/// Proofs regarding memory accesses within each block
+// Proofs regarding memory accesses within each block
 #[derive(Serialize, Deserialize, Debug)]
-pub struct MemBlockProofs {
+struct MemBlockProofs {
   mem_extract_r1cs_sat_proof: R1CSProof,
   mem_extract_inst_evals_bound_rp: (Scalar, Scalar, Scalar),
   mem_extract_inst_evals_list: Vec<(Scalar, Scalar, Scalar)>,
@@ -438,9 +440,9 @@ pub struct MemBlockProofs {
   proof_eval_mem_block_prod_list: Vec<PolyEvalProof>,
 }
 
-/// Proofs regarding memory accesses as a whole
+// Proofs regarding memory accesses as a whole
 #[derive(Serialize, Deserialize, Debug)]
-pub struct MemAddrProofs {
+struct MemAddrProofs {
   mem_cohere_r1cs_sat_proof: R1CSProof,
   mem_cohere_inst_evals: (Scalar, Scalar, Scalar),
   mem_cohere_r1cs_eval_proof: R1CSEvalProof,
@@ -457,6 +459,38 @@ pub struct MemAddrProofs {
   mem_addr_poly: Scalar,
   proof_eval_mem_addr_prod: PolyEvalProof,
 }
+
+// Sort block_num_proofs and record where each entry is
+struct InstanceSortHelper {
+  num_exec: usize,
+  index: usize,
+}
+impl InstanceSortHelper {
+  fn new(num_exec: usize, index: usize) -> InstanceSortHelper {
+    InstanceSortHelper {
+      num_exec,
+      index
+    }
+  }
+}
+
+// Ordering of InstanceSortHelper solely by num_exec
+impl Ord for InstanceSortHelper {
+  fn cmp(&self, other: &Self) -> Ordering {
+      self.num_exec.cmp(&other.num_exec)
+  }
+}
+impl PartialOrd for InstanceSortHelper {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+      Some(self.cmp(other))
+  }
+}
+impl PartialEq for InstanceSortHelper {
+  fn eq(&self, other: &Self) -> bool {
+      self.num_exec == other.num_exec
+  }
+}
+impl Eq for InstanceSortHelper {}
 
 impl SNARK {
   fn protocol_name() -> &'static [u8] {
@@ -505,10 +539,10 @@ impl SNARK {
     num_vars: usize,
     total_num_proofs_bound: usize,
 
-    block_num_instances: usize,
+    block_num_instances_bound: usize,
     block_max_num_proofs: usize,
-    mut block_num_proofs: Vec<usize>,
-    block_inst: &Instance,
+    block_num_proofs: &Vec<usize>,
+    block_inst: &mut Instance,
     block_comm: &Vec<ComputationCommitment>,
     block_decomm: &Vec<ComputationDecommitment>,
     block_gens: &SNARKGens,
@@ -542,7 +576,7 @@ impl SNARK {
     perm_poly_gens: &SNARKGens,
 
     block_num_mem_accesses: &Vec<usize>,
-    mem_extract_inst: &Instance,
+    mem_extract_inst: &mut Instance,
     mem_extract_comm: &Vec<ComputationCommitment>,
     mem_extract_decomm: &Vec<ComputationDecommitment>,
     mem_extract_gens: &SNARKGens,
@@ -588,7 +622,7 @@ impl SNARK {
     // ASSERTIONS
     // --
     assert!(0 < consis_num_proofs);
-    for p in 0..block_num_instances {
+    for p in 0..block_num_instances_bound {
       assert!(block_num_proofs[p] <= block_max_num_proofs);
     }
     assert!(consis_num_proofs <= total_num_proofs_bound);
@@ -603,33 +637,8 @@ impl SNARK {
     let mut exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
     let mut addr_mems_list = addr_mems_list.into_iter().map(|v| v.assignment).collect_vec();
 
-    // For every block that is not executed, pad an invalid input to it for commitment and sumcheck
-    let block_num_proofs_unpadded = block_num_proofs.clone();
-    let dummy_input = vec![Scalar::zero(); num_vars];
-    for i in 0..block_num_instances {
-      if block_num_proofs[i] == 0 {
-        block_num_proofs[i] = 1;
-        assert_eq!(block_vars_mat[i].len(), 0);
-        block_vars_mat[i].push(dummy_input.clone());
-        assert_eq!(block_inputs_mat[i].len(), 0);
-        block_inputs_mat[i].push(dummy_input.clone());
-      }
-    }
-    // Pad num_proofs with 1 until the next power of 2
-    block_num_proofs.extend(vec![1; block_num_instances.next_power_of_two() - block_num_instances]);
-    let block_num_proofs = &block_num_proofs;
-
-    // Pad exec_inputs with dummys so the length is a power of 2
-    exec_inputs_list.extend(vec![dummy_input; consis_num_proofs.next_power_of_two() - consis_num_proofs]);
-    let consis_num_proofs = consis_num_proofs.next_power_of_two();
-
-    // Pad addr_mems with dummys so the length is a power of 2
-    let dummy_input = vec![Scalar::zero(); 4];
-    addr_mems_list.extend(vec![dummy_input; total_num_mem_accesses.next_power_of_two() - total_num_mem_accesses]);
-    let total_num_mem_accesses = total_num_mem_accesses.next_power_of_two();
-
     // --
-    // COMMITMENTS
+    // INSTANCE COMMITMENTS
     // --
 
     // Commit instances
@@ -661,12 +670,67 @@ impl SNARK {
     // Commit num_proofs
     let timer_commit = Timer::new("metacommit");
     Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
-    for n in &block_num_proofs_unpadded {
+    for n in block_num_proofs {
       Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
     }
     timer_commit.stop();
 
-    // Commit witnesses
+    // --
+    // BLOCK SORT
+    // --
+    // Block_num_instance is the number of non-zero entries in block_num_proofs
+    let block_num_instances = block_num_proofs.iter().fold(0, |i, j| if *j > 0 { i + 1 } else { i });
+    // Sort the following based on block_num_proofs:
+    // - block_num_proofs
+    // - block_inst, block_comm, block_decomm
+    // - block_num_mem_accesses
+    // - mem_extract_inst, mem_extract_comm, mem_extract_decomm
+    let mut inst_sorter = Vec::new();
+    for i in 0..block_num_instances_bound {
+      inst_sorter.push(InstanceSortHelper::new(block_num_proofs[i], i))
+    }
+    // Sort from high -> low
+    inst_sorter.sort_by(|a, b| b.cmp(a));
+
+    let inst_sorter = &inst_sorter[..block_num_instances];
+    let mut block_num_proofs: Vec<usize> = inst_sorter.iter().map(|i| i.num_exec).collect();
+    // index[i] = j => the original jth entry should now be at the ith position
+    let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
+    block_inst.sort(block_num_instances, &index);
+    let block_decomm: &Vec<&ComputationDecommitment> = &(0..block_num_instances).map(|i| &block_decomm[index[i]]).collect();
+    let block_num_mem_accesses: Vec<usize> = (0..block_num_instances).map(|i| block_num_mem_accesses[index[i]]).collect();
+    mem_extract_inst.sort(block_num_instances, &index);
+    let mem_extract_decomm: &Vec<&ComputationDecommitment> = &(0..block_num_instances).map(|i| &mem_extract_decomm[index[i]]).collect();
+
+    // --
+    // PADDING
+    // --
+    let zero = Scalar::zero();
+    let dummy_input = vec![zero; num_vars];
+    // For every block that num_proofs is not a power of 2, pad vars_mat and inputs_mat until the length is a power of 2
+    let block_max_num_proofs = block_max_num_proofs.next_power_of_two();
+    for i in 0..block_num_instances {
+      let gap = block_num_proofs[i].next_power_of_two() - block_num_proofs[i];
+      block_vars_mat[i].extend(vec![dummy_input.clone(); gap]);
+      block_inputs_mat[i].extend(vec![dummy_input.clone(); gap]);
+      block_num_proofs[i] = block_num_proofs[i].next_power_of_two();
+    }
+    // Pad num_proofs with 1 until the next power of 2
+    block_num_proofs.extend(vec![1; block_num_instances.next_power_of_two() - block_num_instances]);
+    let block_num_proofs = &block_num_proofs;
+
+    // Pad exec_inputs with dummys so the length is a power of 2
+    exec_inputs_list.extend(vec![dummy_input; consis_num_proofs.next_power_of_two() - consis_num_proofs]);
+    let consis_num_proofs = consis_num_proofs.next_power_of_two();
+
+    // Pad addr_mems with dummys so the length is a power of 2
+    let dummy_addr = vec![zero; 4];
+    addr_mems_list.extend(vec![dummy_addr; total_num_mem_accesses.next_power_of_two() - total_num_mem_accesses]);
+    let total_num_mem_accesses = total_num_mem_accesses.next_power_of_two();
+
+    // --
+    // WITNESS COMMITMENTS
+    // --
     let timer_commit = Timer::new("polycommit");
     let (
       block_poly_vars_list,
@@ -2339,9 +2403,9 @@ impl SNARK {
 
     num_vars: usize,
     total_num_proofs_bound: usize,
-    block_num_instances: usize,
+    block_num_instances_bound: usize,
     block_max_num_proofs: usize,
-    block_num_proofs: Vec<usize>,
+    block_num_proofs: &Vec<usize>,
     block_num_cons: usize,
     block_comm: &Vec<ComputationCommitment>,
     block_gens: &SNARKGens,
@@ -2397,20 +2461,11 @@ impl SNARK {
     // ASSERTIONS
     // --
     assert!(0 < consis_num_proofs);
-    for p in 0..block_num_instances {
+    for p in 0..block_num_instances_bound {
       assert!(block_num_proofs[p] <= block_max_num_proofs);
     }
     assert!(consis_num_proofs <= total_num_proofs_bound);
     assert!(total_num_mem_accesses <= total_num_mem_accesses_bound);
-
-    // --
-    // PREPROCESSING
-    // --
-    // During verification, we pad the number of execution of every unexecuted block to 1
-    let block_num_proofs_unpadded = block_num_proofs.clone();
-    let block_num_proofs = &block_num_proofs.iter().map(|i| if *i == 0 {1} else {*i}).collect();
-    let consis_num_proofs = consis_num_proofs.next_power_of_two();
-    let total_num_mem_accesses = total_num_mem_accesses.next_power_of_two();
 
     // --
     // COMMITMENTS
@@ -2446,11 +2501,56 @@ impl SNARK {
       // Commit num_proofs
       let timer_commit = Timer::new("metacommit");
       Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
-      for n in &block_num_proofs_unpadded {
+      for n in block_num_proofs {
         Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
       }
       timer_commit.stop();
+    }
 
+    // --
+    // BLOCK SORT
+    // --
+    // Block_num_instance is the number of non-zero entries in block_num_proofs
+    let block_num_instances = block_num_proofs.iter().fold(0, |i, j| if *j > 0 { i + 1 } else { i });
+    // Sort the following based on block_num_proofs:
+    // - block_num_proofs
+    // - block_inst, block_comm, block_decomm
+    // - block_num_mem_accesses
+    // - mem_extract_inst, mem_extract_comm, mem_extract_decomm
+    let mut inst_sorter = Vec::new();
+    for i in 0..block_num_instances_bound {
+      inst_sorter.push(InstanceSortHelper::new(block_num_proofs[i], i))
+    }
+    // Sort from high -> low
+    inst_sorter.sort_by(|a, b| b.cmp(a));
+
+    let inst_sorter = &inst_sorter[..block_num_instances];
+    let mut block_num_proofs: Vec<usize> = inst_sorter.iter().map(|i| i.num_exec).collect();
+    // index[i] = j => the original jth entry should now be at the ith position
+    let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
+    let block_comm: &Vec<&ComputationCommitment> = &(0..block_num_instances).map(|i| &block_comm[index[i]]).collect();
+    let mem_extract_comm: &Vec<&ComputationCommitment> = &(0..block_num_instances).map(|i| &mem_extract_comm[index[i]]).collect();
+
+    // --
+    // PADDING
+    // --
+    // Pad entries of block_num_proofs to a power of 2
+    let block_max_num_proofs = block_max_num_proofs.next_power_of_two();
+    for i in 0..block_num_instances {
+      block_num_proofs[i] = block_num_proofs[i].next_power_of_two();
+    }
+    // Pad num_proofs with 1 until the next power of 2
+    block_num_proofs.extend(vec![1; block_num_instances.next_power_of_two() - block_num_instances]);
+    let block_num_proofs = &block_num_proofs;
+    // Pad exec_inputs with dummys so the length is a power of 2
+    let consis_num_proofs = consis_num_proofs.next_power_of_two();
+    // Pad addr_mems with dummys so the length is a power of 2
+    let total_num_mem_accesses = total_num_mem_accesses.next_power_of_two();
+
+    // --
+    // SAMPLE CHALLENGES AND COMMIT WITNESSES
+    // --
+    {
       // add the commitment to the verifier's transcript
       for p in 0..block_num_instances {
         self.block_comm_vars_list[p].append_to_transcript(b"poly_commitment", transcript);
@@ -2461,11 +2561,6 @@ impl SNARK {
         self.addr_comm_mems[0].append_to_transcript(b"poly_commitment", transcript);
       }
     }
-
-    // --
-    // SAMPLE CHALLENGES AND COMMIT WITNESSES FOR PERMUTATION
-    // --
-
     let comb_tau = transcript.challenge_scalar(b"challenge_tau");
     let comb_r = transcript.challenge_scalar(b"challenge_r");
     {
@@ -2762,10 +2857,7 @@ impl SNARK {
             &self.perm_block_poly_list[p],
             &self.perm_block_comm_w3_list[p],
           )?;
-        // Only multuply the root if the block has been executed
-        if block_num_proofs_unpadded[p] > 0 {
           perm_block_poly_bound_tau *= self.perm_block_poly_list[p];
-        }
       }
       perm_block_poly_bound_tau
     };
@@ -2968,10 +3060,7 @@ impl SNARK {
             &mem_block_proofs.mem_block_poly_list[p],
             &self.mem_block_comm_w1_list[p],
           )?;
-          // Only multuply the root if the block has been executed
-          if block_num_proofs_unpadded[p] > 0 {
-            mem_block_poly_bound_tau *= mem_block_proofs.mem_block_poly_list[p];
-          }
+          mem_block_poly_bound_tau *= mem_block_proofs.mem_block_poly_list[p];
         }
         mem_block_poly_bound_tau
       };

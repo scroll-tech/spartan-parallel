@@ -179,37 +179,7 @@ fn produce_r1cs() -> (
     let V_B0 = num_vars + 7;
 
     let mut args = Vec::new();
-    // Instance 0: block 1
-    // Instances need to be sorted form highest # of execution -> lowest
-    let arg = vec![
-      // 0: v * v = v
-      (vec![(V_valid, one)], vec![(V_valid, one)], vec![(V_valid, one)]),
-      // 1: 0 = w - v
-      (vec![], vec![], vec![(V_w, one), (V_valid, minus_one)]),
-      // 2: 0 = b0 - 1
-      (vec![], vec![], vec![(V_b0, one), (V_cnst, minus_one)]),
-      // 3: 0 = A0
-      (vec![], vec![], vec![(V_A0, one)]),
-      // 4: 0 = A1 - 1
-      (vec![], vec![], vec![(V_A1, one), (V_cnst, minus_one)]),
-      // 5: 0 = i1 - i0 - V0
-      (vec![], vec![], vec![(V_i1, one), (V_i0, minus_one), (V_V0, minus_one)]),
-      // 6: 0 = s1 - s0 - V1
-      (vec![], vec![], vec![(V_s1, one), (V_s0, minus_one), (V_V1, minus_one)]),
-      // 7: (i1 - 3) * Z0 = Z1
-      (vec![(V_i1, one), (V_cnst, minus_three)], vec![(V_Z0, one)], vec![(V_Z1, one)]),
-      // 8: B0 * (Z1 - 1) = 0
-      (vec![(V_B0, one)], vec![(V_Z1, one), (V_cnst, minus_one)], vec![]),
-      // 9: B0 * (b1 - 1) = 0
-      (vec![(V_B0, one)], vec![(V_b1, one), (V_cnst, minus_one)], vec![]),
-      // 10: (1 - B0) * (i1 - 3) = 0
-      (vec![(V_cnst, one), (V_B0, minus_one)], vec![(V_i1, one), (V_cnst, minus_three)], vec![]),
-      // 11: (1 - B0) * (b1 - 2) = 0
-      (vec![(V_cnst, one), (V_B0, minus_one)], vec![(V_b1, one), (V_cnst, minus_two)], vec![])
-    ];
-    args.push(arg);
-      
-    // Instance 1: block 0
+    // Block 0
     let arg = vec![
       // 0: v * v = v
       (vec![(V_valid, one)], vec![(V_valid, one)], vec![(V_valid, one)]),
@@ -246,6 +216,35 @@ fn produce_r1cs() -> (
     ];
     args.push(arg);
 
+    // Block 1
+    let arg = vec![
+      // 0: v * v = v
+      (vec![(V_valid, one)], vec![(V_valid, one)], vec![(V_valid, one)]),
+      // 1: 0 = w - v
+      (vec![], vec![], vec![(V_w, one), (V_valid, minus_one)]),
+      // 2: 0 = b0 - 1
+      (vec![], vec![], vec![(V_b0, one), (V_cnst, minus_one)]),
+      // 3: 0 = A0
+      (vec![], vec![], vec![(V_A0, one)]),
+      // 4: 0 = A1 - 1
+      (vec![], vec![], vec![(V_A1, one), (V_cnst, minus_one)]),
+      // 5: 0 = i1 - i0 - V0
+      (vec![], vec![], vec![(V_i1, one), (V_i0, minus_one), (V_V0, minus_one)]),
+      // 6: 0 = s1 - s0 - V1
+      (vec![], vec![], vec![(V_s1, one), (V_s0, minus_one), (V_V1, minus_one)]),
+      // 7: (i1 - 3) * Z0 = Z1
+      (vec![(V_i1, one), (V_cnst, minus_three)], vec![(V_Z0, one)], vec![(V_Z1, one)]),
+      // 8: B0 * (Z1 - 1) = 0
+      (vec![(V_B0, one)], vec![(V_Z1, one), (V_cnst, minus_one)], vec![]),
+      // 9: B0 * (b1 - 1) = 0
+      (vec![(V_B0, one)], vec![(V_b1, one), (V_cnst, minus_one)], vec![]),
+      // 10: (1 - B0) * (i1 - 3) = 0
+      (vec![(V_cnst, one), (V_B0, minus_one)], vec![(V_i1, one), (V_cnst, minus_three)], vec![]),
+      // 11: (1 - B0) * (b1 - 2) = 0
+      (vec![(V_cnst, one), (V_B0, minus_one)], vec![(V_b1, one), (V_cnst, minus_two)], vec![])
+    ];
+    args.push(arg);
+
     args
   };
 
@@ -257,7 +256,7 @@ fn produce_r1cs() -> (
   // RUNTIME KNOWLEDGE
   // --
   let block_max_num_proofs = 4;
-  let block_num_proofs = vec![4, 1];
+  let block_num_proofs = vec![1, 4];
   let consis_num_proofs: usize = 8;
   // What is the input and the output?
   let input = vec![zero, zero];
@@ -285,6 +284,7 @@ fn produce_r1cs() -> (
     let mut exec_inputs = Vec::new();
     let mut addr_mems_list = Vec::new();
 
+    // Assignment needs to be sorted by # of executions per block, so assignment[0] corresponds to block 1, assignment[1] is block 0
     // Block 1
     // Exec:  v | b0  i0  s0  | _ | b1  i1  s1  |  w  A0  A1  V0  V1  Z0  Z1  B0
     // 0      1    1   0   0    0    1   1   2     1   0   1   1   2 -2i   1   1
@@ -431,7 +431,7 @@ fn main() {
   // Generate all remaining instances
 
   // BLOCK INSTANCES
-  let (block_num_cons, block_num_non_zero_entries, block_inst) = Instance::gen_block_inst(block_num_instances, num_vars, &ctk.args);
+  let (block_num_cons, block_num_non_zero_entries, mut block_inst) = Instance::gen_block_inst(block_num_instances, num_vars, &ctk.args);
 
   // CONSIS INSTANCES
   // CONSIS is consisted of two instances
@@ -461,7 +461,7 @@ fn main() {
 
   // MEM INSTANCES
   // MEM_EXTRACT
-  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(block_num_instances, num_vars, &block_num_mem_accesses);
+  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mut mem_extract_inst) = Instance::gen_mem_extract_inst(block_num_instances, num_vars, &block_num_mem_accesses);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound);
   // MEM_BLOCK_POLY is PERM_BLOCK_POLY
@@ -531,8 +531,8 @@ fn main() {
     total_num_proofs_bound,
     block_num_instances,
     rtk.block_max_num_proofs,
-    rtk.block_num_proofs.clone(),
-    &block_inst,
+    &rtk.block_num_proofs,
+    &mut block_inst,
     &block_comm,
     &block_decomm,
     &block_gens,
@@ -563,7 +563,7 @@ fn main() {
     &perm_poly_gens,
 
     &block_num_mem_accesses,
-    &mem_extract_inst,
+    &mut mem_extract_inst,
     &mem_extract_comm,
     &mem_extract_decomm,
     &mem_extract_gens,
@@ -613,7 +613,7 @@ fn main() {
     total_num_proofs_bound,
     block_num_instances, 
     rtk.block_max_num_proofs, 
-    rtk.block_num_proofs, 
+    &rtk.block_num_proofs, 
     block_num_cons, 
     &block_comm,
     &block_gens,

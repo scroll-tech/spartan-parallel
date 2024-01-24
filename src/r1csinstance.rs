@@ -155,6 +155,15 @@ impl R1CSInstance {
     }
   }
 
+  // Sort A_list, B_list, C_list based on index
+  // index[i] = j => the original jth entry should now be at the ith position
+  pub fn sort(&mut self, num_instances: usize, index: &Vec<usize>) {
+    self.num_instances = num_instances;
+    self.A_list = (0..num_instances).map(|i| self.A_list[index[i]].clone()).collect();
+    self.B_list = (0..num_instances).map(|i| self.B_list[index[i]].clone()).collect();
+    self.C_list = (0..num_instances).map(|i| self.C_list[index[i]].clone()).collect();
+  }
+
   pub fn get_num_instances(&self) -> usize {
     self.num_instances
   }
