@@ -353,6 +353,7 @@ fn main() {
   // --
   // INSTANCE PREPROCESSING
   // --
+  println!("Preprocessing instances...");
   let block_num_instances_bound = ctk.block_num_instances;
   let num_vars = ctk.num_vars;
   assert_eq!(num_vars, num_vars.next_power_of_two());
@@ -368,6 +369,7 @@ fn main() {
   // If output_block_num < block_num_instances, the prover can cheat by executing the program multiple times
   assert!(ctk.output_block_num >= block_num_instances_bound);
 
+  println!("Generating Circuits...");
   // --
   // BLOCK INSTANCES
   let (block_num_cons, block_num_non_zero_entries, mut block_inst) = Instance::gen_block_inst(block_num_instances_bound, num_vars, &ctk.args);
@@ -413,6 +415,7 @@ fn main() {
   // --
   // COMMITMENT PREPROCESSING
   // --
+  println!("Comitting Circuits...");
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
   let perm_size_bound = total_num_proofs_bound;
   let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
@@ -463,6 +466,7 @@ fn main() {
     assert_eq!(block_vars_matrix[p].len(), block_inputs_matrix[p].len());
   }
 
+  println!("Running the proof...");
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
   let proof = SNARK::prove(
@@ -545,6 +549,7 @@ fn main() {
     &mut prover_transcript,
   );
 
+  println!("Verifying the proof...");
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
   assert!(proof.verify::<false>(
