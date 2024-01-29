@@ -364,7 +364,7 @@ fn main() {
   assert!(ctk.args.len() == block_num_instances_bound);
   assert!(block_num_mem_accesses.len() == block_num_instances_bound);
   for n in &block_num_mem_accesses {
-    assert!(2 * n <= num_vars - 4);
+    assert!(3 * n <= num_vars - 4);
   }
   // If output_block_num < block_num_instances, the prover can cheat by executing the program multiple times
   assert!(ctk.output_block_num >= block_num_instances_bound);
@@ -403,7 +403,8 @@ fn main() {
   // MEM INSTANCES
   let total_num_mem_accesses_bound_padded = if total_num_mem_accesses_bound == 0 {1} else {total_num_mem_accesses_bound};
   // MEM_EXTRACT
-  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mut mem_extract_inst) = Instance::gen_mem_extract_inst(block_num_instances_bound, num_vars, &block_num_mem_accesses);
+  let max_block_num_mem_accesses = *block_num_mem_accesses.iter().max().unwrap();
+  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(num_vars, max_block_num_mem_accesses);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound_padded);
   // MEM_BLOCK_POLY is PERM_BLOCK_POLY
@@ -415,7 +416,7 @@ fn main() {
   // --
   // COMMITMENT PREPROCESSING
   // --
-  println!("Comitting Circuits...");
+  println!("Producing Public Parameters...");
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
   let perm_size_bound = total_num_proofs_bound;
   let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
@@ -429,7 +430,7 @@ fn main() {
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
-  let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, block_num_instances_bound, mem_extract_num_non_zero_entries);
+  let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, 1, mem_extract_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_addr_poly_num_non_zero_entries);
@@ -439,18 +440,26 @@ fn main() {
   // for size PROOF * VAR
   let proofs_times_vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
 
+  println!("Comitting Circuits...");
   // create a commitment to the R1CS instance
-  // TODO: change to encoding all r1cs instances
   let (block_comm, block_decomm) = SNARK::multi_encode(&block_inst, &block_gens);
+  println!("Finished Block");
   let (consis_comb_comm, consis_comb_decomm) = SNARK::encode(&consis_comb_inst, &consis_comb_gens);
   let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
+  println!("Finished Consis");
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
-  let (mem_extract_comm, mem_extract_decomm) = SNARK::multi_encode(&mem_extract_inst, &mem_extract_gens);
+  println!("Finished Perm");
+  let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
   let (mem_cohere_comm, mem_cohere_decomm) = SNARK::encode(&mem_cohere_inst, &mem_cohere_gens);
   let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
   let (mem_addr_poly_comm, mem_addr_poly_decomm) = SNARK::encode(&mem_addr_poly_inst, &mem_addr_poly_gens);
+  println!("Finished Mem");
+
+  // Mask vector for mem_extract
+  let (mem_block_mask_list, mem_block_mask_poly_list, mem_block_mask_comm_list) = 
+    Instance::gen_mem_extract_mask(block_num_instances_bound, num_vars, &block_num_mem_accesses, &vars_gens);
 
   // --
   // WITNESS PREPROCESSING
@@ -514,8 +523,8 @@ fn main() {
     &perm_poly_decomm,
     &perm_poly_gens,
 
-    &block_num_mem_accesses,
-    &mut mem_extract_inst,
+    max_block_num_mem_accesses,
+    &mem_extract_inst,
     &mem_extract_comm,
     &mem_extract_decomm,
     &mem_extract_gens,
@@ -543,6 +552,9 @@ fn main() {
     block_inputs_matrix,
     rtk.exec_inputs,
     rtk.addr_mems_list,
+    &mem_block_mask_list,
+    &mem_block_mask_poly_list,
+    &mem_block_mask_comm_list,
 
     &vars_gens,
     &proofs_times_vars_gens,
@@ -603,6 +615,8 @@ fn main() {
     mem_addr_poly_num_cons_base,
     &mem_addr_poly_comm,
     &mem_addr_poly_gens,
+
+    &mem_block_mask_comm_list,
 
     &vars_gens,
     &proofs_times_vars_gens,
