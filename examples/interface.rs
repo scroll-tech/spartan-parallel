@@ -425,15 +425,19 @@ fn main() {
 
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound, block_num_non_zero_entries);
+  println!("Finished Block");
   let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_vars, 1, consis_comb_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * num_vars, 1, consis_check_num_non_zero_entries);
+  println!("Finished Consis");
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
+  println!("Finished Perm");
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, 1, mem_extract_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_addr_poly_num_non_zero_entries);
+  println!("Finished Mem");
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;

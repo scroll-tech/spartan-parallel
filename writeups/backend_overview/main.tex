@@ -36,6 +36,7 @@
 \newcommand{\pse}{\mathtt{ps_{exec}}}
 \newcommand{\memb}{\mathtt{mem_{block}}}
 \newcommand{\mema}{\mathtt{mem_{addr}}}
+\newcommand{\wb}{\mathtt{w_{block}}}
 \newcommand{\ps}{\mathtt{ps}}
 \newcommand{\eqq}{\stackrel{?}{=}}
 \newcommand{\addr}{\mbox{addr}}
@@ -66,14 +67,14 @@ A proof system involves two parties: a Prover $\P$ and a Verifier $\V$. Given a 
 
 One strategy for such proof system is to convert the program into an \emph{R1CS circuit}. The idea is to translate the instructions line-by-line into degree-2 arithmetic constraints. In particular, each constraint can be expressed as $az_i\cdot bz_i = cz_{i+1}$, where $z_i$ and $z_{i+1}$ are the program states before and after the instruction, and $a$, $b$, and $c$ are vectors that can perform any arbitrary linear combination on the program states.
 
-Now, assume that $f$ can be expressed using $M$ degree-2 constraints, and the collection of all program states that will be used in the proof can be expressed using $N$ variables. We can encode $f$ using an R1CS \emph{Instance}, which is consisted of three $M\times N$ matrices $A$, $B$, $C$ that contains the constraints, and a length-$N$ vector $z$ to express the program states. The circuit satisfiability problem is then equivalent to the equation:
+Now, assume that $f$ can be expressed using $M$ such degree-2 constraints, and the collection of all program states that will be used in the proof can be expressed using $N$ variables. We can encode $f$ using an R1CS \emph{Instance}, which is consisted of three $M\times N$ matrices $A$, $B$, $C$ that contains the constraints, and a length-$N$ vector $z$ to express the program states. The circuit satisfiability problem is then equivalent to the equation:
 $$Az \cdot Bz - Cz = 0$$
 
 One proof system that can efficiently verify the correctness of the equation is called \code{spartan}. Specifically, let $m = \log M$, $n = \log N$, \code{spartan} allows $\P$ to reduce the correctness of the equation down to a single claim
 $$z(r_y) \eqq e$$
 in $O(M\cdot N)$ time, and $\V$ to verify the reduction in $O(m + n)$ time. To verify the claim $z(r_y) \eqq e$. $\P$ commits to a polynomial extension of the program states $z$ at the very beginning, and reveals $z(r_y)$ to $\V$ at the end of the proof. This polynomial commitment and opening takes $O(M\cdot N)$ for $\P$ and $O(\sqrt{M\cdot N})$ for $\V$, making the total $\V$ runtime $O(m + n + \sqrt{M\cdot N})$. 
 
-In this work, we expand on \code{spartan} to tackle a data-paralleled version of the R1CS problem. Assume that we now have $P$ instances $I_0\dots I_{P-1}$. For each instance $I_i = (A_i, B_i, C_i)$, $\P$ wants to convince $\V$ that it has a list of $Q_i$ vectors $z_{i, 0}\dots z_{i, Q_i-1}$ that satisfies
+In this work, we expand on \code{spartan} to apply to a data-paralleled version of the R1CS problem. Assume that we now have $P$ instances $I_0\dots I_{P-1}$. For each instance $I_i = (A_i, B_i, C_i)$, $\P$ wants to convince $\V$ that it has a list of $Q_i$ vectors $z_{i, 0}\dots z_{i, Q_i-1}$ that satisfies
 $$\forall_{i\in [0, P), j \in [0, Q_i)}, A_iz_{i, j} \cdot B_iz_{i, j} - C_iz_{i, j} = 0$$
 
 Let $p = \log P$, $q_i = \log Q_i$, $\Qmax = \max_i Q_i$, $\qmax = \log \Qmax$, and $\Qsum = \sum_i Q_i$, we developed a new proof system called \code{spartan\_parallel} to verify the correctness of the above equation in $O(\Qsum \cdot M \cdot N)$ time for $\P$ and $O(p + \qmax + m + n + \sum_i \sqrt{Q_i\cdot M\cdot N})$ time for $\V$. We describe details of \code{spartan\_parallel} in section \ref{sec:block_correctness}.
@@ -82,14 +83,14 @@ Let $p = \log P$, $q_i = \log Q_i$, $\Qmax = \max_i Q_i$, $\qmax = \log \Qmax$, 
 
 \section{Input Format}\label{sec:input}
 
-To understand how \code{spartan\_parallel} fits into the overall backend protocol of \code{circ\_blocks}, we need to start by examining the output of the frontend, which is also the input of the backend. The frontend \code{circ\_blocks} divides a program into $P$ basic blocks of similar sizes. During each program execution, depending on the input, each basic block can be executed different number of times. Assume that for one particular execution, each block $B_i$ is executed $Q_i$ times. This leads to the following strategy to verify the correctness of the execution:
+To understand how \code{spartan\_parallel} fits into the overall backend protocol of \code{circ\_blocks}, we start by describing the interface between the frontend and the backend. The frontend \code{circ\_blocks} divides a program into $P$ basic blocks of similar sizes. During each program execution, depending on the input, each basic block can be executed different number of times (including 0). Assume that for one particular execution, each block $B_i$ is executed $Q_i$ times. This leads to the following strategy to verify the correctness of the execution:
 \begin{enumerate}
     \item \emph{Verifying the correctness of every block execution}. We concatenate the program states before and after each execution of each block, together with any intermediate values computed within each block, into a $z$ vector. There are $\sum_{i\in [0, P)} Q_i$ such $z$ vectors. Let the frontend provide the instance $I_i$ of each block $B_i$, we can use \code{spartan\_parallel} to prove that every block has been executed correctly.
-    \item \emph{Verifying the correctness of block transition}. The next step is to verify that inputs and outputs across the instances are consistent. This can be verified by listing the $z$'s in execution order, and check that the output state of the previous block is the input state of the next block. We also need to check that the prover is executing the right block. The simplest way is to include the block label as part of program state and check it inside each block.
-    \item \emph{Verifying the correctness of program state permutation}. We note that the previous two steps require $z$'s to be provided in two different orders (by block and by execution order). We then need to verify that these two orderings of $z$'s are indeed permutations of each other. We do so by constructing two polynomials, each with their roots set to the entries of one of the two $z$ orderings. $\V$ then samples a random point and checks whether the two polynomials agree on that random point.
+    \item \emph{Verifying the correctness of block transition}. The next step is to verify that inputs and outputs across the instances are consistent. This can be verified by listing every $z$ in execution order, and checking that the output state of the previous block is the input state of the next block. We also need to check that the prover is executing the right block. The simplest way is to include the block label in each $z$ and add an assertion on that label during the block correctness proof.
+    \item \emph{Verifying the correctness of program state permutation}. We note that the previous two steps require $z$'s to be provided in two different orders (by block and by execution order). The next step is to verify that the two orderings of $z$ lists are indeed permutations of each other. To do so, for each ordering of $z$ list, we construct a polynomial, the roots of which are set to the entries of that list. Since the two lists of $z$ are permutation of each other, the roots of the two polynomials are the same, and so the two polynomials should also be the same. To verify this, $\V$ samples a random point and checks whether the two polynomials agree on that random point.
     \item \emph{Verifying the correctness of the physical memory}. As the front end converts the program into blocks, it resolves all scoping change by converting them into LOADs and STOREs of a write-once RAM. The final step is to ensure this write-once RAM is coherent, i.e. LOADs and STOREs on the same address should always yield the same value.
     
-    To do so, the frontend provides one instance per block to extract all memory operations from them. $\P$ then reorders these (address, value) pairs by address and proves the permutation to $\V$. Finally, a separated instance provided by the frontend proves that there is a bijective relationship between address and value.
+    To do so, the frontend provides an extraction instance that extracts all memory operations from each $z$. $\P$ then reorders these (address, value) pairs by address and proves the permutation to $\V$. Finally, a separated instance provided by the frontend proves that there is a bijective relationship between addresses and values.
 \end{enumerate}
 
 \noindent These four steps lay out all required inputs for the backend:
@@ -101,21 +102,21 @@ To understand how \code{spartan\_parallel} fits into the overall backend protoco
         \item $\PERMB$ and $\PERME$: two instances to construct polynomials to verify permutation
         \item $\MEME$, $\MEMP$, and $\MEMC$: three instances for memory coherence check
     \end{itemize}
-    \item Program States: $\sum_i Q_i$ for each execution of each block, grouped in two orderings.
+    \item Program States: one for each execution of each block, grouped in two orderings.
     \begin{itemize}
-        \item $\psb$: A $P\times \Qmax$ matrix of $z$'s. Each row $i$ corresponds to all $Q_i$ executions of block $i$. If there aren't $\Qmax$ executions for a given block, the remaining entries are either filled with 0 or skipped (see section \ref{sec:block_correctness})
+        \item $\psb$: A $P\times \Qmax$ matrix of $z$'s. Each row $i$ records program states of all $Q_i$ executions of block $i$. If $Q_i < \Qmax$, the remaining entries of the matrix are either padded with 0 or absent (see section \ref{sec:block_correctness})
         \item $\pse$: A length-$\sum_i Q_i$ vector of $z$'s sorted in execution order.
     \end{itemize}
     \item Memory Accesses: $\sum_i Q_i$ for each execution of each block, grouped in two orderings.
     \begin{itemize}
-        \item $\memb$: A $P\times \Qmax$ matrix of \emph{lists of} (addr, val). Each list of (addr, val) records all memory accesses that take place within one execution of a block. The length of the lists might vary from block to block, but should stay the same across different executions of the same block.
+        \item $\memb$: A $P\times \Qmax$ matrix of \emph{lists of} (addr, val). Each list of (addr, val) records all memory accesses that take place within one execution of a block.
         \item $\mema$: A list of (addr, val) that includes \emph{every} memory accesses occurred within the program, sorted by address. 
     \end{itemize}
 \end{itemize}
 
 We note that the backend is consisted of seven independent proofs, spanning across checks on block correctness, consistency, permutation, and memory coherence. However, some of these proofs use the same $z$. For example, $\psb$ is used in both \code{BLOCK} and $\PERMB$. How can $\P$ convince $\V$ that the same $\psb$ is supplied to both proofs? The solution is to force $\P$ to generate one commitment of $\psb$ for both proofs. Through \code{spartan\_parallel}, $\P$ reduces \code{BLOCK} and $\PERMB$ to two claims: $\psb(r_1) \eqq e_1$ and $\psb(r_2) \eqq e_2$. $\P$ then opens the commitment on both $r_1$ and $r_2$ to complete the proof. This \emph{shared commitment} property turns out to be a major obstacle for circuit design, which will show up in section \ref{sec:consistency}.
 
-Finally, in the next sections, we will reveal that instants and program states need to be further divided for technical reasons. For this reason, we will deliberately avoid using the terms $\psb$ and $\pse$. We will revisit the detailed input format and instances in section \ref{sec:summary}, alongside with details of $\psb$, $\pse$, $\memb$, and $\mema$.
+In the next sections, we reveal that instants and program states need to be further divided due to technicalities. For this reason, we deliberately avoid using the terms $\psb$ and $\pse$ when describing the instances, and redefine them at the end of each section. We revisit the detailed input format and instances in section \ref{sec:summary}, alongside with contents of $\psb$, $\pse$, $\memb$, and $\mema$.
 
 % --
 
@@ -123,29 +124,28 @@ Finally, in the next sections, we will reveal that instants and program states n
 
 Given the instances $I_i = (A_i, B_i, C_i)$ of all $P$ blocks and vectors $z_{i, j}$ to describe the program states before, after, and during each of the $Q_i$ executions of each block $i$. The goal of this proof is to verify that all $\Qsum = \sum_i Q_i$ block executions are correct.
 
-To simplify the proof, we assume that $P$, $Q_i$, as well as the size of each instances $X_i$ and $Y_i$ are all powers of two. We can do so by \emph{padding} the instance list and program state vectors with dummy entries. Dummy instances can be viewed as unreachable dead codes in the program, so they don't require extra reasoning. Dummy program states can be expressed by including a \emph{valid variable} in the program state. Valid variable is set to 0 if the state is a dummy, 1 otherwise. Finally, for \code{spartan\_parallel} to be most efficient, we want the number of constraints of all block instances to be similar. This can be achieved using various tricks, like splitting basic blocks and merging control flows.
+Let matrices of each instance $(A_i, B_i, C_i)$ be of size $X_i \times Y_i$. To simplify the proof, we assume that $Q_i$, $X_i$ and $Y_i$ are all powers of two. We can do so by \emph{padding} the program state vectors with dummy entries. To differentiate between valid and dummy program states, we introduce a \emph{valid variable} in the program state. Valid variable is set to 0 if the state is a dummy, 1 otherwise. Finally, for \code{spartan\_parallel} to be most efficient, we want the number of constraints of all block instances to be similar. This can be achieved using various tricks, like splitting basic blocks and merging control flows.
 
 \subsection{Composition of $z_{i, j}$}\label{io_composition}
 While from the perspective of the proof system, $z_{i, j}$ (referred to as $z$ for the rest of the subsection) can be viewed as a single vector, from the perspective of \code{circ\_blocks} as a whole, $z$ is divided as the following:
 $$z = ((v, i, 0, o), w)$$
 where, let $\ell_z$ be the length (number of entries) of $z$, assume $\ell_z$ is a power of 2 and $\ell_z \geq 8$,
 \begin{itemize}
-    \item $v$ is a length-1 valid bit which is set to 0 if $z$ is a dummy entry, 1 otherwise. The valid bit is enforced by the block instances to be either 0 or 1. \emph{$v$ also serves as the constant value $1$ used in constant addition.}
-    \item If $v$ is 0, completeness only holds if all entries of $z$ are set to 0. If $v$ is 1, the rest of $z$ are defined below:
+    \item $v$ is a length-1 valid bit which is set to 0 if $z$ is a dummy entry, 1 otherwise. The valid bit is enforced by the block instances to be either 0 or 1. \emph{$v$ also serves as the constant value $1$ used in constant addition.} If $v$ is 0, completeness only holds if all entries of $z$ are set to 0. If $v$ is 1, the rest of $z$ are defined below:
     \item $i$ has length $(\ell_z / 4 - 1)$ and records the input state of the block. We can always pad $i$ with 0 if it is not long enough, same with $o$ and $w$.
     \item $0$ is a dummy variable, the value of which does not matter.
     \item $o$ has length $(\ell_z / 4 - 1)$ and records the output state of the block.
     \item $w$ has length $(\ell_z / 2)$ and records all intermediate values that will be computed within the block.
 \end{itemize}
 
-We note that the first half, $z[0] = (v, i, 0, o)$, will later be used by permutation and to extract memory accesses (see section \ref{sec:memory}), while the second half, $z[1] = w$, is only used to extract memory accesses. As a result, we need to commit the two halves separately. Define $io = (v, i, 0, o)$, $z = (io, w)$.
+We note that the first half, $z[0] = (v, i, 0, o)$, will later be used by permutation, and the second half, $z[1] = w$, will be used to extract memory accesses. As a result, we need to commit the two halves separately. Define $io = (v, i, 0, o)$, $z = (io, w)$.
 
-Finally, to standardize the size of program state across all proofs, \emph{let $Y$ be the length of $io$ (and $w$)}. Thus, each $z$ can be viewed as a length-$2Y$ vector. We also assume $X = O(Y)$, where $X$ is the number of constraints. In the remainder of the section, we treat $O(X)$, $O(Y)$, and $O(\ell_f)$ as the same value.
+Finally, to standardize the size of program state across all proofs, \emph{let $Y$ be the length of $io$ (and $w$)}. Thus, each $z$ can be viewed as a length-$2Y$ vector. We also assume $X = O(Y)$, where $X$ is the number of constraints. In the remainder of the section, we treat $O(X)$, $O(Y)$, and $O(\ell_z)$ as the same value.
 
 \subsection{Overview of \code{spartan\_parallel}}
 With the format $z = (io, w)$ out of the way, the next step is to provide an overview of the mechanisms behind \code{spartan\_parallel}.
 
-As mentioned earlier, there are $P$ block instances. Each block $i$ corresponds to $Q_i$ executions, and in turn, $Q_i$ $(io, w)$ vectors. Let $\Qmax = \max_i Q_i$ and $\Qsum = \sum_i Q_i$, a naive data-parallel implementation of \code{spartan} represents and commits all $z$ vectors into a $P\times \Qmax\times 2Y$ hypermatrix. This construction allows $\V$ to verify the reduction in $O(\log (P\cdot \Qmax\cdot Y))$ and the commitment opening in $O(\sqrt{P\cdot \Qmax\cdot Y})$ time, at the cost of $\P$ taking $O(P\cdot \Qmax\cdot Y)$ time, which exceeds the program runtime of $O(\Qsum\cdot Y)$. Furthermore, the time for $\V$ to open the commitment is also not ideal as there are only $\Qsum$ valid $z$ vectors.
+As mentioned earlier, there are $P$ block instances. Each block $i$ corresponds to $Q_i$ executions, and in turn, $Q_i$ $(io, w)$ vectors. Let $\Qmax = \max_i Q_i$ and $\Qsum = \sum_i Q_i$, a naive data-parallel implementation of \code{spartan} represents and commits all $z$ vectors into a $P\times \Qmax\times 2Y$ hypermatrix. This construction allows $\V$ to verify the reduction in $O(\log (P\cdot \Qmax\cdot Y))$ and the commitment opening in $O(\sqrt{P\cdot \Qmax\cdot Y})$ time, at the cost of $\P$ taking $O(P\cdot \Qmax\cdot Y)$ time, which exceeds the program runtime of $O(\Qsum\cdot Y)$. Furthermore, the time for $\V$ to open the commitment is also not ideal, which should be approximately $O(\sqrt{\Qsum\cdot Y})$.
 
 To solve these problems, \code{spartan\_parallel} improves on the naive version in two main ways:
 \begin{enumerate}
@@ -159,7 +159,7 @@ We now succinctly describe the \code{spartan\_parallel} proof system:
     \item The value $P$ and the instances for all $P$ blocks are provided by the frontend.
     \item All $Q_i$ and the program states $(io, w)$ of all $\Qsum$ executions are provided by $\P$ and committed into $P$ commitments, one for each block.
     \item $\P$ concatenates each $(io_{i, j}, w_{i, j})$ pair into a single vector $z_{i, j}$.
-    \item $\P$ computes three polynomials, each extending all $\Qsum$ length-$X$ vectors $Az$, $Bz$, or $Cz$. This step takes $O(\Qsum\cdot Y)$ time since $\P$ can skip all the zeros.
+    \item $\P$ computes three polynomials, each extending all $\Qsum$ length-$X$ vectors $Az$, $Bz$, or $Cz$. This step takes $O(\Qsum\cdot Y)$ time since $\P$ can skip all zero-entries.
     \item $\P$ engages $\V$ in the first sumcheck protocol to prove $\sum_{p, q, x} \eq\cdot (Az \cdot Bz - Cz) = 0$. The sumcheck lasts $p + \qmax + x$ rounds but $\P$ only needs to perform $O(\Qsum\cdot Y)$ evaluations and bindings. At the end of the sumcheck, $\V$ samples vectors $r_p, r_q, r_x$ of length $p, \qmax, x$.
     \item $\V$ samples three random values $r_A$, $r_B$, and $r_C$. $\P$ computes a polynomial $\Z_{r_q}$ that extends all $z_{i, j}$ and binds to $r_q$, as well as a polynomial $\ABC = r_A\cdot A + r_B\cdot B + r_C\cdot C$.
     \item $\P$ engages $\V$ in the second sumcheck protocol to prove $\sum_{p, y} \eq\cdot \ABC \cdot \Z_{r_q} = e$, where $e$ is the claim from the first sumcheck. Note that 
@@ -167,19 +167,19 @@ We now succinctly describe the \code{spartan\_parallel} proof system:
     \item $\P$ opens all $P$ commitments of $io$ and $w$ on $r_q, r_y$ and proves that their linear combination using $r_p'$ is $\Z_{r_q}(r_p', r_y)$. This takes $O(\Qsum\cdot Y)$ time for $\P$ and $O(\sum_i\sqrt{P\cdot Q_i\cdot Y})$ time for $\V$.
     \item Finally, $\P$ opens one commitment on all instances to reveal the evaluation on $r_p', r_x, r_y$.
 \end{enumerate}
-\emph{Note: We can further generalize the above proof system by expanding on the composition of $z$. In later proofs, $z$ will be expressed as four separate commitments: $(w_0, w_1, w_2, w_4)$.}
+\emph{Note: We can further generalize the above proof system by expanding on the composition of $z$. In later proofs, $z$ will be expressed as four separate commitments: $(w_0, w_1, w_2, w_3)$.}
 
 \subsection{Commitments and Shared Commitments}
 
-The program states of the block correctness proof is represented as $z = (io, w)$. As explained earlier, $io$ is the input and output state of each block execution, sorted in block order, while $w$ contains all other intermediate values computed within each block execution. The commitments of both $io$ and $w$ are consisted of $P$ commitments each describing $Q_i \times Y$ entries. Since both $io$ and $w$ will be used by $\MEME$, and $io$ will also be used by $\PERMB$, both commitments are \emph{shared commitments}.
+The program states of the block correctness proof is represented as $z = (io, w)$, where $io$ is the input and output state of each block execution, sorted in block order, and $w$ contains all other intermediate values computed within each block execution. The commitments of both $io$ and $w$ are consisted of $P$ commitments each describing $Q_i \times Y$ entries. Since $io$ will be used by $\PERMB$ and $w$ will be used by $\MEME$, both commitments are \emph{shared commitments}.
 
-We define the shared commitment of $\psb$ to be the commitment of $io$. Runtime and memory constraint in the block correctness proof dictates that $\psb$ will be committed as $P$ commitments, which later also dictates the strategy used by the proof $\PERMB$. We will keep referring the commitment of $w$ as ``$w$'', as the backend does not involve any other intermediate computation.
+We define the shared commitment of $\psb$ to be the commitment of $io$. Runtime and memory constraint in the block correctness proof dictates that $\psb$ will be committed as $P$ commitments, which later also dictates the strategy used by the proof $\PERMB$. We refer the commitment of $w$ as $\wb$, and will later demonstrate how to use $\wb$ as $\memb$.
 
 % --
 
 \section{Proof of Consistency and \code{spartan\_pseudo\_parallel}}\label{sec:consistency}
 
-The next proof is to verify that, when ordering the program states in execution order, the output state of the previous block execution matches the input state of the next block execution. As explained previously, checks on whether the correct block is being executed can be done within each block as long as the block label is included in the input and output states.
+The next proof is to verify that, when ordering the program states in execution order, the output state of the previous block execution matches the input state of the next block execution. As previously described, checks on whether the correct block is being executed can be done within each block as long as the block label is included in the input and output states.
 
 \subsection{Constraint Composition}\label{consis_composition}
 
@@ -216,7 +216,7 @@ To achieve improvement \ref{impr:min_cons}, we want to parallelize as much work 
     \item Finally, $\P$ concats all $\RLC(\ioc)_i$ into a length-$\Qbound$ list. The frontend generates an instance that verifies $v_{i+1}\cdot v_i\RLC(o_i) = v_{i+1}\RLC(i_{i+1})$ for all $i\in [0, \Qbound - 1)$. $\P$ and $Q$ engage in an $O(\Qbound)$ verification process.
 \end{enumerate}
 
-We conclude this procedure with some addtional remarks:
+We conclude this procedure with two additional remarks:
 \begin{enumerate}
     \item If $io_i$ is invalid, then $\RLC(\ioc)_i$ would be a zero vector. This is crucial later to achieve improvement \ref{impr:min_comp}.
     \item If $io_i$ is valid, then $\RLC(i) = 1 + \sum i_i\cdot r^i$ and $\RLC(o) = 1 + \sum o_i\cdot r^i$ are almost never 0. This implicitly suggests that the consistency check will almost always fails if $\P$ orders a valid $io$ behind an invalid one. Thus, \emph{we don't need to explicitly check that all valid $io$'s are listed before the invalid ones}.
@@ -230,14 +230,14 @@ At the end of RLC, $\P$ convinces $\V$ that a list of $\RLC(\ioc)_i = (v_i, v_i\
     \item Consistency between each pair of $\RLC(\ioc)_i$ and $\RLC(\ioc)_{i+1}$ is checked using only one constraint. We let the $i$th constraint in $I$ check the consistency between $\RLC(\ioc)_i$ and $\RLC(\ioc)_{i+1}$. This means that if $io_i$ is invalid, all variables used by the $i$th constraint will be 0, and the constraint will be satisfied with both sides being 0.
     \item All constraints share an identical structure: namely, when expressed as $a\cdot z + b\cdot z = c\cdot z$, there is exactly one non-zero entry in $a$, $b$, and $c$ respectively. As \code{spartan} and its derived versions store $A$, $B$, and $C$ as lists of non-zero entries, this repeating structure allows $\P$ to quickly identify which non-zero entries in $A$, $B$, and $C$ conrrespond to invalid $io$'s, and subsequently skip them.
 \end{itemize}
-It turns out that these two properties are enough to apply the basic idea behind \code{spartan\_parallel}. Instead of $Q$ proofs, each with $X$ constraints and $Y$ variables, we now have 1 proof with $\Qbound\cdot X$ constraints and $\Qbound\cdot Y$ variables. However, only the first $Q\cdot Y$ variables are non-zero, and only the first $Q\cdot X$ constraints are multiplied to non-zero variables. We call this construction a \emph{pseudo-parallel proof system} with
+It turns out that these three properties are enough to apply the basic idea behind \code{spartan\_parallel}. Instead of $Q$ proofs, each with $X$ constraints and $Y$ variables, we now have 1 proof with $\Qbound\cdot X$ constraints and $\Qbound\cdot Y$ variables. However, only the first $Q\cdot Y$ variables are non-zero, and only the first $Q\cdot X$ constraints are multiplied to non-zero variables. We call this construction a \emph{pseudo-parallel proof system} with
 \begin{itemize}
     \item Number of proofs: $P = 1$
     \item Number of parallel constraints and inputs per proof: $Q_0 = Q = \Qsum$
     \item Base constraint size: $X = 1$
     \item Base input size: $Y = 3$ (then round to the next power of 2, so $Y = 4$)
 \end{itemize}
-This system also supports multiple proofs, each with different numbers of parallel inputs (and constraints), just like $P$ and $Q_i$ in \code{spartan\_parallel}. We will exploit this property later when discussing $\PERMB$.
+This system also supports multiple proofs, each with different numbers of parallel inputs (and constraints), just like $P$ and $Q_i$ in \code{spartan\_parallel}. We will utilize this property later when discussing $\PERMB$.
 
 Finally, during the RLC verification, $\P$ invokes \code{spartan\_parallel} with one instance. This means $\P$ has committed all $\Qsum$ copies of $\RLC(\ioc)_i$ in a single commitment. This will also be what the pseudo-parallel proof system needs to support: one commitment per proof.
 
@@ -248,7 +248,7 @@ In the previous subsection, we introduced a pseudo-parallelism and properties th
     \item The one and only instance is provided by the frontend. $A$, $B$, and $C$ are of size $\Qbound X\times \Qbound Y$. The frontend also supplies the value $\Qbound$ to $\P$ and $\V$.
     \item $P$, $Q_i$, and program states $\RLC(io_{i, j})$ of all $\Qsum$ executions are provided by $\P$ and committed into $P$ commitments, one for each proof. Each commitment $c_i$ represents a matrix of size $Q_i \times Y$.
     \item $\P$ sets $z_{i, j} = \RLC(io_{i, j})$. The entire $z$ is of size $P\times Q_i\times Y$.
-    \item $\P$ computes $Az$, $Bz$, and $Cz$ and extends them to three polynomials. Each $Az$, $Bz$, and $Cz$ is of size $P\times Q_i \times X$. Note that the correct output of the matrix multiplication should be of size $P\times \Qbound \times X$, but $\P$ can skip the $Q_i \dots \Qbound$ part because they are all 0's. This step takes $O(\Qsum\cdot Y)$ time.
+    \item $\P$ computes $Az$, $Bz$, and $Cz$ and extends them to three polynomials. Each $Az$, $Bz$, and $Cz$ is of size $P\times Q_i \times X$. Note that the exact output of the matrix multiplication should be of size $P\times \Qbound \times X$, but $\P$ can skip the $Q_i \dots \Qbound$ part because they are all 0's. This step takes $O(\Qsum\cdot Y)$ time.
     \item $Az$, $Bz$, $Cz$ are in the exact same format as in \code{spartan\_parallel}, so sumcheck 1 also stays the same. $\P$ engages $\V$ to prove $\sum_{p, q, x} \eq\cdot (Az \cdot Bz - Cz) = 0$ in $p + \qmax + x$ rounds, performing $O(\Qsum\cdot Y)$ evaluations and bindings. At the end of the sumcheck, $\V$ samples vectors $r_p, r_{qx}, r_x$ of length $p, \qmax, x$. Note that $\Qmax = \max_i(Q_i)\leq\Qbound$.
     \item $\V$ samples three random values $r_A$, $r_B$, and $r_C$. $\P$ computes a polynomial $\Z_{r_p}$ that extends all $z_{i, j}$ and binds to $r_p$ (instead of $r_q$! In \code{spartan\_pseudo\_parallel}, $P$ is the dimension that only exists in $z$). $\P$ also computes polynomial $\ABC = r_A\cdot A(r_{qx}) + r_B\cdot B(r_{qx}) + r_C(r_{qx})\cdot C$, which is of size $O(\Qmax \cdot Y)$, instead of $O(\Qbound \cdot Y)$.
     \item $\P$ engages $\V$ in the second sumcheck protocol to prove $\sum_{q, y} \ABC \cdot \Z_{r_p} = e$, where $e$ is the claim from the first sumcheck. At the end of the sumcheck, $\V$ samples vectors $r_{qy}, r_y$ of length $\qmax, y$. Note that $r_{qx}$ and $r_{qy}$ are not related. $\V$ uses $(r_{qx}, r_x)$ to perform RLC on the constraints and $(r_{qy}, r_y)$ for RLC on $z$. \red{In \code{spartan\_parallel}, the sumcheck one output $r_p$ is applied to both the instance and $z$, which is why, in sumcheck 2, we need to introduce an additional polynomial $\eq_p$ to make it degree-1. In \code{spartan\_pseudo\_parallel}, sumcheck 1 produces $r_p$, which is only used by $z$, and $r_{qx}$, which is only used by the instance, so no degree-2 bindings, no $\eq$.}

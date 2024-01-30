@@ -40,7 +40,7 @@ impl R1CSCommitmentGens {
     num_vars: usize,
     num_nz_entries: usize,
   ) -> R1CSCommitmentGens {
-    let num_poly_vars_x = num_instances.log_2() * num_cons.log_2();
+    let num_poly_vars_x = num_instances.log_2() + num_cons.log_2();
     let num_poly_vars_y = num_vars.log_2();
     let gens =
       SparseMatPolyCommitmentGens::new(label, num_poly_vars_x, num_poly_vars_y, num_instances * num_nz_entries, 3);
