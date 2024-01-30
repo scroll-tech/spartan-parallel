@@ -645,9 +645,8 @@ impl SNARK {
     // --
     // INSTANCE COMMITMENTS
     // --
-
+    let timer_commit = Timer::new("inst_commit");
     // Commit instances
-    let timer_commit = Timer::new("metacommit");
     for c in block_comm {
       c.comm.append_to_transcript(b"block_comm", transcript);
     }
@@ -685,6 +684,7 @@ impl SNARK {
     // --
     // BLOCK SORT
     // --
+    let timer_sort = Timer::new("block_sort");
     // Block_num_instance is the number of non-zero entries in block_num_proofs
     let block_num_instances = block_num_proofs.iter().fold(0, |i, j| if *j > 0 { i + 1 } else { i });
     // Sort the following based on block_num_proofs:
@@ -735,11 +735,12 @@ impl SNARK {
       addr_mems_list.extend(vec![dummy_addr; total_num_mem_accesses.next_power_of_two() - total_num_mem_accesses]);
     }
     let total_num_mem_accesses = if total_num_mem_accesses == 0 { 0 } else { total_num_mem_accesses.next_power_of_two() };
+    timer_sort.stop();
 
     // --
     // WITNESS COMMITMENTS
     // --
-    let timer_commit = Timer::new("polycommit");
+    let timer_commit = Timer::new("input_commit");
     let (
       block_poly_vars_list,
       block_comm_vars_list,
@@ -845,6 +846,7 @@ impl SNARK {
     // --
 
     // Non-memory
+    let timer_gen = Timer::new("witness_gen");
     let (
       comb_tau,
       comb_r,
@@ -1295,6 +1297,7 @@ impl SNARK {
         )
       }
     };
+    timer_gen.stop();
 
     // Make exec_input_list an one-entry matrix so we don't have to wrap it later
     let exec_inputs_list = vec![exec_inputs_list];
@@ -1306,6 +1309,7 @@ impl SNARK {
     // BLOCK CORRECTNESS
     // --
 
+    let timer_proof = Timer::new("Block Correctness");
     let (block_r1cs_sat_proof, block_challenges) = {
       let (proof, block_challenges) = {
         R1CSProof::prove(
@@ -1363,14 +1367,16 @@ impl SNARK {
         r1cs_eval_proof_list.push(r1cs_eval_proof);
       }
 
-      timer_prove.stop();
+
       (inst_evals_bound_rp, inst_evals_list, r1cs_eval_proof_list)
     };
+    timer_proof.stop();
 
     // --
     // CONSIS_COMB
     // --
 
+    let timer_proof = Timer::new("Consis Comb");
     let (consis_comb_r1cs_sat_proof, consis_comb_challenges) = {
       let (proof, consis_comb_challenges) = {
         R1CSProof::prove(
@@ -1424,14 +1430,15 @@ impl SNARK {
         proof
       };
 
-      timer_prove.stop();
       (inst_evals, r1cs_eval_proof)
     };
+    timer_proof.stop();
 
     // --
     // CONSIS_CHECK
     // --
 
+    let timer_proof = Timer::new("Consis Check");
     let (consis_check_r1cs_sat_proof, consis_check_challenges) = {
       let (proof, consis_check_challenges) = {
         R1CSProof::prove_single(
@@ -1486,14 +1493,16 @@ impl SNARK {
         proof
       };
 
-      timer_prove.stop();
+      
       (inst_evals, r1cs_eval_proof)
     };
+    timer_proof.stop();
 
     // --
     // PERM_PRELIM
     // --
 
+    let timer_proof = Timer::new("Perm Prelim");
     let (
       perm_prelim_r1cs_sat_proof, 
       perm_prelim_challenges,
@@ -1581,14 +1590,16 @@ impl SNARK {
         proof
       };
 
-      timer_prove.stop();
+      
       (inst_evals, r1cs_eval_proof)
     };
+    timer_proof.stop();
 
     // --
     // PERM_BLOCK_ROOT
     // --
 
+    let timer_proof = Timer::new("Perm Block Root");
     let (perm_block_root_r1cs_sat_proof, perm_block_root_challenges) = {
       let (proof, perm_block_root_challenges) = {
         R1CSProof::prove(
@@ -1642,14 +1653,16 @@ impl SNARK {
         proof
       };
 
-      timer_prove.stop();
+      
       (inst_evals, r1cs_eval_proof)
     };
+    timer_proof.stop();
 
     // --
     // PERM_BLOCK_POLY
     // --
 
+    let timer_proof = Timer::new("Perm Block Poly");
     let (perm_block_poly_r1cs_sat_proof, perm_block_poly_challenges) = {
       let (proof, perm_block_poly_challenges) = {
         R1CSProof::prove_single(
@@ -1706,7 +1719,7 @@ impl SNARK {
         proof
       };
 
-      timer_prove.stop();
+      
       (inst_evals, r1cs_eval_proof)
     };
 
@@ -1733,11 +1746,13 @@ impl SNARK {
       }
       (perm_block_poly_list, proof_eval_perm_block_prod_list)
     };
+    timer_proof.stop();
 
     // --
     // PERM_EXEC_ROOT
     // --
 
+    let timer_proof = Timer::new("Perm Exec Root");
     let (perm_exec_root_r1cs_sat_proof, perm_exec_root_challenges) = {
       let (proof, perm_exec_root_challenges) = {
         R1CSProof::prove(
@@ -1791,14 +1806,16 @@ impl SNARK {
         proof
       };
 
-      timer_prove.stop();
+      
       (inst_evals, r1cs_eval_proof)
     };
+    timer_proof.stop();
 
     // --
     // PERM_EXEC_POLY
     // --
 
+    let timer_proof = Timer::new("Perm Exec Poly");
     let (perm_exec_poly_r1cs_sat_proof, perm_exec_poly_challenges) = {
       let (proof, perm_exec_poly_challenges) = {
         R1CSProof::prove_single(
@@ -1853,7 +1870,7 @@ impl SNARK {
         proof
       };
 
-      timer_prove.stop();
+      
       (inst_evals, r1cs_eval_proof)
     };
 
@@ -1874,6 +1891,7 @@ impl SNARK {
       );
       (perm_exec_poly, proof_eval_perm_exec_prod)
     };
+    timer_proof.stop();
 
     // --
     // MEM_BLOCK
@@ -1884,6 +1902,7 @@ impl SNARK {
         // --
         // MEM_EXTRACT
         // --
+        let timer_proof = Timer::new("Mem Extract");
         let (mem_extract_r1cs_sat_proof, mem_extract_challenges) = {
           let (proof, mem_extract_challenges) = {
             R1CSProof::prove(
@@ -1937,13 +1956,15 @@ impl SNARK {
             proof
           };
     
-          timer_prove.stop();
+          
           (inst_evals, r1cs_eval_proof)
         };
+        timer_proof.stop();
 
         // --
         // MEM_BLOCK_POLY
         // --
+        let timer_proof = Timer::new("Mem Block Poly");
         let (mem_block_poly_r1cs_sat_proof, mem_block_poly_challenges) = {
           let (proof, mem_block_poly_challenges) = {
             R1CSProof::prove_single(
@@ -2000,7 +2021,7 @@ impl SNARK {
             proof
           };
     
-          timer_prove.stop();
+          
           (inst_evals, r1cs_eval_proof)
         };
     
@@ -2027,6 +2048,7 @@ impl SNARK {
           }
           (mem_block_poly_list, proof_eval_mem_block_prod_list)
         };
+        timer_proof.stop();
 
         Some(MemBlockProofs {
           mem_extract_r1cs_sat_proof,
@@ -2053,6 +2075,7 @@ impl SNARK {
         // --
         // MEM_COHERE
         // --
+        let timer_proof = Timer::new("Mem Cohere");
         let (mem_cohere_r1cs_sat_proof, mem_cohere_challenges) = {
           let (proof, mem_cohere_challenges) = {
             R1CSProof::prove_single(
@@ -2107,13 +2130,15 @@ impl SNARK {
             proof
           };
     
-          timer_prove.stop();
+          
           (inst_evals, r1cs_eval_proof)
         };
+        timer_proof.stop();
 
         // --
         // MEM_ADDR_COMB
         // --
+        let timer_proof = Timer::new("Mem Addr Comb");
         let (
           mem_addr_comb_r1cs_sat_proof, 
           mem_addr_comb_challenges,
@@ -2195,13 +2220,15 @@ impl SNARK {
             proof
           };
 
-          timer_prove.stop();
+          
           (inst_evals, r1cs_eval_proof)
         };
+        timer_proof.stop();
 
         // --
         // MEM_ADDR_POLY
         // --
+        let timer_proof = Timer::new("Mem Addr Poly");
         let (mem_addr_poly_r1cs_sat_proof, mem_addr_poly_challenges) = {
           let (proof, mem_addr_poly_challenges) = {
             R1CSProof::prove_single(
@@ -2256,9 +2283,10 @@ impl SNARK {
             proof
           };
 
-          timer_prove.stop();
+          
           (inst_evals, r1cs_eval_proof)
         };
+        timer_proof.stop();
 
         // Record the prod of instance
         let (mem_addr_poly, proof_eval_mem_addr_prod) = {
@@ -2303,6 +2331,7 @@ impl SNARK {
     // IO_PROOFS
     // --
 
+    let timer_proof = Timer::new("IO Proofs");
     let io_proof = IOProofs::prove(
       &exec_poly_inputs[0],
       num_vars,
@@ -2319,7 +2348,9 @@ impl SNARK {
       transcript,
       &mut random_tape
     );
+    timer_proof.stop();
 
+    timer_prove.stop();
     SNARK {
       block_comm_vars_list,
       block_comm_inputs_list,
@@ -2474,7 +2505,7 @@ impl SNARK {
     let input: Vec<Scalar> = input.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
     let output: Scalar = Scalar::from_bytes(output).unwrap();
     {
-      let timer_commit = Timer::new("metacommit");
+      let timer_commit = Timer::new("inst_commit");
       // append a commitment to the computation to the transcript
       for c in block_comm {
         c.comm.append_to_transcript(b"block_comm", transcript);
@@ -2511,6 +2542,7 @@ impl SNARK {
     // BLOCK SORT
     // --
     // Block_num_instance is the number of non-zero entries in block_num_proofs
+    let timer_sort = Timer::new("block_sort");
     let block_num_instances = block_num_proofs.iter().fold(0, |i, j| if *j > 0 { i + 1 } else { i });
     // Sort the following based on block_num_proofs:
     // - block_num_proofs
@@ -2546,10 +2578,12 @@ impl SNARK {
     let consis_num_proofs = consis_num_proofs.next_power_of_two();
     // Pad addr_mems with dummys so the length is a power of 2
     let total_num_mem_accesses = if total_num_mem_accesses == 0 { 0 } else { total_num_mem_accesses.next_power_of_two() };
+    timer_sort.stop();
 
     // --
     // SAMPLE CHALLENGES AND COMMIT WITNESSES
     // --
+    let timer_commit = Timer::new("witness_commit");
     {
       // add the commitment to the verifier's transcript
       for p in 0..block_num_instances {
@@ -2586,13 +2620,14 @@ impl SNARK {
     }
     // Compute perm_size_bound
     let perm_size_bound = total_num_proofs_bound;
+    timer_commit.stop();
 
     // --
     // BLOCK CORRECTNESS
     // --
     if DEBUG {println!("BLOCK CORRECTNESS")};
     {
-      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let timer_sat_proof = Timer::new("Block Correctness Sat");
       let block_challenges = self.block_r1cs_sat_proof.verify(
         (2, 0, 0),
         block_num_instances,
@@ -2607,7 +2642,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("verify_eval_proof");
+      let timer_eval_proof = Timer::new("Block Correctness Eval");
       // Verify Evaluation on BLOCK
       let mut A_evals = Vec::new();
       let mut B_evals = Vec::new();
@@ -2642,7 +2677,7 @@ impl SNARK {
     // --
     if DEBUG {println!("CONSIS COMB")};
     {
-      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let timer_sat_proof = Timer::new("Consis Comb Sat");
       let consis_comb_challenges = self.consis_comb_r1cs_sat_proof.verify(
         (4, 0, 1),
         1,
@@ -2657,7 +2692,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("verify_eval_proof");
+      let timer_eval_proof = Timer::new("Consis Comb Eval");
       // Verify Evaluation on CONSIS_COMB
       let (Ar, Br, Cr) = &self.consis_comb_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -2680,7 +2715,7 @@ impl SNARK {
     // --
     if DEBUG {println!("CONSIS CHECK")};
     {
-      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let timer_sat_proof = Timer::new("Consis Check Sat");
       let consis_check_challenges = self.consis_check_r1cs_sat_proof.verify_single(
         1,
         consis_check_num_cons_base,
@@ -2695,7 +2730,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("verify_eval_proof");
+      let timer_eval_proof = Timer::new("Consis Check Eval");
       // Verify Evaluation on CONSIS_CHECK
       let (Ar, Br, Cr) = &self.consis_check_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -2718,7 +2753,7 @@ impl SNARK {
     // --
     if DEBUG {println!("PERM PRELIM")};
     {
-      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let timer_sat_proof = Timer::new("Perm Prelim Sat");
       let perm_prelim_challenges = self.perm_prelim_r1cs_sat_proof.verify(
         (1, 0, 0),
         1,
@@ -2749,7 +2784,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("verify_eval_proof");
+      let timer_eval_proof = Timer::new("Perm Prelim Eval");
       // Verify Evaluation on PERM_PRELIM
       let (Ar, Br, Cr) = &self.perm_prelim_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -2772,7 +2807,7 @@ impl SNARK {
     // --
     if DEBUG {println!("PERM BLOCK ROOT")};
     {
-      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let timer_sat_proof = Timer::new("Perm Block Root Sat");
       let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
         (4, 0, 1),
         block_num_instances,
@@ -2787,7 +2822,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("verify_eval_proof");
+      let timer_eval_proof = Timer::new("Perm Block Root Eval");
       // Verify Evaluation on PERM_BLOCK_ROOT
       let (Ar, Br, Cr) = &self.perm_block_root_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -2810,7 +2845,7 @@ impl SNARK {
     // --
     if DEBUG {println!("PERM BLOCK POLY")};
     let perm_block_poly_bound_tau = {
-      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let timer_sat_proof = Timer::new("Perm Block Poly Sat");
       let perm_block_poly_challenges = self.perm_block_poly_r1cs_sat_proof.verify_single(
         block_num_instances,
         perm_poly_num_cons_base,
@@ -2825,7 +2860,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("verify_eval_proof");
+      let timer_eval_proof = Timer::new("Perm Block Poly Eval");
       // Verify Evaluation on PERM_BLOCK_POLY
       let (Ar, Br, Cr) = &self.perm_block_poly_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -2863,7 +2898,7 @@ impl SNARK {
     // --
     if DEBUG {println!("PERM EXEC ROOT")};
     {
-      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let timer_sat_proof = Timer::new("Perm Exec Root Sat");
       let perm_exec_root_challenges = self.perm_exec_root_r1cs_sat_proof.verify(
         (4, 0, 1),
         1,
@@ -2878,7 +2913,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("verify_eval_proof");
+      let timer_eval_proof = Timer::new("Perm Exec Root Eval");
       // Verify Evaluation on PERM_EXEC_ROOT
       let (Ar, Br, Cr) = &self.perm_exec_root_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -2901,7 +2936,7 @@ impl SNARK {
     // --
     if DEBUG {println!("PERM EXEC POLY")};
     let perm_exec_poly_bound_tau = {
-      let timer_sat_proof = Timer::new("verify_sat_proof");
+      let timer_sat_proof = Timer::new("Perm Exec Poly Sat");
       let perm_exec_poly_challenges = self.perm_exec_poly_r1cs_sat_proof.verify_single(
         1,
         perm_poly_num_cons_base,
@@ -2916,7 +2951,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("verify_eval_proof");
+      let timer_eval_proof = Timer::new("Perm Exec Poly Eval");
       // Verify Evaluation on PERM_EXEC_POLY
       let (Ar, Br, Cr) = &self.perm_exec_poly_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -2961,7 +2996,7 @@ impl SNARK {
       // --
       if DEBUG {println!("MEM EXTRACT")};
       {
-        let timer_sat_proof = Timer::new("verify_sat_proof");
+        let timer_sat_proof = Timer::new("Mem Extract Sat");
         let mem_extract_challenges = mem_block_proofs.mem_extract_r1cs_sat_proof.verify(
           (4, 1, 1),
           block_num_instances,
@@ -2976,7 +3011,7 @@ impl SNARK {
         )?;
         timer_sat_proof.stop();
 
-        let timer_eval_proof = Timer::new("verify_eval_proof");
+        let timer_eval_proof = Timer::new("Mem Extract Eval");
         // Verify Evaluation on PERM_BLOCK_ROOT
         let (Ar, Br, Cr) = &mem_block_proofs.mem_extract_inst_evals;
         Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -2999,7 +3034,7 @@ impl SNARK {
       // --
       if DEBUG {println!("MEM BLOCK POLY")};
       let mem_block_poly_bound_tau = {
-        let timer_sat_proof = Timer::new("verify_sat_proof");
+        let timer_sat_proof = Timer::new("Mem Block Poly Sat");
         let mem_block_poly_challenges = mem_block_proofs.mem_block_poly_r1cs_sat_proof.verify_single(
           block_num_instances,
           perm_poly_num_cons_base,
@@ -3014,7 +3049,7 @@ impl SNARK {
         )?;
         timer_sat_proof.stop();
 
-        let timer_eval_proof = Timer::new("verify_eval_proof");
+        let timer_eval_proof = Timer::new("Mem Block Poly Eval");
         // Verify Evaluation on MEM_BLOCK_POLY
         let (Ar, Br, Cr) = &mem_block_proofs.mem_block_poly_inst_evals;
         Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -3059,7 +3094,7 @@ impl SNARK {
           // --
           if DEBUG {println!("MEM COHERE")};
           {
-            let timer_sat_proof = Timer::new("verify_sat_proof");
+            let timer_sat_proof = Timer::new("Mem Cohere Sat");
             let mem_cohere_challenges = mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify_single(
               1,
               mem_cohere_num_cons_base,
@@ -3074,7 +3109,7 @@ impl SNARK {
             )?;
             timer_sat_proof.stop();
 
-            let timer_eval_proof = Timer::new("verify_eval_proof");
+            let timer_eval_proof = Timer::new("Mem Cohere Eval");
             // Verify Evaluation on MEM_COHERE
             let (Ar, Br, Cr) = &mem_addr_proofs.mem_cohere_inst_evals;
             Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -3097,7 +3132,7 @@ impl SNARK {
           // --
           if DEBUG {println!("MEM ADDR COMB")};
           {
-            let timer_sat_proof = Timer::new("verify_sat_proof");
+            let timer_sat_proof = Timer::new("Mem Addr Comb Sat");
             let mem_addr_comb_challenges = mem_addr_proofs.mem_addr_comb_r1cs_sat_proof.verify(
               (4, 0, 1),
               1,
@@ -3128,7 +3163,7 @@ impl SNARK {
             )?;
             timer_sat_proof.stop();
 
-            let timer_eval_proof = Timer::new("verify_eval_proof");
+            let timer_eval_proof = Timer::new("Mem Addr Comb Eval");
             // Verify Evaluation on PERM_EXEC_ROOT
             let (Ar, Br, Cr) = &mem_addr_proofs.mem_addr_comb_inst_evals;
             Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -3151,7 +3186,7 @@ impl SNARK {
           // --
           if DEBUG {println!("MEM ADDR POLY")};
           let mem_addr_poly_bound_tau = {
-            let timer_sat_proof = Timer::new("verify_sat_proof");
+            let timer_sat_proof = Timer::new("Mem Addr Poly Sat");
             let mem_addr_poly_challenges = mem_addr_proofs.mem_addr_poly_r1cs_sat_proof.verify_single(
               1,
               mem_addr_poly_num_cons_base,
@@ -3166,7 +3201,7 @@ impl SNARK {
             )?;
             timer_sat_proof.stop();
 
-            let timer_eval_proof = Timer::new("verify_eval_proof");
+            let timer_eval_proof = Timer::new("Mem Addr Poly Eval");
             // Verify Evaluation on PERM_EXEC_POLY
             let (Ar, Br, Cr) = &mem_addr_proofs.mem_addr_poly_inst_evals;
             Ar.append_to_transcript(b"Ar_claim", transcript);
@@ -3211,6 +3246,7 @@ impl SNARK {
     // IO_PROOFS
     // --
     if DEBUG {println!("IO PROOFS")};
+    let timer_proof = Timer::new("IO Proofs");
     self.io_proof.verify(
       &self.exec_comm_inputs[0],
       num_vars,
@@ -3226,6 +3262,7 @@ impl SNARK {
       vars_gens,
       transcript
     )?;
+    timer_proof.stop();
     
     timer_verify.stop();
     Ok(())
@@ -3307,7 +3344,7 @@ impl NIZK {
       (proof, rx, ry)
     };
 
-    timer_prove.stop();
+    
     NIZK {
       r1cs_sat_proof,
       r: (rx, ry),

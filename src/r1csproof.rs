@@ -597,7 +597,6 @@ impl R1CSProof {
       },
       _ => panic!("PROOF Failed: Unsupported (num_witness_secs, num_shorts, num_singles) pair: ({}, {}, {})", num_witness_secs, num_shorts, num_singles)
     }
-    timer_polyeval.stop();
     
     // Bind the resulting witness list to rp
     // poly_vars stores the result of each witness matrix bounded to (rq_short ++ ry)
@@ -619,6 +618,7 @@ impl R1CSProof {
         eval_vars_at_ry_list[p] *= ONE - rq[q];
       }
     }
+    timer_polyeval.stop();
 
     let poly_vars = DensePolynomial::new(eval_vars_at_ry_list);
     let eval_vars_at_ry = poly_vars.evaluate(&rp);
@@ -1220,7 +1220,6 @@ impl R1CSProof {
       proof_eval_vars_at_ry_list.push(proof_eval_vars_at_ry);
       comm_vars_at_ry_list.push(comm_vars_at_ry);
     }
-    timer_polyeval.stop();
     
     // Bind the resulting witness list to rp
     // poly_vars stores the result of each witness matrix bounded to (rq_short ++ ry)
@@ -1231,6 +1230,8 @@ impl R1CSProof {
         eval_vars_at_ry_list[p] *= ONE - ry[q];
       }
     }
+
+    timer_polyeval.stop();
 
     let poly_vars = DensePolynomial::new(eval_vars_at_ry_list);
     let eval_vars_at_ry = poly_vars.evaluate(&rp);

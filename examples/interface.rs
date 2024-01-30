@@ -373,6 +373,7 @@ fn main() {
   // --
   // BLOCK INSTANCES
   let (block_num_cons, block_num_non_zero_entries, mut block_inst) = Instance::gen_block_inst(block_num_instances_bound, num_vars, &ctk.args);
+  println!("Finished Block");
 
   // CONSIS INSTANCES
   // CONSIS is consisted of two instances
@@ -384,6 +385,7 @@ fn main() {
   let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_vars);
   // CONSIS_CHECK
   let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(num_vars, total_num_proofs_bound);
+  println!("Finished Consis");
 
   // PERM INSTANCES
   // PERM is consisted of four instances
@@ -399,6 +401,7 @@ fn main() {
   let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_vars);
   // PERM_POLY (for PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY), MEM_ADDR_POLY
   let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(num_vars, total_num_proofs_bound);
+  println!("Finished Perm");
 
   // MEM INSTANCES
   let total_num_mem_accesses_bound_padded = if total_num_mem_accesses_bound == 0 {1} else {total_num_mem_accesses_bound};
@@ -412,6 +415,7 @@ fn main() {
   let (mem_addr_comb_num_cons, mem_addr_comb_num_non_zero_entries, mem_addr_comb_inst) = Instance::gen_mem_addr_comb_inst();
   // MEM_ADDR_POLY
   let (mem_addr_poly_num_cons_base, mem_addr_poly_num_non_zero_entries, mem_addr_poly_inst) = Instance::gen_mem_addr_poly_inst(total_num_mem_accesses_bound_padded);
+  println!("Finished Mem");
 
   // --
   // COMMITMENT PREPROCESSING
@@ -425,27 +429,23 @@ fn main() {
 
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound, block_num_non_zero_entries);
-  println!("Finished Block");
   let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_vars, 1, consis_comb_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * num_vars, 1, consis_check_num_non_zero_entries);
-  println!("Finished Consis");
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
-  println!("Finished Perm");
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, 1, mem_extract_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_addr_poly_num_non_zero_entries);
-  println!("Finished Mem");
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   // for size PROOF * VAR
   let proofs_times_vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
-
-  println!("Comitting Circuits...");
+  
   // create a commitment to the R1CS instance
+  println!("Comitting Circuits...");
   let (block_comm, block_decomm) = SNARK::multi_encode(&block_inst, &block_gens);
   println!("Finished Block");
   let (consis_comb_comm, consis_comb_decomm) = SNARK::encode(&consis_comb_inst, &consis_comb_gens);
