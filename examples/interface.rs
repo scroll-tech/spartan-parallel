@@ -38,6 +38,7 @@ fn string_to_bytes(buffer: String) -> [u8; 32] {
 struct CompileTimeKnowledge {
   block_num_instances: usize,
   num_vars: usize,
+  num_inputs_unpadded: usize,
   total_num_proofs_bound: usize,
   block_num_mem_accesses: Vec<usize>,
   total_num_mem_accesses_bound: usize,
@@ -58,12 +59,15 @@ impl CompileTimeKnowledge {
     let mut reader = BufReader::new(f);
     let mut buffer = String::new();
 
-    let (block_num_instances, num_vars, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound) = {
+    let (block_num_instances, num_vars, num_inputs_unpadded, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound) = {
       reader.read_line(&mut buffer)?;
       let block_num_instances = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
       reader.read_line(&mut buffer)?;
       let num_vars = buffer.trim().parse::<usize>().unwrap();
+      buffer.clear();
+      reader.read_line(&mut buffer)?;
+      let num_inputs_unpadded = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
       reader.read_line(&mut buffer)?;
       let total_num_proofs_bound = buffer.trim().parse::<usize>().unwrap();
@@ -73,7 +77,7 @@ impl CompileTimeKnowledge {
       buffer.clear();
       reader.read_line(&mut buffer)?;
       let total_num_mem_accesses_bound = buffer.trim().parse::<usize>().unwrap();
-      (block_num_instances, num_vars, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound)
+      (block_num_instances, num_vars, num_inputs_unpadded, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound)
     };
 
     let mut args = vec![Vec::new(); block_num_instances];
@@ -143,6 +147,7 @@ impl CompileTimeKnowledge {
     Ok(CompileTimeKnowledge {
       block_num_instances,
       num_vars,
+      num_inputs_unpadded,
       total_num_mem_accesses_bound,
       block_num_mem_accesses,
       total_num_proofs_bound,
@@ -356,11 +361,13 @@ fn main() {
   println!("Preprocessing instances...");
   let block_num_instances_bound = ctk.block_num_instances;
   let num_vars = ctk.num_vars;
-  assert_eq!(num_vars, num_vars.next_power_of_two());
+  // num_inputs_unpadded is only used by consis_comb
+  let num_inputs_unpadded = ctk.num_inputs_unpadded;
   let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound.next_power_of_two();
 
+  assert_eq!(num_vars, num_vars.next_power_of_two());
   assert!(ctk.args.len() == block_num_instances_bound);
   assert!(block_num_mem_accesses.len() == block_num_instances_bound);
   for n in &block_num_mem_accesses {
@@ -382,7 +389,7 @@ fn main() {
   // CONSIS_CHECK checks that these values indeed matches
   // There is only one copy for CONSIS_CHECK
   // CONSIS_COMB
-  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_vars);
+  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_inputs_unpadded, num_vars);
   // CONSIS_CHECK
   let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(num_vars, total_num_proofs_bound);
   println!("Finished Consis");
@@ -493,6 +500,7 @@ fn main() {
     rtk.output_exec_num,
     
     num_vars,
+    num_inputs_unpadded,
     total_num_proofs_bound,
     block_num_instances_bound,
     rtk.block_max_num_proofs,

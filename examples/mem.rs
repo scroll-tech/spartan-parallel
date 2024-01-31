@@ -68,6 +68,7 @@ use merlin::Transcript;
 struct CompileTimeKnowledge {
   block_num_instances: usize,
   num_vars: usize,
+  num_inputs_unpadded: usize,
   total_num_proofs_bound: usize,
   block_num_mem_accesses: Vec<usize>,
   total_num_mem_accesses_bound: usize,
@@ -134,6 +135,8 @@ fn produce_r1cs() -> (
   // Divide inputs into (1, input, 1, output)
   // So num_inputs = num_outputs = num_vars / 2 - 1
   let num_vars = 16;
+  // How many non-dummy inputs do we have?
+  let num_inputs_unpadded = 8;
 
   // Number of proofs of each R1CS instance
   // Total for all blocks and one block
@@ -384,6 +387,7 @@ fn produce_r1cs() -> (
     CompileTimeKnowledge {
       block_num_instances,
       num_vars,
+      num_inputs_unpadded,
       total_num_proofs_bound,
       block_num_mem_accesses,
       total_num_mem_accesses_bound,
@@ -421,6 +425,7 @@ fn main() {
   let (ctk, rtk) = produce_r1cs();
   let block_num_instances = ctk.block_num_instances;
   let num_vars = ctk.num_vars;
+  let num_inputs_unpadded = ctk.num_inputs_unpadded;
   let total_num_proofs_bound = ctk.total_num_proofs_bound;
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound;
@@ -446,7 +451,7 @@ fn main() {
   // CONSIS_CHECK checks that these values indeed matches
   // There is only one copy for CONSIS_CHECK
   // CONSIS_COMB
-  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_vars);
+  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_inputs_unpadded, num_vars);
   // CONSIS_CHECK
   let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(num_vars, total_num_proofs_bound);
 
@@ -539,6 +544,7 @@ fn main() {
     rtk.output_exec_num,
     
     num_vars,
+    num_inputs_unpadded,
     total_num_proofs_bound,
     block_num_instances,
     rtk.block_max_num_proofs,

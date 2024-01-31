@@ -3,12 +3,7 @@
 #![deny(missing_docs)]
 #![allow(clippy::assertions_on_result_states)]
 
-// TODO: Try to add Maybe's to reduce the work for unexecuted blocks
-// TODO: Could be beneficial to commit blocks separately
-// TODO: Can we let number of constraints vary for different blocks?
-// TODO: Can we use only one instance for mem_extract?
-// TODO: Allow number of instances to be not a power of 2
-// Q: We wouldn't know the number of executions during compile time, how to order the blocks? (Also what if P provides the wrong number of execution?)
+// TODO: Can we let number of constraints / inputs vary for different blocks?
 
 extern crate byteorder;
 extern crate core;
@@ -535,6 +530,7 @@ impl SNARK {
     output_exec_num: usize,
 
     num_vars: usize,
+    num_inputs_unpadded: usize,
     total_num_proofs_bound: usize,
 
     block_num_instances_bound: usize,
@@ -1030,7 +1026,7 @@ impl SNARK {
         
         consis_w3[q][1] = exec_inputs_list[q][0];
         consis_w3[q][2] = exec_inputs_list[q][0];
-        for i in 1..num_inputs {
+        for i in 1..num_inputs_unpadded {
           consis_w2[q][i] = perm_w0[i] * exec_inputs_list[q][i];
           consis_w2[q][num_inputs + i] = perm_w0[i] * exec_inputs_list[q][num_inputs + i];
           consis_w3[q][1] += consis_w2[q][i];

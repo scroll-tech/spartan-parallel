@@ -255,12 +255,12 @@ impl Instance {
   /// - consis_w2: <0, i0 * r, i1 * r^2, ..., 0, o0 * r, o1 * r^2, ...>
   /// - consis_w3: <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0, 0, ...>
   /// Note: if v is 1, it is almost impossible to have consis_w3[1] = 0
-  pub fn gen_consis_comb_inst(num_vars: usize) -> (usize, usize, Instance) {
+  pub fn gen_consis_comb_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
     assert_eq!(num_vars, num_vars.next_power_of_two());
     let num_inputs = num_vars / 2;
 
-    let consis_comb_num_cons = num_vars + 1;
-    let consis_comb_num_non_zero_entries = 2 * num_vars - 1;
+    let consis_comb_num_cons = 2 * num_inputs_unpadded + 1;
+    let consis_comb_num_non_zero_entries = 4 * num_inputs_unpadded - 1;
   
     let V_valid = num_vars;
     let V_cnst = V_valid;
@@ -279,7 +279,7 @@ impl Instance {
   
         // R1CS:
         // For w2
-        for i in 1..num_inputs {
+        for i in 1..num_inputs_unpadded {
           // Dot product for inputs
           (A, B, C) = Instance::gen_constr(A, B, C,
             constraint_count, vec![(i, 1)], vec![(num_vars + i, 1)], vec![(2 * num_vars + i, 1)]);
@@ -296,14 +296,14 @@ impl Instance {
         (A, B, C) = Instance::gen_constr(A, B, C, // w3[1]
           constraint_count, 
           vec![(V_valid, 1)], 
-          [vec![(V_cnst, 1)], (1..num_inputs).map(|i| (2 * num_vars + i, 1)).collect()].concat(),
+          [vec![(V_cnst, 1)], (1..num_inputs_unpadded).map(|i| (2 * num_vars + i, 1)).collect()].concat(),
           vec![(3 * num_vars + 1, 1)]
         );
         constraint_count += 1;
         (A, B, C) = Instance::gen_constr(A, B, C, // w3[2]
           constraint_count, 
           vec![(V_valid, 1)], 
-          [vec![(V_cnst, 1)], (1..num_inputs).map(|i| (2 * num_vars + num_inputs + i, 1)).collect()].concat(),
+          [vec![(V_cnst, 1)], (1..num_inputs_unpadded).map(|i| (2 * num_vars + num_inputs + i, 1)).collect()].concat(),
           vec![(3 * num_vars + 2, 1)]
         );
   
