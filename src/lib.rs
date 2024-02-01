@@ -875,25 +875,35 @@ impl SNARK {
       let comb_tau = transcript.challenge_scalar(b"challenge_tau");
       let comb_r = transcript.challenge_scalar(b"challenge_r");
       
-      // w0 is (tau, r, r^2, ...)
+      // w0 is (tau, r, r^2, ...) for the first 2 * num_inputs_unpadded entries
       // set the first entry to 1 for multiplication and later revert it to tau
       let mut perm_w0 = Vec::new();
       perm_w0.push(Scalar::one());
       let mut r_tmp = comb_r;
-      for _ in 1..num_vars {
+      for _ in 1..2 * num_inputs_unpadded {
         perm_w0.push(r_tmp);
         r_tmp *= comb_r;
       }
+      perm_w0.extend(vec![zero; num_vars - 2 * num_inputs_unpadded]);
       
       // FOR PERM
-      // w2 is block_inputs * <r>
+      // w2 is block_inputs * <r>, skipping num_inputs_unpadded .. num_vars / 2
+      // So w2[num_inputs_unpadded] = w0[num_inputs_unpadded] * input[num_vars / 2]
       let perm_block_w2: Vec<Vec<Vec<Scalar>>> = block_inputs_mat.iter().map(
-        |i| i.iter().map(
-          |input| (0..input.len()).map(|j| perm_w0[j] * input[j]).collect()
+        |i| i.iter().map(|input|
+          [
+            (0..num_inputs_unpadded).map(|j| perm_w0[j] * input[j]).collect(),
+            (0..num_inputs_unpadded).map(|j| perm_w0[num_inputs_unpadded + j] * input[num_vars / 2 + j]).collect(),
+            vec![zero; num_vars - 2 * num_inputs_unpadded]
+          ].concat()
         ).collect()
       ).collect();
-      let perm_exec_w2: Vec<Vec<Scalar>> = exec_inputs_list.iter().map(
-        |input| (0..input.len()).map(|j| perm_w0[j] * input[j]).collect()
+      let perm_exec_w2: Vec<Vec<Scalar>> = exec_inputs_list.iter().map(|input|
+        [
+          (0..num_inputs_unpadded).map(|j| perm_w0[j] * input[j]).collect(),
+          (0..num_inputs_unpadded).map(|j| perm_w0[num_inputs_unpadded + j] * input[num_vars / 2 + j]).collect(),
+          vec![zero; num_vars - 2 * num_inputs_unpadded]
+        ].concat()
       ).collect();
       perm_w0[0] = comb_tau;
       

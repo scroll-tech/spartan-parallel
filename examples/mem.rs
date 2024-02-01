@@ -464,9 +464,9 @@ fn main() {
   // The product is defined by PROD = \prod(\tau - (\sum_i a_i * r^{i-1}))
   // There is only one proof
   // PERM_PRELIM
-  let (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst) = Instance::gen_perm_prelim_inst(num_vars);
+  let (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst) = Instance::gen_perm_prelim_inst(num_inputs_unpadded, num_vars);
   // PERM_ROOT
-  let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_vars);
+  let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_vars);
   // PERM_POLY (for PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY), MEM_ADDR_POLY
   let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(num_vars, total_num_proofs_bound);
 
@@ -620,7 +620,7 @@ fn main() {
 
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
-  assert!(proof.verify::<false>(
+  assert!(proof.verify::<true>(
     ctk.input_block_num,
     ctk.output_block_num,
     ctk.func_input_width,

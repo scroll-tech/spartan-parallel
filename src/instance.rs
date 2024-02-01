@@ -255,6 +255,7 @@ impl Instance {
   /// - consis_w2: <0, i0 * r, i1 * r^2, ..., 0, o0 * r, o1 * r^2, ...>
   /// - consis_w3: <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0, 0, ...>
   /// Note: if v is 1, it is almost impossible to have consis_w3[1] = 0
+  /// Note: Only combine the first num_inputs_unpadded inputs since the rest are unused
   pub fn gen_consis_comb_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
     assert_eq!(num_vars, num_vars.next_power_of_two());
     let num_inputs = num_vars / 2;
@@ -367,9 +368,10 @@ impl Instance {
 
   /// Generates PERM_PRELIM instance based on parameters
   /// PERM_PRELIM checks the correctness of (r, r^2, ...)
-  pub fn gen_perm_prelim_inst(num_vars: usize) -> (usize, usize, Instance) {
-    let perm_prelim_num_cons = num_vars - 2;
-    let perm_prelim_num_non_zero_entries = num_vars - 2;
+  /// Only need to generate the first 2 * num_inputs_unpadded entries
+  pub fn gen_perm_prelim_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
+    let perm_prelim_num_cons = 2 * num_inputs_unpadded - 2;
+    let perm_prelim_num_non_zero_entries = 2 * num_inputs_unpadded - 2;
     let perm_prelim_inst = {
       let mut A_list = Vec::new();
       let mut B_list = Vec::new();
@@ -382,7 +384,7 @@ impl Instance {
   
         let V_r = 1;
   
-        for i in 2..num_vars {
+        for i in 2..2 * num_inputs_unpadded {
           (A, B, C) = Instance::gen_constr(A, B, C,
             i - 2, vec![(i - 1, 1)], vec![(V_r, 1)], vec![(i, 1)]);
         }
@@ -406,9 +408,10 @@ impl Instance {
   /// w2: one block_inputs entry dot product <r>: i0, i1 * r, i2 * r^2, i3 * r^3, ...
   /// w3[0]: valid bit, should match block_inputs[0]
   /// w3[1]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...)), 0 if invalid
-  pub fn gen_perm_root_inst(num_vars: usize) -> (usize, usize, Instance) {
-    let perm_root_num_cons = num_vars + 2;
-    let perm_root_num_non_zero_entries = 2 * num_vars + 2;
+  /// Note: Only process the first num_inputs_unpadded inputs since the rest are unused
+  pub fn gen_perm_root_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
+    let perm_root_num_cons = 2 * num_inputs_unpadded + 2;
+    let perm_root_num_non_zero_entries = 4 * num_inputs_unpadded + 2;
     let perm_root_inst = {
       let (A, B, C) = {
         let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -416,15 +419,32 @@ impl Instance {
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
   
         let V_tau = 0;
+        // V_r(0) == tau and should be skipped!
+        let V_r = |i: usize| i;
+        let V_input = |i: usize| num_vars + i;
+        let V_output = |i: usize| num_vars + num_vars / 2 + i;
+        let V_input_dot_prod = |i: usize| 2 * num_vars + i;
+        // Note: we skip entries num_inputs_unpadded .. num_vars
+        // So w2[num_inputs_unpadded] = w0[num_inputs_unpadded] * w1[num_vars / 2]
+        let V_output_dot_prod = |i: usize| 2 * num_vars + num_inputs_unpadded + i;
+
         let mut constraint_count = 0;
   
         // correctness of w2
-        (A, B, C) = Instance::gen_constr(A, B, C, // for i0
-          constraint_count, vec![], vec![], vec![(num_vars, 1), (2 * num_vars, -1)]);
+        // for i0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          constraint_count, vec![], vec![], vec![(V_input(0), 1), (V_input_dot_prod(0), -1)]);
         constraint_count += 1;
-        for i in 1..num_vars {
-          (A, B, C) = Instance::gen_constr(A, B, C, // for i1..
-            constraint_count, vec![(num_vars + i, 1)], vec![(i, 1)], vec![(2 * num_vars + i, 1)]);
+        // for i1..
+        for i in 1..num_inputs_unpadded {
+          (A, B, C) = Instance::gen_constr(A, B, C,
+            constraint_count, vec![(V_input(i), 1)], vec![(V_r(i), 1)], vec![(V_input_dot_prod(i), 1)]);
+          constraint_count += 1;
+        }
+        // for o0, o1..
+        for i in 0..num_inputs_unpadded {
+          (A, B, C) = Instance::gen_constr(A, B, C,
+            constraint_count, vec![(V_output(i), 1)], vec![(V_r(i + num_inputs_unpadded), 1)], vec![(V_output_dot_prod(i), 1)]);
           constraint_count += 1;
         }
         // correctness of w3[0]
@@ -433,7 +453,7 @@ impl Instance {
         constraint_count += 1;
         // correctness of w3[1]
         (A, B, C) = Instance::gen_constr(A, B, C, constraint_count,
-            [vec![(V_tau, 1)], (0..num_vars).map(|i| (2 * num_vars + i, -1)).collect()].concat(), 
+            [vec![(V_tau, 1)], (0..2 * num_inputs_unpadded).map(|i| (V_input_dot_prod(i), -1)).collect()].concat(), 
             vec![(num_vars, 1)], 
             vec![(3 * num_vars + 1, 1)]);
   
