@@ -1,4 +1,6 @@
 #![allow(clippy::too_many_arguments)]
+use crate::{ProverWitnessSecInfo, VerifierWitnessSecInfo};
+
 use super::commitments::{Commitments, MultiCommitGens};
 use super::dense_mlpoly::{
   DensePolynomial, EqPolynomial, PolyCommitment, PolyCommitmentGens, PolyEvalProof,
@@ -195,27 +197,21 @@ impl R1CSProof {
     num_proofs: &Vec<usize>,
     // Number of inputs of the combined Z matrix
     num_inputs: usize,
-
-    // NUM_WITNESS_SECS
+    // WITNESS_SECS
     // How many sections does each Z vector have?
     // num_witness_secs can be 1, 2, 3, or 4
     // if num_witness_secs is 3, w3 is just 0s
     num_witness_secs: usize,
-    // For each witness sec, record the follwoing:
-    // WIT_SEC_SINGLE: does it have just one copy across all blocks?
-    wit_sec_single: Vec<bool>,
-    // WIT_SEC_SHORT: does it have only one copy per block? A single witness sect must also be short
-    wit_sec_short: Vec<bool>,
-    // WIT_SEC_NUM_INPUTS: number of inputs of the witness sec. Must be <= num_inputs
-    wit_sec_num_inputs: Vec<usize>,
-
+    // For each witness sec, record the following:
+    // IS_SINGLE: does it have just one copy across all blocks?
+    // IS_SHORT: does it have only one copy per block? A single witness sect must also be short
+    // NUM_INPUTS: number of inputs per block
+    // W_MAT: num_instances x num_proofs x num_inputs hypermatrix for all values
+    // POLY_W: one dense polynomial per instance
+    witness_secs: Vec<&ProverWitnessSecInfo>,
+    // INSTANCES
     inst: &R1CSInstance,
     gens: &R1CSGens,
-    // Depends on num_witness_secs, witnesses are separated into w[0], w[1], w[2], w[3]
-    // Each committed separately but concated together to form Z
-    w_mat: Vec<&Vec<Vec<Vec<Scalar>>>>,
-    // The polynomial interpolated from each witness section
-    poly_w_list: Vec<&Vec<DensePolynomial>>,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
   ) -> (R1CSProof, [Vec<Scalar>; 4]) { 
@@ -234,20 +230,20 @@ impl R1CSProof {
 
     // Assert num_witness_secs is valid
     assert!(num_witness_secs >= 1 && num_witness_secs <= 4);
-    assert_eq!(num_witness_secs, w_mat.len());
-    assert_eq!(num_witness_secs, poly_w_list.len());
-    for i in 0..num_witness_secs {
+    assert_eq!(num_witness_secs, witness_secs.len());
+    for w in &witness_secs {
       // If a witness_sec is single, it is also short
-      assert!(!wit_sec_single[i] || wit_sec_short[i]);
+      assert!(!w.is_single || w.is_short);
       // wit_sec_num_inputs <= num_inputs
-      assert!(wit_sec_num_inputs[i] <= num_inputs);
-
+      for i in &w.num_inputs {
+        assert!(*i <= num_inputs);
+      }
       // assert size of w_mat
-      assert!(wit_sec_single[i] && w_mat[i].len() == 1 || !wit_sec_single[i] && w_mat[i].len() == num_instances);
-      for p in 0..w_mat[i].len() {
-        assert!(wit_sec_short[i] && w_mat[i][p].len() == 1 || !wit_sec_short[i] && w_mat[i][p].len() == num_proofs[p]);
-        for q in 0..w_mat[i][p].len() {
-          assert_eq!(w_mat[i][p][q].len(), wit_sec_num_inputs[i]);
+      assert!(w.is_single && w.w_mat.len() == 1 || !w.is_single && w.w_mat.len() == num_instances);
+      for p in 0..w.w_mat.len() {
+        assert!(w.is_short && w.w_mat[p].len() == 1 || !w.is_short && w.w_mat[p].len() == num_proofs[p]);
+        for q in 0..w.w_mat[p].len() {
+          assert_eq!(w.w_mat[p][q].len(), w.num_inputs[p]);
         }
       }
     }
@@ -264,11 +260,11 @@ impl R1CSProof {
       z_mat.push(Vec::new());
       for q in 0..num_proofs[p] {
         z_mat[p].push(Vec::new());
-        for w in 0..num_witness_secs {
-          let p_w = if wit_sec_single[w] { 0 } else { p };
-          let q_w = if wit_sec_short[w] { 0 } else { q };
-          z_mat[p][q].extend(w_mat[w][p_w][q_w].clone());
-          z_mat[p][q].extend(vec![ZERO; num_inputs - wit_sec_num_inputs[w]]);
+        for w in &witness_secs {
+          let p_w = if w.is_single { 0 } else { p };
+          let q_w = if w.is_short { 0 } else { q };
+          z_mat[p][q].extend(w.w_mat[p_w][q_w].clone());
+          z_mat[p][q].extend(vec![ZERO; num_inputs - w.num_inputs[p_w]]);
         }
         if num_witness_secs == 3 {
           z_mat[p][q].extend(vec![ZERO; num_inputs]);
@@ -441,17 +437,25 @@ impl R1CSProof {
     let mut comm_vars_at_ry_list = vec![Vec::new(); num_witness_secs];
     let timer_polyeval = Timer::new("polyeval");
 
-    for w in 0..num_witness_secs {
-      // ry_short is the last wit_sec_num_inputs[w].log_2() entries of ry
-      let ry_short = &ry[num_rounds_y - wit_sec_num_inputs[w].log_2()..];
-      // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)...
-      let ry_factor = (num_witness_secs.next_power_of_two().log_2()..num_rounds_y - wit_sec_num_inputs[w].log_2()).fold(ONE, |a, b| a * (ONE - ry[b]));
-      let wit_sec_num_instance = if wit_sec_single[w] { 1 } else { num_instances };
+    // For every possible wit_sec.num_inputs, compute ry_factor = prodX(1 - ryX)...
+    // If there are 2 witness secs, then ry_factors[0] = 1, ry_factors[1] = 1, ry_factors[2] = 1 - ry1, ry_factors[3] = (1 - ry1)(1 - ry2), etc.
+    let mut ry_factors = vec![ONE; num_rounds_y + 1];
+    for i in num_witness_secs.next_power_of_two().log_2()..num_rounds_y {
+      ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
+    }
+
+    for i in 0..num_witness_secs {
+      let w = witness_secs[i];
+      let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
       for p in 0..wit_sec_num_instance {
+        // ry_short is the last wit_sec_num_inputs[w].log_2() entries of ry
+        // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
+        let ry_short = &ry[num_rounds_y - w.num_inputs[p].log_2()..];
+        
         let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
-        let poly = poly_w_list[w][p].clone();
+        let poly = w.poly_w[p].clone();
         let r_concat = [rq_short, ry_short].concat();
-        let r = if wit_sec_short[w] { ry_short } else { &r_concat };
+        let r = if w.is_short { ry_short } else { &r_concat };
         let eval_vars_at_ry = poly.evaluate(r);
         let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
           &poly,
@@ -463,9 +467,9 @@ impl R1CSProof {
           transcript,
           random_tape,
         );
-        eval_vars_at_ry_list[w].push(eval_vars_at_ry * ry_factor);
-        proof_eval_vars_at_ry_list[w].push(proof_eval_vars_at_ry);
-        comm_vars_at_ry_list[w].push(comm_vars_at_ry);
+        eval_vars_at_ry_list[i].push(eval_vars_at_ry * ry_factors[num_rounds_y - w.num_inputs[p].log_2()]);
+        proof_eval_vars_at_ry_list[i].push(proof_eval_vars_at_ry);
+        comm_vars_at_ry_list[i].push(comm_vars_at_ry);
       }
     }
 
@@ -475,8 +479,8 @@ impl R1CSProof {
     // So we need to multiply each entry by (1 - rq0)(1 - rq1)
     let mut eval_vars_comb_list = Vec::new();
     for p in 0..num_instances {
-      let wit_sec_p = |w: usize| if wit_sec_single[w] { 0 } else { p };
-      let e = |w: usize | eval_vars_at_ry_list[w][wit_sec_p(w)];
+      let wit_sec_p = |i: usize| if witness_secs[i].is_single { 0 } else { p };
+      let e = |i: usize| eval_vars_at_ry_list[i][wit_sec_p(i)];
       let mut eval_vars_comb = match num_witness_secs {
         1 => { e(0) }
         2 => { (ONE - ry[0]) * e(0) + ry[0] * e(1) }
@@ -494,6 +498,9 @@ impl R1CSProof {
     let poly_vars = DensePolynomial::new(eval_vars_comb_list);
     let eval_vars_at_ry = poly_vars.evaluate(&rp);
     let comm_vars_at_ry = eval_vars_at_ry.commit(&ZERO, &gens.gens_pc.gens.gens_1).compress();
+
+    println!("CLAIM: {:?}", Z_poly[0]);
+    println!("EXPECTED: {:?}", eval_vars_at_ry);
 
     // prove the final step of sum-check #2
     let blind_expected_claim_postsc2 = ZERO;
@@ -549,31 +556,31 @@ impl R1CSProof {
     // num_witness_secs can be 1, 2, 3, or 4
     // if num_witness_secs is 3, w3 is just 0s
     num_witness_secs: usize,
-    // For each witness sec, record the follwoing:
-    // WIT_SEC_SINGLE: does it have just one copy across all blocks?
-    wit_sec_single: Vec<bool>,
-    // WIT_SEC_SHORT: does it have only one copy per block? A single witness sect must also be short
-    wit_sec_short: Vec<bool>,
-    // WIT_SEC_NUM_INPUTS: number of inputs of the witness sec. Must be <= num_inputs
-    wit_sec_num_inputs: Vec<usize>,
+    // For each witness sec, record the following:
+    // IS_SINGLE: does it have just one copy across all blocks?
+    // IS_SHORT: does it have only one copy per block? A single witness sect must also be short
+    // NUM_INPUTS: number of inputs per block
+    // W_MAT: num_instances x num_proofs x num_inputs hypermatrix for all values
+    // COMM_W: one commitment per instance
+    witness_secs: Vec<&VerifierWitnessSecInfo>,
 
     num_cons: usize,
     gens: &R1CSGens,
     evals: &(Scalar, Scalar, Scalar),
-    // Commitment for witnesses
-    comm_w_list: Vec<&Vec<PolyCommitment>>,
     transcript: &mut Transcript,
   ) -> Result<[Vec<Scalar>; 4], ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
     // Assert num_witness_secs is valid
     assert!(num_witness_secs >= 1 && num_witness_secs <= 4);
-    assert_eq!(num_witness_secs, comm_w_list.len());
-    for i in 0..num_witness_secs {
+    assert_eq!(num_witness_secs, witness_secs.len());
+    for w in &witness_secs {
       // If a witness_sec is single, it is also short
-      assert!(!wit_sec_single[i] || wit_sec_short[i]);
+      assert!(!w.is_single || w.is_short);
       // wit_sec_num_inputs <= num_inputs
-      assert!(wit_sec_num_inputs[i] <= num_inputs);
+      for i in &w.num_inputs {
+        assert!(*i <= num_inputs);
+      }
     }
 
     let z_len = if num_witness_secs == 3 { num_inputs * 4 } else { num_inputs * num_witness_secs };
@@ -687,34 +694,38 @@ impl R1CSProof {
 
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First by witness & by instance on ry
-    let mut ry_factor_list = Vec::new();
-    for w in 0..num_witness_secs {
-      // ry_short is the last wit_sec_num_inputs[w].log_2() entries of ry
-      let ry_short = &ry[num_rounds_y - wit_sec_num_inputs[w].log_2()..];
-      // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)...
-      let ry_factor = (num_witness_secs.next_power_of_two().log_2()..num_rounds_y - wit_sec_num_inputs[w].log_2()).fold(ONE, |a, b| a * (ONE - ry[b]));
-      let wit_sec_num_instance = if wit_sec_single[w] { 1 } else { num_instances };
+    // For every possible wit_sec.num_inputs, compute ry_factor = prodX(1 - ryX)...
+    // If there are 2 witness secs, then ry_factors[0] = 1, ry_factors[1] = 1, ry_factors[2] = 1 - ry1, ry_factors[3] = (1 - ry1)(1 - ry2), etc.
+    let mut ry_factors = vec![ONE; num_rounds_y + 1];
+    for i in num_witness_secs.next_power_of_two().log_2()..num_rounds_y {
+      ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
+    }
+
+    for i in 0..num_witness_secs {
+      let w = witness_secs[i];
+      let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
       for p in 0..wit_sec_num_instance {
+        // ry_short is the last wit_sec_num_inputs[w].log_2() entries of ry
+        let ry_short = &ry[num_rounds_y - w.num_inputs[p].log_2()..];
         let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
-        let comm = &comm_w_list[w][p];
+        let comm = &w.comm_w[p];
         let r_concat = [rq_short, ry_short].concat();
-        let r = if wit_sec_short[w] { ry_short } else { &r_concat };
-        self.proof_eval_vars_at_ry_list[w][p].verify(
+        let r = if w.is_short { ry_short } else { &r_concat };
+        self.proof_eval_vars_at_ry_list[i][p].verify(
           &gens.gens_pc,
           transcript,
           &r,
-          &self.comm_vars_at_ry_list[w][p],
+          &self.comm_vars_at_ry_list[i][p],
           comm,
         )?;
       }
-      ry_factor_list.push(ry_factor);
     }
 
     // Then on rp
     let mut expected_comm_vars_list = Vec::new();
     for p in 0..num_instances {
-      let wit_sec_p = |w: usize| if wit_sec_single[w] { 0 } else { p };
-      let c = |w: usize | self.comm_vars_at_ry_list[w][wit_sec_p(w)].decompress().unwrap() * ry_factor_list[w];
+      let wit_sec_p = |i: usize| if witness_secs[i].is_single { 0 } else { p };
+      let c = |i: usize| self.comm_vars_at_ry_list[i][wit_sec_p(i)].decompress().unwrap() * ry_factors[num_rounds_y - witness_secs[i].num_inputs[wit_sec_p(i)].log_2()];
       let mut comm_vars_comb = match num_witness_secs {
         1 => { c(0) }
         2 => { (ONE - ry[0]) * c(0) + ry[0] * c(1) }

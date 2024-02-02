@@ -39,6 +39,7 @@ struct CompileTimeKnowledge {
   block_num_instances: usize,
   num_vars: usize,
   num_inputs_unpadded: usize,
+  num_vars_per_block: Vec<usize>,
   total_num_proofs_bound: usize,
   block_num_mem_accesses: Vec<usize>,
   total_num_mem_accesses_bound: usize,
@@ -59,7 +60,7 @@ impl CompileTimeKnowledge {
     let mut reader = BufReader::new(f);
     let mut buffer = String::new();
 
-    let (block_num_instances, num_vars, num_inputs_unpadded, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound) = {
+    let (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound) = {
       reader.read_line(&mut buffer)?;
       let block_num_instances = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
@@ -70,6 +71,9 @@ impl CompileTimeKnowledge {
       let num_inputs_unpadded = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
       reader.read_line(&mut buffer)?;
+      let num_vars_per_block: Vec<usize> = string_to_vec(buffer.clone());
+      buffer.clear();
+      reader.read_line(&mut buffer)?;
       let total_num_proofs_bound = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
       reader.read_line(&mut buffer)?;
@@ -77,7 +81,7 @@ impl CompileTimeKnowledge {
       buffer.clear();
       reader.read_line(&mut buffer)?;
       let total_num_mem_accesses_bound = buffer.trim().parse::<usize>().unwrap();
-      (block_num_instances, num_vars, num_inputs_unpadded, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound)
+      (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound)
     };
 
     let mut args = vec![Vec::new(); block_num_instances];
@@ -148,6 +152,7 @@ impl CompileTimeKnowledge {
       block_num_instances,
       num_vars,
       num_inputs_unpadded,
+      num_vars_per_block,
       total_num_mem_accesses_bound,
       block_num_mem_accesses,
       total_num_proofs_bound,
@@ -595,6 +600,7 @@ fn main() {
     num_ios,
     addr_block_w3_size,
     num_inputs_unpadded,
+    &ctk.num_vars_per_block,
     total_num_proofs_bound,
     block_num_instances_bound, 
     rtk.block_max_num_proofs, 
