@@ -606,7 +606,7 @@ fn main() {
 
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
-  assert!(proof.verify::<true>(
+  assert!(proof.verify(
     ctk.input_block_num,
     ctk.output_block_num,
     ctk.func_input_width,
