@@ -368,6 +368,9 @@ fn main() {
   let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound.next_power_of_two();
+  let max_block_num_mem_accesses = *block_num_mem_accesses.iter().max().unwrap();
+  // addr_block_w3_size is used specifically by addr_block_w3_size and MEM_BLOCK_POLY
+  let addr_block_w3_size = (4 + 3 * max_block_num_mem_accesses).next_power_of_two();
 
   assert_eq!(num_vars, num_vars.next_power_of_two());
   assert!(ctk.args.len() == block_num_instances_bound);
@@ -416,12 +419,11 @@ fn main() {
   // MEM INSTANCES
   let total_num_mem_accesses_bound_padded = if total_num_mem_accesses_bound == 0 {1} else {total_num_mem_accesses_bound};
   // MEM_EXTRACT
-  let max_block_num_mem_accesses = *block_num_mem_accesses.iter().max().unwrap();
   let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(num_vars, max_block_num_mem_accesses);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound_padded);
   // MEM_BLOCK_POLY
-  let (mem_block_poly_num_cons_base, mem_block_poly_num_non_zero_entries, mem_block_poly_inst) = Instance::gen_perm_poly_inst(total_num_proofs_bound, num_vars);
+  let (mem_block_poly_num_cons_base, mem_block_poly_num_non_zero_entries, mem_block_poly_inst) = Instance::gen_perm_poly_inst(total_num_proofs_bound, addr_block_w3_size);
   // MEM_ADDR_COMB
   let (mem_addr_comb_num_cons, mem_addr_comb_num_non_zero_entries, mem_addr_comb_inst) = Instance::gen_mem_addr_comb_inst();
   println!("Finished Mem");
@@ -443,7 +445,7 @@ fn main() {
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, 1, mem_extract_num_non_zero_entries);
-  let mem_block_poly_gens = SNARKGens::new(mem_block_poly_num_cons, total_num_proofs_bound * num_vars, 1, mem_block_poly_num_non_zero_entries);
+  let mem_block_poly_gens = SNARKGens::new(mem_block_poly_num_cons, total_num_proofs_bound * addr_block_w3_size, 1, mem_block_poly_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
@@ -502,6 +504,7 @@ fn main() {
     
     num_vars,
     num_ios,
+    addr_block_w3_size,
     num_inputs_unpadded,
     total_num_proofs_bound,
     block_num_instances_bound,
@@ -590,6 +593,7 @@ fn main() {
 
     num_vars,
     num_ios,
+    addr_block_w3_size,
     num_inputs_unpadded,
     total_num_proofs_bound,
     block_num_instances_bound, 

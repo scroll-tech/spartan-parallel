@@ -530,6 +530,7 @@ impl SNARK {
 
     num_vars: usize,
     num_ios: usize,
+    addr_block_w3_size: usize,
     num_inputs_unpadded: usize,
     total_num_proofs_bound: usize,
 
@@ -1136,7 +1137,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           mem_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
           for q in (0..block_num_proofs[p]).rev() {
-            mem_block_w3[p][q] = vec![zero; num_vars];
+            mem_block_w3[p][q] = vec![zero; addr_block_w3_size];
             mem_block_w3[p][q][0] = block_vars_mat[p][q][0];
             // Compute MR, MD, MC
             for i in 0..max_block_num_mem_accesses {
@@ -1930,7 +1931,7 @@ impl SNARK {
               4,
               vec![true, false, false, false],
               vec![true, true, false, false],
-              vec![4, max_block_num_mem_accesses.next_power_of_two(), num_vars, num_vars],
+              vec![4, max_block_num_mem_accesses.next_power_of_two(), num_vars, addr_block_w3_size],
               &mem_extract_inst.inst,
               &vars_gens,
               vec![&mem_w0, &mem_block_mask, &block_vars_mat, &mem_block_w3],
@@ -1990,7 +1991,7 @@ impl SNARK {
             R1CSProof::prove_single(
               block_num_instances,
               mem_block_poly_num_cons_base,
-              num_vars,
+              addr_block_w3_size,
               // We need to feed the compile-time bound because that is the size of the constraints
               // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
               total_num_proofs_bound,
@@ -2050,7 +2051,7 @@ impl SNARK {
           let mut mem_block_poly_list = Vec::new();
           let mut proof_eval_mem_block_prod_list = Vec::new();
           for p in 0..block_num_instances {
-            let r_len = (block_num_proofs[p] * num_vars).log_2();
+            let r_len = (block_num_proofs[p] * addr_block_w3_size).log_2();
             // Prod is the 3rd entry
             let mem_block_poly = mem_block_poly_w3_list[p][3];
             let (proof_eval_mem_block_prod, _comm_mem_block_prod) = PolyEvalProof::prove(
@@ -2455,6 +2456,7 @@ impl SNARK {
 
     num_vars: usize,
     num_ios: usize,
+    addr_block_w3_size: usize,
     num_inputs_unpadded: usize,
     total_num_proofs_bound: usize,
     block_num_instances_bound: usize,
@@ -3038,7 +3040,7 @@ impl SNARK {
           4,
           vec![true, false, false, false],
           vec![true, true, false, false],
-          vec![4, max_block_num_mem_accesses.next_power_of_two(), num_vars, num_vars],
+          vec![4, max_block_num_mem_accesses.next_power_of_two(), num_vars, addr_block_w3_size],
           mem_extract_num_cons,
           &vars_gens,
           &mem_block_proofs.mem_extract_inst_evals,
@@ -3073,7 +3075,7 @@ impl SNARK {
         let mem_block_poly_challenges = mem_block_proofs.mem_block_poly_r1cs_sat_proof.verify_single(
           block_num_instances,
           mem_block_poly_num_cons_base,
-          num_vars,
+          addr_block_w3_size,
           total_num_proofs_bound,
           block_max_num_proofs,
           &block_num_proofs,
@@ -3104,7 +3106,7 @@ impl SNARK {
         // COMPUTE POLY FOR MEM_BLOCK
         let mut mem_block_poly_bound_tau = Scalar::one();
         for p in 0..block_num_instances {
-          let r_len = (block_num_proofs[p] * num_vars).log_2();
+          let r_len = (block_num_proofs[p] * addr_block_w3_size).log_2();
           mem_block_proofs.proof_eval_mem_block_prod_list[p].verify_plain(
             &proofs_times_vars_gens.gens_pc,
             transcript,
