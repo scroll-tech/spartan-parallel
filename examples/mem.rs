@@ -136,7 +136,7 @@ fn produce_r1cs() -> (
   // So num_inputs = num_outputs = num_vars / 2 - 1
   let num_vars = 16;
   // How many non-dummy inputs do we have?
-  let num_inputs_unpadded = 8;
+  let num_inputs_unpadded = 4;
 
   // Number of proofs of each R1CS instance
   // Total for all blocks and one block
@@ -162,16 +162,14 @@ fn produce_r1cs() -> (
   //        0    1   2   3    4    5   6   7     0   2   3   4   5   6   7   8
   // Exec:  v | b0  i0  s0  | _ | b1  i1  s1  |  w  A0  V0  A1  V1  Z0  Z1  B0
   let args = {
-    let num_inputs = num_vars / 2;
-
     let V_valid = 0;
     let V_cnst = V_valid;
     let V_b0 = 1;
     let V_i0 = 2;
     let V_s0 = 3;
-    let V_b1 = num_inputs + 1;
-    let V_i1 = num_inputs + 2;
-    let V_s1 = num_inputs + 3;
+    let V_b1 = num_inputs_unpadded + 1;
+    let V_i1 = num_inputs_unpadded + 2;
+    let V_s1 = num_inputs_unpadded + 3;
     let V_w = num_vars;
     let V_A0 = num_vars + 1;
     let V_V0 = num_vars + 2;
@@ -298,7 +296,7 @@ fn produce_r1cs() -> (
       let mut assignment_vars = Vec::new();
       let mut assignment_inputs = Vec::new();
       // Iteration i = 1
-      let inputs: Vec<[u8; 32]> = [vec![one, one, zero, zero], vec![zero; 4], vec![zero, one, one, two], vec![zero; 4]].concat();
+      let inputs: Vec<[u8; 32]> = [vec![one, one, zero, zero], vec![zero, one, one, two]].concat();
       let vars: Vec<[u8; 32]> = [vec![one, zero, one, one, two, Scalar::from(2u32).neg().invert().to_bytes(), one, one], vec![zero; 8]].concat();
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
@@ -306,7 +304,7 @@ fn produce_r1cs() -> (
       assignment_inputs.push(next_block_assignment_inputs.clone());
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 2
-      let inputs: Vec<[u8; 32]> = [vec![one, one, one, two], vec![zero; 4], vec![zero, one, two, four], vec![zero; 4]].concat();
+      let inputs: Vec<[u8; 32]> = [vec![one, one, one, two], vec![zero, one, two, four]].concat();
       let vars: Vec<[u8; 32]> = [vec![one, zero, one, one, two, Scalar::from(1u32).neg().invert().to_bytes(), one, one], vec![zero; 8]].concat();
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
@@ -314,7 +312,7 @@ fn produce_r1cs() -> (
       assignment_inputs.push(next_block_assignment_inputs.clone());
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 3
-      let inputs: Vec<[u8; 32]> = [vec![one, one, two, four], vec![zero; 4], vec![zero, two, three, six], vec![zero; 4]].concat();
+      let inputs: Vec<[u8; 32]> = [vec![one, one, two, four], vec![zero, two, three, six]].concat();
       let vars: Vec<[u8; 32]> = [vec![one, zero, one, one, two, zero, zero, zero], vec![zero; 8]].concat();
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
@@ -322,8 +320,8 @@ fn produce_r1cs() -> (
       assignment_inputs.push(next_block_assignment_inputs.clone());
       exec_inputs.push(next_block_assignment_inputs);
       // Iteration i = 4
+      let inputs: Vec<[u8; 32]> = vec![zero; 8];
       let vars: Vec<[u8; 32]> = vec![zero; 16];
-      let inputs: Vec<[u8; 32]> = vec![zero; 16];
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
       assignment_vars.push(next_block_assignment_vars);
@@ -341,7 +339,7 @@ fn produce_r1cs() -> (
     let (assignment_vars, assignment_inputs) = {
       let mut assignment_vars = Vec::new();
       let mut assignment_inputs = Vec::new();
-      let inputs = [vec![one, zero, zero, zero], vec![zero; 4], vec![zero, one, zero, zero], vec![zero; 4]].concat();
+      let inputs = [vec![one, zero, zero, zero], vec![zero, one, zero, zero]].concat();
       let vars = [vec![one, zero, one, one, two, Scalar::from(3u32).neg().invert().to_bytes(), one, one], vec![zero; 8]].concat();
       let next_block_assignment_vars = VarsAssignment::new(&vars).unwrap();
       let next_block_assignment_inputs = InputsAssignment::new(&inputs).unwrap();
@@ -353,13 +351,6 @@ fn produce_r1cs() -> (
     };
     block_vars_matrix.push(assignment_vars);
     block_inputs_matrix.push(assignment_inputs);
-
-    // Pad exec_inputs with 0
-    assert!(consis_num_proofs >= exec_inputs.len());
-    let pad_size = consis_num_proofs - exec_inputs.len();
-    for _ in 0..pad_size {
-      exec_inputs.push(VarsAssignment::new(&vec![zero; num_vars]).unwrap());
-    }
 
     // Witnesses for permutation cannot be generated until tau and r are generated
     // Both can only be generated at proving time
@@ -426,6 +417,7 @@ fn main() {
   let block_num_instances = ctk.block_num_instances;
   let num_vars = ctk.num_vars;
   let num_inputs_unpadded = ctk.num_inputs_unpadded;
+  let num_ios = (num_inputs_unpadded * 2).next_power_of_two();
   let total_num_proofs_bound = ctk.total_num_proofs_bound;
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound;
@@ -451,9 +443,9 @@ fn main() {
   // CONSIS_CHECK checks that these values indeed matches
   // There is only one copy for CONSIS_CHECK
   // CONSIS_COMB
-  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_inputs_unpadded, num_vars);
+  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_inputs_unpadded, num_ios);
   // CONSIS_CHECK
-  let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(num_vars, total_num_proofs_bound);
+  let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(total_num_proofs_bound);
 
   // PERM INSTANCES
   // PERM is consisted of four instances
@@ -464,50 +456,43 @@ fn main() {
   // The product is defined by PROD = \prod(\tau - (\sum_i a_i * r^{i-1}))
   // There is only one proof
   // PERM_PRELIM
-  let (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst) = Instance::gen_perm_prelim_inst(num_inputs_unpadded, num_vars);
+  let (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst) = Instance::gen_perm_prelim_inst(num_inputs_unpadded, num_ios);
   // PERM_ROOT
-  let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_vars);
-  // PERM_POLY (for PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY), MEM_ADDR_POLY
-  let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(num_vars, total_num_proofs_bound);
+  let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_ios);
+  // PERM_POLY for PERM_BLOCK_POLY, PERM_EXEC_POLY, & MEM_ADDR_POLY
+  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
+  let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(perm_size_bound, 4);
 
   // MEM INSTANCES
   // MEM_EXTRACT
   let max_block_num_mem_accesses = *block_num_mem_accesses.iter().max().unwrap();
   let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(num_vars, max_block_num_mem_accesses);
+  // MEM_BLOCK_POLY
+  let (mem_block_poly_num_cons_base, mem_block_poly_num_non_zero_entries, mem_block_poly_inst) = Instance::gen_perm_poly_inst(total_num_proofs_bound, num_vars);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound);
-  // MEM_BLOCK_POLY is PERM_BLOCK_POLY
   // MEM_ADDR_COMB
   let (mem_addr_comb_num_cons, mem_addr_comb_num_non_zero_entries, mem_addr_comb_inst) = Instance::gen_mem_addr_comb_inst();
-  // MEM_ADDR_POLY
-  let (mem_addr_poly_num_cons_base, mem_addr_poly_num_non_zero_entries, mem_addr_poly_inst) = Instance::gen_mem_addr_poly_inst(total_num_mem_accesses_bound);
 
   // --
   // INSTANCE PREPROCESSING
   // --
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
-  let perm_size_bound = total_num_proofs_bound;
   let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
+  let mem_block_poly_num_cons = mem_block_poly_num_cons_base * total_num_proofs_bound;
   let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound;
-  let mem_addr_poly_num_cons = mem_addr_poly_num_cons_base * total_num_mem_accesses_bound;
-
-  assert_eq!(block_num_instances, block_vars_matrix.len());
-  assert_eq!(block_num_instances, block_inputs_matrix.len());
-  for p in 0..block_num_instances {
-    assert_eq!(block_vars_matrix[p].len(), block_inputs_matrix[p].len());
-  }
 
   // produce public parameters
-  let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries);
-  let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_vars, 1, consis_comb_num_non_zero_entries);
-  let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * num_vars, 1, consis_check_num_non_zero_entries);
-  let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
-  let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
-  let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
+  let block_gens = SNARKGens::new(block_num_cons, 2 * num_vars, block_num_instances, block_num_non_zero_entries);
+  let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_ios, 1, consis_comb_num_non_zero_entries);
+  let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * 4, 1, consis_check_num_non_zero_entries);
+  let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_ios, 1, perm_prelim_num_non_zero_entries);
+  let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
+  let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, 1, mem_extract_num_non_zero_entries);
+  let mem_block_poly_gens = SNARKGens::new(mem_block_poly_num_cons, total_num_proofs_bound * num_vars, 1, mem_block_poly_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
-  let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound * 4, 1, mem_addr_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances, block_num_non_zero_entries).gens_r1cs_sat;
@@ -523,13 +508,13 @@ fn main() {
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
   let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
+  let (mem_block_poly_comm, mem_block_poly_decomm) = SNARK::encode(&mem_block_poly_inst, &mem_block_poly_gens);
   let (mem_cohere_comm, mem_cohere_decomm) = SNARK::encode(&mem_cohere_inst, &mem_cohere_gens);
   let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
-  let (mem_addr_poly_comm, mem_addr_poly_decomm) = SNARK::encode(&mem_addr_poly_inst, &mem_addr_poly_gens);
 
   // Mask vector for mem_extract
   let (mem_block_mask, mem_block_poly_mask_list, mem_block_comm_mask_list) = 
-    Instance::gen_mem_extract_mask(block_num_instances, num_vars, &block_num_mem_accesses, &vars_gens);
+    Instance::gen_mem_extract_mask(block_num_instances, max_block_num_mem_accesses.next_power_of_two(), &block_num_mem_accesses, &vars_gens);
 
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
@@ -544,6 +529,7 @@ fn main() {
     rtk.output_exec_num,
     
     num_vars,
+    num_ios,
     num_inputs_unpadded,
     total_num_proofs_bound,
     block_num_instances,
@@ -585,6 +571,12 @@ fn main() {
     &mem_extract_decomm,
     &mem_extract_gens,
 
+    mem_block_poly_num_cons_base,
+    &mem_block_poly_inst,
+    &mem_block_poly_comm,
+    &mem_block_poly_decomm,
+    &mem_block_poly_gens,
+
     total_num_mem_accesses_bound,
     rtk.total_num_mem_accesses,
     mem_cohere_num_cons_base,
@@ -597,12 +589,6 @@ fn main() {
     &mem_addr_comb_comm,
     &mem_addr_comb_decomm,
     &mem_addr_comb_gens,
-
-    mem_addr_poly_num_cons_base,
-    &mem_addr_poly_inst,
-    &mem_addr_poly_comm,
-    &mem_addr_poly_decomm,
-    &mem_addr_poly_gens,
 
     block_vars_matrix,
     block_inputs_matrix,
@@ -631,6 +617,8 @@ fn main() {
     rtk.output_exec_num,
 
     num_vars,
+    num_ios,
+    num_inputs_unpadded,
     total_num_proofs_bound,
     block_num_instances, 
     rtk.block_max_num_proofs, 
@@ -657,9 +645,13 @@ fn main() {
     &perm_poly_comm,
     &perm_poly_gens,
 
+    max_block_num_mem_accesses,
     mem_extract_num_cons,
     &mem_extract_comm,
     &mem_extract_gens,
+    mem_block_poly_num_cons_base,
+    &mem_block_poly_comm,
+    &mem_block_poly_gens,
     total_num_mem_accesses_bound,
     rtk.total_num_mem_accesses,
     mem_cohere_num_cons_base,
@@ -668,9 +660,6 @@ fn main() {
     mem_addr_comb_num_cons,
     &mem_addr_comb_comm,
     &mem_addr_comb_gens,
-    mem_addr_poly_num_cons_base,
-    &mem_addr_poly_comm,
-    &mem_addr_poly_gens,
 
     &mem_block_comm_mask_list,
 

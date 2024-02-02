@@ -417,7 +417,7 @@ impl DotProductProofGens {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DotProductProofLog {
   bullet_reduction_proof: BulletReductionProof,
   delta: CompressedGroup,

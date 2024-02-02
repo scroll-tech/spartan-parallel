@@ -253,18 +253,20 @@ impl Instance {
   /// - perm_w0: <tau, r, r^2, r^3, ...>, see PERM_PRELIM below
   /// - exec_inputs: <v, i0, i1, i2, ..., cnst, o0, o1, o2, ...>
   /// - consis_w2: <0, i0 * r, i1 * r^2, ..., 0, o0 * r, o1 * r^2, ...>
-  /// - consis_w3: <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0, 0, ...>
+  /// - consis_w3: <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0>
   /// Note: if v is 1, it is almost impossible to have consis_w3[1] = 0
   /// Note: Only combine the first num_inputs_unpadded inputs since the rest are unused
   pub fn gen_consis_comb_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
-    assert_eq!(num_vars, num_vars.next_power_of_two());
-    let num_inputs = num_vars / 2;
 
     let consis_comb_num_cons = 2 * num_inputs_unpadded + 1;
     let consis_comb_num_non_zero_entries = 4 * num_inputs_unpadded - 1;
   
     let V_valid = num_vars;
     let V_cnst = V_valid;
+    let V_input = |i: usize| num_vars + i;
+    let V_output = |i: usize| num_vars + num_inputs_unpadded + i;
+    let V_input_dot_prod = |i: usize| 2 * num_vars + i;
+    let V_output_dot_prod = |i: usize| 2 * num_vars + num_inputs_unpadded + i;
   
     let consis_comb_inst = {
       let mut A_list = Vec::new();
@@ -283,11 +285,11 @@ impl Instance {
         for i in 1..num_inputs_unpadded {
           // Dot product for inputs
           (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, vec![(i, 1)], vec![(num_vars + i, 1)], vec![(2 * num_vars + i, 1)]);
+            constraint_count, vec![(i, 1)], vec![(V_input(i), 1)], vec![(V_input_dot_prod(i), 1)]);
           constraint_count += 1;
           // Dot product for outputs
           (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, vec![(i, 1)], vec![(num_vars + num_inputs + i, 1)], vec![(2 * num_vars + num_inputs + i, 1)]);
+            constraint_count, vec![(i, 1)], vec![(V_output(i), 1)], vec![(V_output_dot_prod(i), 1)]);
           constraint_count += 1;
         }
         // For w3
@@ -297,14 +299,14 @@ impl Instance {
         (A, B, C) = Instance::gen_constr(A, B, C, // w3[1]
           constraint_count, 
           vec![(V_valid, 1)], 
-          [vec![(V_cnst, 1)], (1..num_inputs_unpadded).map(|i| (2 * num_vars + i, 1)).collect()].concat(),
+          [vec![(V_cnst, 1)], (1..num_inputs_unpadded).map(|i| (V_input_dot_prod(i), 1)).collect()].concat(),
           vec![(3 * num_vars + 1, 1)]
         );
         constraint_count += 1;
         (A, B, C) = Instance::gen_constr(A, B, C, // w3[2]
           constraint_count, 
           vec![(V_valid, 1)], 
-          [vec![(V_cnst, 1)], (1..num_inputs_unpadded).map(|i| (2 * num_vars + num_inputs + i, 1)).collect()].concat(),
+          [vec![(V_cnst, 1)], (1..num_inputs_unpadded).map(|i| (V_output_dot_prod(i), 1)).collect()].concat(),
           vec![(3 * num_vars + 2, 1)]
         );
   
@@ -322,9 +324,10 @@ impl Instance {
   }
 
   /// Generates CONSIS_CHECK instance based on parameters
-  /// CONSIS_CHECK takes in consis_w3 = <v, i, o, 0, 0, ...>
+  /// CONSIS_CHECK takes in consis_w3 = <v, i, o, 0>
   /// and verifies (o[k] - i[k + 1]) * v[k + 1] = 0 for all k
-  pub fn gen_consis_check_inst(num_vars: usize, total_num_proofs_bound: usize) -> (usize, usize, Instance) {
+  pub fn gen_consis_check_inst(total_num_proofs_bound: usize) -> (usize, usize, Instance) {
+    let num_vars = 4;
     let consis_check_num_cons_base = 1;
     let consis_check_num_non_zero_entries = 2 * total_num_proofs_bound;
     let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
@@ -370,6 +373,7 @@ impl Instance {
   /// PERM_PRELIM checks the correctness of (r, r^2, ...)
   /// Only need to generate the first 2 * num_inputs_unpadded entries
   pub fn gen_perm_prelim_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
+
     let perm_prelim_num_cons = 2 * num_inputs_unpadded - 2;
     let perm_prelim_num_non_zero_entries = 2 * num_inputs_unpadded - 2;
     let perm_prelim_inst = {
@@ -410,6 +414,7 @@ impl Instance {
   /// w3[1]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...)), 0 if invalid
   /// Note: Only process the first num_inputs_unpadded inputs since the rest are unused
   pub fn gen_perm_root_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
+
     let perm_root_num_cons = 2 * num_inputs_unpadded + 2;
     let perm_root_num_non_zero_entries = 4 * num_inputs_unpadded + 2;
     let perm_root_inst = {
@@ -422,10 +427,8 @@ impl Instance {
         // V_r(0) == tau and should be skipped!
         let V_r = |i: usize| i;
         let V_input = |i: usize| num_vars + i;
-        let V_output = |i: usize| num_vars + num_vars / 2 + i;
+        let V_output = |i: usize| num_vars + num_inputs_unpadded + i;
         let V_input_dot_prod = |i: usize| 2 * num_vars + i;
-        // Note: we skip entries num_inputs_unpadded .. num_vars
-        // So w2[num_inputs_unpadded] = w0[num_inputs_unpadded] * w1[num_vars / 2]
         let V_output_dot_prod = |i: usize| 2 * num_vars + num_inputs_unpadded + i;
 
         let mut constraint_count = 0;
@@ -480,10 +483,9 @@ impl Instance {
   /// x[k]  <- \tau - (\sum_i a_i * r^{i-1})
   /// pi[k] <- v[k] * D[k]
   /// D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
-  /// number of variables is total_num_proofs_bound * num_vars
-  pub fn gen_perm_poly_inst(num_vars: usize, total_num_proofs_bound: usize) -> (usize, usize, Instance) {
+  /// number of variables is perm_size_bound * num_vars
+  pub fn gen_perm_poly_inst(perm_size_bound: usize, num_vars: usize) -> (usize, usize, Instance) {
     let perm_poly_num_cons_base = 2;
-    let perm_size_bound = total_num_proofs_bound;
     let perm_poly_num_cons = perm_size_bound * perm_poly_num_cons_base;
     let perm_poly_num_non_zero_entries = perm_size_bound * 4;
     
@@ -596,7 +598,7 @@ impl Instance {
   /// Input composition: 
   ///           Challenges                            Masks                              Vars                                   W3
   /// 0   1   2   3   4   5   6   7   |   0   1   2   3   4   5   6   7   |   0   1   2   3   4   5   6   7    |  0   1   2   3     4   5   6   7
-  /// tau r   _   _   _   _   _   _   |   1   1   0   0   0   0   0   0   |   w   A0  V0  A1  V1  Z0  Z1 ...   |  v   x  pi   D  | MR  MD  MC  MR ...
+  /// tau r   _   _   _   _   _   _   |   1   1   0   0   _   _   _   _   |   w   A0  V0  A1  V1  Z0  Z1 ...   |  v   x  pi   D  | MR  MD  MC  MR ...
   ///
   /// All memory accesses should be in the form (A0, V0, A1, V1, ...) at the front of the witnesses
   /// Mask is the unary representation of L
@@ -793,70 +795,6 @@ impl Instance {
       mem_addr_comb_inst
     };
     (mem_addr_comb_num_cons, mem_addr_comb_num_non_zero_entries, mem_addr_comb_inst)
-  }
-
-  /// Generates MEM_ADDR_POLY instance based on parameters
-  /// MEM_ADDR_POLY is like PERM_POLY except number of variables is total_num_mem_accesses_bound and gap is 4
-  pub fn gen_mem_addr_poly_inst(total_num_mem_accesses_bound: usize) -> (usize, usize, Instance) {
-    let mem_addr_poly_num_cons_base = 2;
-    let mem_addr_poly_num_cons = total_num_mem_accesses_bound * mem_addr_poly_num_cons_base;
-    let mem_addr_poly_num_non_zero_entries = total_num_mem_accesses_bound * 4;
-    
-    let mem_addr_poly_inst = {
-      let width = 4;
-
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-
-        let V_valid = 0;
-        let V_cnst = V_valid;
-        let V_x = 1;
-        let V_pi = 2;
-        let V_d = 3;
-
-        let mut constraint_count = 0;
-
-        // Need to order the constraints so that they solve the inputs in the front first
-        // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
-        for i in 0..total_num_mem_accesses_bound - 1 {
-          // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, 
-            vec![(i * width + V_x, 1)], 
-            vec![((i + 1) * width + V_pi, 1), (i * width + V_cnst, 1), ((i + 1) * width + V_valid, -1)], 
-            vec![(i * width + V_d, 1)]);
-          constraint_count += 1;
-          // pi[k] = v[k] * D[k]
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, vec![(i * width + V_valid, 1)], vec![(i * width + V_d, 1)], vec![(i * width + V_pi, 1)]);
-          // Pad base constraint size to 2
-          constraint_count += 1;
-        }
-        // Last Entry
-        // Pad A, B, C with dummy entries so their size is multiple of total_num_mem_accesses_bound
-        let i = total_num_mem_accesses_bound - 1;
-        // last D is x[k] * 1
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          constraint_count, vec![(i * width + V_x, 1)], vec![(V_cnst, 1), (V_cnst, 0), (V_cnst, 0)], vec![(i * width + V_d, 1)]);
-        constraint_count += 1;
-        // last pi is just usual
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          constraint_count, vec![(i * width + V_valid, 1)], vec![(i * width + V_d, 1)], vec![(i * width + V_pi, 1)]);
-
-        (A, B, C)   
-      };
-
-      let A_list = vec![A.clone()];
-      let B_list = vec![B.clone()];
-      let C_list = vec![C.clone()];
-
-      let mem_addr_poly_inst = Instance::new(1, mem_addr_poly_num_cons, total_num_mem_accesses_bound * width, &A_list, &B_list, &C_list).unwrap();
-      
-      mem_addr_poly_inst
-    };
-    (mem_addr_poly_num_cons_base, mem_addr_poly_num_non_zero_entries, mem_addr_poly_inst)
   }
 
   /*

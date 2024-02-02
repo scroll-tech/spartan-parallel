@@ -36,7 +36,7 @@ mod timer;
 mod transcript;
 mod unipoly;
 
-use std::cmp::Ordering;
+use std::cmp::{max, Ordering};
 
 use instance::Instance;
 use dense_mlpoly::{DensePolynomial, PolyCommitment, PolyEvalProof};
@@ -173,7 +173,8 @@ impl IOProofs {
   fn prove(
     exec_poly_inputs: &DensePolynomial,
     
-    num_vars: usize,
+    num_ios: usize,
+    num_inputs_unpadded: usize,
     num_proofs: usize,
     input_block_num: Scalar,
     output_block_num: Scalar,
@@ -187,9 +188,7 @@ impl IOProofs {
     transcript: &mut Transcript,
     random_tape: &mut RandomTape
   ) -> IOProofs {
-    let num_inputs = num_vars / 2 - 2;
-    assert!(2 * num_inputs + 2 <= num_vars);
-    let r_len = (num_proofs * num_vars).log_2();
+    let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
 
     // input_valid_proof
@@ -207,7 +206,7 @@ impl IOProofs {
     let (output_valid_proof, _comm) = PolyEvalProof::prove(
       exec_poly_inputs,
       None,
-      &to_bin_array(output_exec_num * num_vars),
+      &to_bin_array(output_exec_num * num_ios),
       &Scalar::one(),
       None,
       &vars_gens.gens_pc,
@@ -229,7 +228,7 @@ impl IOProofs {
     let (output_block_num_proof, _comm) = PolyEvalProof::prove(
       exec_poly_inputs,
       None,
-      &to_bin_array(output_exec_num * num_vars + num_vars / 2 + 1),
+      &to_bin_array(output_exec_num * num_ios + num_inputs_unpadded + 1),
       &output_block_num,
       None,
       &vars_gens.gens_pc,
@@ -255,7 +254,7 @@ impl IOProofs {
     let (output_correctness_proof, _comm) = PolyEvalProof::prove(
       exec_poly_inputs,
       None,
-      &to_bin_array(output_exec_num * num_vars + num_vars / 2 + output_offset),
+      &to_bin_array(output_exec_num * num_ios + num_inputs_unpadded + output_offset),
       &output,
       None,
       &vars_gens.gens_pc,
@@ -275,7 +274,9 @@ impl IOProofs {
   fn verify(
     &self,
     comm_poly_inputs: &PolyCommitment,
-    num_vars: usize,
+
+    num_ios: usize,
+    num_inputs_unpadded: usize,
     num_proofs: usize,
     input_block_num: Scalar,
     output_block_num: Scalar,
@@ -288,9 +289,7 @@ impl IOProofs {
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
-    let num_inputs = num_vars / 2 - 2;
-    assert!(2 * num_inputs + 2 <= num_vars);
-    let r_len = (num_proofs * num_vars).log_2();
+    let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
     
     // input_valid_proof
@@ -305,7 +304,7 @@ impl IOProofs {
     self.output_valid_proof.verify_plain(
       &vars_gens.gens_pc,
       transcript,
-      &to_bin_array(output_exec_num * num_vars),
+      &to_bin_array(output_exec_num * num_ios),
       &Scalar::one(),
       comm_poly_inputs,
     )?;
@@ -321,7 +320,7 @@ impl IOProofs {
     self.output_block_num_proof.verify_plain(
       &vars_gens.gens_pc,
       transcript,
-      &to_bin_array(output_exec_num * num_vars + num_vars / 2 + 1),
+      &to_bin_array(output_exec_num * num_ios + num_inputs_unpadded + 1),
       &output_block_num,
       comm_poly_inputs,
     )?;
@@ -338,7 +337,7 @@ impl IOProofs {
     self.output_correctness_proof.verify_plain(
       &vars_gens.gens_pc,
       transcript,
-      &to_bin_array(output_exec_num * num_vars + num_vars / 2 + output_offset),
+      &to_bin_array(output_exec_num * num_ios + num_inputs_unpadded + output_offset),
       &output,
       comm_poly_inputs,
     )?;
@@ -530,6 +529,7 @@ impl SNARK {
     output_exec_num: usize,
 
     num_vars: usize,
+    num_ios: usize,
     num_inputs_unpadded: usize,
     total_num_proofs_bound: usize,
 
@@ -575,6 +575,12 @@ impl SNARK {
     mem_extract_decomm: &ComputationDecommitment,
     mem_extract_gens: &SNARKGens,
 
+    mem_block_poly_num_cons_base: usize,
+    mem_block_poly_inst: &Instance,
+    mem_block_poly_comm: &ComputationCommitment,
+    mem_block_poly_decomm: &ComputationDecommitment,
+    mem_block_poly_gens: &SNARKGens,
+
     total_num_mem_accesses_bound: usize,
     total_num_mem_accesses: usize,
     mem_cohere_num_cons_base: usize,
@@ -587,12 +593,6 @@ impl SNARK {
     mem_addr_comb_comm: &ComputationCommitment,
     mem_addr_comb_decomm: &ComputationDecommitment,
     mem_addr_comb_gens: &SNARKGens,
-
-    mem_addr_poly_num_cons_base: usize,
-    mem_addr_poly_inst: &Instance,
-    mem_addr_poly_comm: &ComputationCommitment,
-    mem_addr_poly_decomm: &ComputationDecommitment,
-    mem_addr_poly_gens: &SNARKGens,
 
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
@@ -652,9 +652,9 @@ impl SNARK {
     perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
+    mem_block_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_cohere_comm.comm.append_to_transcript(b"consis_comm", transcript);
     mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
-    mem_addr_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
 
     // Commit io
     let input_block_num = Scalar::from(input_block_num as u64);
@@ -708,13 +708,14 @@ impl SNARK {
     // PADDING
     // --
     let zero = Scalar::zero();
-    let dummy_input = vec![zero; num_vars];
+    let dummy_inputs = vec![zero; num_ios];
+    let dummy_vars = vec![zero; num_vars];
     // For every block that num_proofs is not a power of 2, pad vars_mat and inputs_mat until the length is a power of 2
     let block_max_num_proofs = block_max_num_proofs.next_power_of_two();
     for i in 0..block_num_instances {
       let gap = block_num_proofs[i].next_power_of_two() - block_num_proofs[i];
-      block_vars_mat[i].extend(vec![dummy_input.clone(); gap]);
-      block_inputs_mat[i].extend(vec![dummy_input.clone(); gap]);
+      block_vars_mat[i].extend(vec![dummy_vars.clone(); gap]);
+      block_inputs_mat[i].extend(vec![dummy_inputs.clone(); gap]);
       block_num_proofs[i] = block_num_proofs[i].next_power_of_two();
     }
     // Pad num_proofs with 1 until the next power of 2
@@ -722,7 +723,7 @@ impl SNARK {
     let block_num_proofs = &block_num_proofs;
 
     // Pad exec_inputs with dummys so the length is a power of 2
-    exec_inputs_list.extend(vec![dummy_input; consis_num_proofs.next_power_of_two() - consis_num_proofs]);
+    exec_inputs_list.extend(vec![dummy_inputs; consis_num_proofs.next_power_of_two() - consis_num_proofs]);
     let consis_num_proofs = consis_num_proofs.next_power_of_two();
 
     // Pad addr_mems with dummys so the length is a power of 2
@@ -871,7 +872,6 @@ impl SNARK {
       consis_poly_w3,
       consis_comm_w3,   
     ) = {
-      let num_inputs = num_vars / 2;
       let comb_tau = transcript.challenge_scalar(b"challenge_tau");
       let comb_r = transcript.challenge_scalar(b"challenge_r");
       
@@ -884,36 +884,32 @@ impl SNARK {
         perm_w0.push(r_tmp);
         r_tmp *= comb_r;
       }
-      perm_w0.extend(vec![zero; num_vars - 2 * num_inputs_unpadded]);
+      perm_w0.extend(vec![zero; num_ios - 2 * num_inputs_unpadded]);
       
       // FOR PERM
-      // w2 is block_inputs * <r>, skipping num_inputs_unpadded .. num_vars / 2
-      // So w2[num_inputs_unpadded] = w0[num_inputs_unpadded] * input[num_vars / 2]
+      // w2 is block_inputs * <r>
       let perm_block_w2: Vec<Vec<Vec<Scalar>>> = block_inputs_mat.iter().map(
         |i| i.iter().map(|input|
           [
-            (0..num_inputs_unpadded).map(|j| perm_w0[j] * input[j]).collect(),
-            (0..num_inputs_unpadded).map(|j| perm_w0[num_inputs_unpadded + j] * input[num_vars / 2 + j]).collect(),
-            vec![zero; num_vars - 2 * num_inputs_unpadded]
+            (0..2 * num_inputs_unpadded).map(|j| perm_w0[j] * input[j]).collect(),
+            vec![zero; num_ios - 2 * num_inputs_unpadded]
           ].concat()
         ).collect()
       ).collect();
       let perm_exec_w2: Vec<Vec<Scalar>> = exec_inputs_list.iter().map(|input|
         [
-          (0..num_inputs_unpadded).map(|j| perm_w0[j] * input[j]).collect(),
-          (0..num_inputs_unpadded).map(|j| perm_w0[num_inputs_unpadded + j] * input[num_vars / 2 + j]).collect(),
-          vec![zero; num_vars - 2 * num_inputs_unpadded]
+          (0..2 * num_inputs_unpadded).map(|j| perm_w0[j] * input[j]).collect(),
+          vec![zero; num_ios - 2 * num_inputs_unpadded]
         ].concat()
       ).collect();
       perm_w0[0] = comb_tau;
       
       // w3 is [v, x, pi, D]
-      // See accumulator.rs
       let mut perm_block_w3: Vec<Vec<Vec<Scalar>>> = Vec::new();
       for p in 0..block_num_instances {
         perm_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
         for q in (0..block_num_proofs[p]).rev() {
-          perm_block_w3[p][q] = vec![Scalar::zero(); num_vars];
+          perm_block_w3[p][q] = vec![Scalar::zero(); 4];
           perm_block_w3[p][q][0] = block_inputs_mat[p][q][0];
           perm_block_w3[p][q][1] = perm_block_w3[p][q][0] * (comb_tau - perm_block_w2[p][q].iter().fold(Scalar::zero(), |a, b| a + b));
           if q != block_num_proofs[p] - 1 {
@@ -926,7 +922,7 @@ impl SNARK {
       }
       let mut perm_exec_w3 = vec![Vec::new(); consis_num_proofs];
       for q in (0..consis_num_proofs).rev() {
-        perm_exec_w3[q] = vec![Scalar::zero(); num_vars];
+        perm_exec_w3[q] = vec![Scalar::zero(); 4];
         perm_exec_w3[q][0] = exec_inputs_list[q][0];
         perm_exec_w3[q][1] = (comb_tau - perm_exec_w2[q].iter().fold(Scalar::zero(), |a, b| a + b)) * exec_inputs_list[q][0];
         if q != consis_num_proofs - 1 {
@@ -1027,20 +1023,20 @@ impl SNARK {
 
       // FOR CONSIS
       // w2 is <0, i0 * r, i1 * r^2, ..., 0, o0 * r, o1 * r^2, ...>
-      // w3 is <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0, 0, ...>
+      // w3 is <v, v * (cnst + i0 * r + i1 * r^2 + i2 * r^3 + ...), v * (cnst + o0 * r + o1 * r^2 + o2 * r^3 + ...), 0>
       let mut consis_w2 = Vec::new();
       let mut consis_w3 = Vec::new();
       for q in 0..consis_num_proofs {
-        consis_w2.push(vec![Scalar::zero(); num_vars]);
-        consis_w3.push(vec![Scalar::zero(); num_vars]);
+        consis_w2.push(vec![Scalar::zero(); num_ios]);
+        consis_w3.push(vec![Scalar::zero(); 4]);
         
         consis_w3[q][1] = exec_inputs_list[q][0];
         consis_w3[q][2] = exec_inputs_list[q][0];
         for i in 1..num_inputs_unpadded {
           consis_w2[q][i] = perm_w0[i] * exec_inputs_list[q][i];
-          consis_w2[q][num_inputs + i] = perm_w0[i] * exec_inputs_list[q][num_inputs + i];
+          consis_w2[q][num_inputs_unpadded + i] = perm_w0[i] * exec_inputs_list[q][num_inputs_unpadded + i];
           consis_w3[q][1] += consis_w2[q][i];
-          consis_w3[q][2] += consis_w2[q][num_inputs + i];
+          consis_w3[q][2] += consis_w2[q][num_inputs_unpadded + i];
         }
         consis_w3[q][0] = exec_inputs_list[q][0];
         consis_w3[q][1] *= exec_inputs_list[q][0];
@@ -1309,7 +1305,7 @@ impl SNARK {
     let exec_inputs_list = vec![exec_inputs_list];
     let addr_mems_list = vec![addr_mems_list];
     // Compute perm_size_bound
-    let perm_size_bound = total_num_proofs_bound;
+    let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
 
     // --
     // BLOCK CORRECTNESS
@@ -1319,11 +1315,14 @@ impl SNARK {
     let (block_r1cs_sat_proof, block_challenges) = {
       let (proof, block_challenges) = {
         R1CSProof::prove(
-          (2, 0, 0),
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
           num_vars,
+          2,
+          vec![false, false],
+          vec![false, false],
+          vec![num_ios, num_vars],
           &block_inst.inst,
           &vars_gens,
           vec![&block_inputs_mat, &block_vars_mat],
@@ -1386,11 +1385,14 @@ impl SNARK {
     let (consis_comb_r1cs_sat_proof, consis_comb_challenges) = {
       let (proof, consis_comb_challenges) = {
         R1CSProof::prove(
-          (4, 0, 1),
           1,
           consis_num_proofs,
           &vec![consis_num_proofs],
-          num_vars,
+          num_ios,
+          4,
+          vec![true, false, false, false],
+          vec![true, false, false, false],
+          vec![num_ios, num_ios, num_ios, 4],
           &consis_comb_inst.inst,
           &vars_gens,
           vec![&perm_w0, &exec_inputs_list, &consis_w2, &consis_w3],
@@ -1450,7 +1452,7 @@ impl SNARK {
         R1CSProof::prove_single(
           1,
           consis_check_num_cons_base,
-          num_vars,
+          4,
           total_num_proofs_bound,
           consis_num_proofs,
           &vec![consis_num_proofs],
@@ -1517,11 +1519,14 @@ impl SNARK {
     ) = {
       let (proof, perm_prelim_challenges) = {
         R1CSProof::prove(
-          (1, 0, 0),
           1,
           1,
           &vec![1],
-          num_vars,
+          num_ios,
+          1,
+          vec![false],
+          vec![false],
+          vec![num_ios],
           &perm_prelim_inst.inst,
           &vars_gens,
           vec![&perm_w0],
@@ -1609,11 +1614,14 @@ impl SNARK {
     let (perm_block_root_r1cs_sat_proof, perm_block_root_challenges) = {
       let (proof, perm_block_root_challenges) = {
         R1CSProof::prove(
-          (4, 0, 1),
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
-          num_vars,
+          num_ios,
+          4,
+          vec![true, false, false, false],
+          vec![true, false, false, false],
+          vec![num_ios, num_ios, num_ios, 4],
           &perm_root_inst.inst,
           &vars_gens,
           vec![&perm_w0, &block_inputs_mat, &perm_block_w2, &perm_block_w3],
@@ -1674,7 +1682,7 @@ impl SNARK {
         R1CSProof::prove_single(
           block_num_instances,
           perm_poly_num_cons_base,
-          num_vars,
+          4,
           // We need to feed the compile-time bound because that is the size of the constraints
           // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
           perm_size_bound,
@@ -1734,7 +1742,7 @@ impl SNARK {
       let mut perm_block_poly_list = Vec::new();
       let mut proof_eval_perm_block_prod_list = Vec::new();
       for p in 0..block_num_instances {
-        let r_len = (block_num_proofs[p] * num_vars).log_2();
+        let r_len = (block_num_proofs[p] * 4).log_2();
         // Prod is the 3rd entry
         let perm_block_poly = perm_block_poly_w3_list[p][3];
         let (proof_eval_perm_block_prod, _comm_perm_block_prod) = PolyEvalProof::prove(
@@ -1762,11 +1770,14 @@ impl SNARK {
     let (perm_exec_root_r1cs_sat_proof, perm_exec_root_challenges) = {
       let (proof, perm_exec_root_challenges) = {
         R1CSProof::prove(
-          (4, 0, 1),
           1,
           consis_num_proofs,
           &vec![consis_num_proofs],
-          num_vars,
+          num_ios,
+          4,
+          vec![true, false, false, false],
+          vec![true, false, false, false],
+          vec![num_ios, num_ios, num_ios, 4],
           &perm_root_inst.inst,
           &vars_gens,
           vec![&perm_w0, &exec_inputs_list, &perm_exec_w2, &perm_exec_w3],
@@ -1827,7 +1838,7 @@ impl SNARK {
         R1CSProof::prove_single(
           1,
           perm_poly_num_cons_base,
-          num_vars,
+          4,
           perm_size_bound,
           consis_num_proofs,
           &vec![consis_num_proofs],
@@ -1882,7 +1893,7 @@ impl SNARK {
 
     // Record the prod of instance
     let (perm_exec_poly, proof_eval_perm_exec_prod) = {
-      let r_len = (consis_num_proofs * num_vars).log_2();
+      let r_len = (consis_num_proofs * 4).log_2();
       // Prod is the 3rd entry
       let perm_exec_poly = perm_exec_poly_w3[0][3];
       let (proof_eval_perm_exec_prod, _comm_perm_exec_prod) = PolyEvalProof::prove(
@@ -1912,15 +1923,18 @@ impl SNARK {
         let (mem_extract_r1cs_sat_proof, mem_extract_challenges) = {
           let (proof, mem_extract_challenges) = {
             R1CSProof::prove(
-              (4, 1, 1),
               block_num_instances,
               block_max_num_proofs,
               block_num_proofs,
               num_vars,
+              4,
+              vec![true, false, false, false],
+              vec![true, true, false, false],
+              vec![4, max_block_num_mem_accesses.next_power_of_two(), num_vars, num_vars],
               &mem_extract_inst.inst,
               &vars_gens,
-              vec![&perm_w0, &mem_block_mask, &block_vars_mat, &mem_block_w3],
-              vec![&perm_poly_w0, &mem_block_poly_mask_list, &block_poly_vars_list, &mem_block_poly_w3_list],
+              vec![&mem_addr_w0, &mem_block_mask, &block_vars_mat, &mem_block_w3],
+              vec![&mem_addr_poly_w0, &mem_block_poly_mask_list, &block_poly_vars_list, &mem_block_poly_w3_list],
               transcript,
               &mut random_tape,
             )
@@ -1975,14 +1989,14 @@ impl SNARK {
           let (proof, mem_block_poly_challenges) = {
             R1CSProof::prove_single(
               block_num_instances,
-              perm_poly_num_cons_base,
+              mem_block_poly_num_cons_base,
               num_vars,
               // We need to feed the compile-time bound because that is the size of the constraints
               // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
               perm_size_bound,
               block_max_num_proofs,
               &block_num_proofs,
-              &perm_poly_inst.inst,
+              &mem_block_poly_inst.inst,
               &proofs_times_vars_gens,
               &mem_block_w3.iter().map(|i| i.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())).collect(),
               &mem_block_poly_w3_list,
@@ -2000,7 +2014,7 @@ impl SNARK {
         // Final evaluation on MEM_BLOCK_POLY
         let (mem_block_poly_inst_evals, mem_block_poly_r1cs_eval_proof) = {
           let [_, rx, ry] = &mem_block_poly_challenges;
-          let inst = perm_poly_inst;
+          let inst = mem_block_poly_inst;
           let timer_eval = Timer::new("eval_sparse_polys");
           let inst_evals = {
             let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
@@ -2013,11 +2027,11 @@ impl SNARK {
     
           let r1cs_eval_proof = {
             let proof = R1CSEvalProof::prove(
-              &perm_poly_decomm.decomm,
+              &mem_block_poly_decomm.decomm,
               &rx,
               &ry,
               &inst_evals,
-              &perm_poly_gens.gens_r1cs_eval,
+              &mem_block_poly_gens.gens_r1cs_eval,
               transcript,
               &mut random_tape,
             );
@@ -2153,11 +2167,14 @@ impl SNARK {
         ) = {
           let (proof, mem_addr_comb_challenges) = {
             R1CSProof::prove(
-              (4, 0, 1),
               1,
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
               4,
+              4,
+              vec![true, false, false, false],
+              vec![true, false, false, false],
+              vec![4, 4, 4, 4],
               &mem_addr_comb_inst.inst,
               &vars_gens,
               vec![&mem_addr_w0, &mem_addr_w1, &addr_mems_list, &mem_addr_w3],
@@ -2239,12 +2256,12 @@ impl SNARK {
           let (proof, mem_addr_poly_challenges) = {
             R1CSProof::prove_single(
               1,
-              mem_addr_poly_num_cons_base,
+              perm_poly_num_cons_base,
               4,
-              total_num_mem_accesses_bound,
+              perm_size_bound,
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
-              &mem_addr_poly_inst.inst,
+              &perm_poly_inst.inst,
               &proofs_times_vars_gens,
               &vec![mem_addr_w1[0].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())],
               &mem_addr_poly_w1,
@@ -2262,7 +2279,7 @@ impl SNARK {
         // Final evaluation on MEM_ADDR_POLY
         let (mem_addr_poly_inst_evals, mem_addr_poly_r1cs_eval_proof) = {
           let [_, rx, ry] = &mem_addr_poly_challenges;
-          let inst = mem_addr_poly_inst;
+          let inst = perm_poly_inst;
           let timer_eval = Timer::new("eval_sparse_polys");
           let inst_evals = {
             let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
@@ -2275,11 +2292,11 @@ impl SNARK {
 
           let r1cs_eval_proof = {
             let proof = R1CSEvalProof::prove(
-              &mem_addr_poly_decomm.decomm,
+              &perm_poly_decomm.decomm,
               &rx,
               &ry,
               &inst_evals,
-              &mem_addr_poly_gens.gens_r1cs_eval,
+              &perm_poly_gens.gens_r1cs_eval,
               transcript,
               &mut random_tape,
             );
@@ -2340,7 +2357,8 @@ impl SNARK {
     let timer_proof = Timer::new("IO Proofs");
     let io_proof = IOProofs::prove(
       &exec_poly_inputs[0],
-      num_vars,
+      num_ios,
+      num_inputs_unpadded,
       consis_num_proofs,
       input_block_num,
       output_block_num,
@@ -2436,6 +2454,8 @@ impl SNARK {
     output_exec_num: usize,
 
     num_vars: usize,
+    num_ios: usize,
+    num_inputs_unpadded: usize,
     total_num_proofs_bound: usize,
     block_num_instances_bound: usize,
     block_max_num_proofs: usize,
@@ -2465,9 +2485,14 @@ impl SNARK {
     perm_poly_comm: &ComputationCommitment,
     perm_poly_gens: &SNARKGens,
 
+    max_block_num_mem_accesses: usize,
     mem_extract_num_cons: usize,
     mem_extract_comm: &ComputationCommitment,
     mem_extract_gens: &SNARKGens,
+
+    mem_block_poly_num_cons_base: usize,
+    mem_block_poly_comm: &ComputationCommitment,
+    mem_block_poly_gens: &SNARKGens,
 
     total_num_mem_accesses_bound: usize,
     total_num_mem_accesses: usize,
@@ -2478,10 +2503,6 @@ impl SNARK {
     mem_addr_comb_num_cons: usize,
     mem_addr_comb_comm: &ComputationCommitment,
     mem_addr_comb_gens: &SNARKGens,
-
-    mem_addr_poly_num_cons_base: usize,
-    mem_addr_poly_comm: &ComputationCommitment,
-    mem_addr_poly_gens: &SNARKGens,
 
     mem_block_comm_mask_list: &Vec<PolyCommitment>,
 
@@ -2522,9 +2543,9 @@ impl SNARK {
       perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
       perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
       mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
+      mem_block_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
       mem_cohere_comm.comm.append_to_transcript(b"consis_comm", transcript);
       mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
-      mem_addr_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
 
       // Commit io
       input_block_num.append_to_transcript(b"input_block_num", transcript);
@@ -2625,7 +2646,7 @@ impl SNARK {
       }
     }
     // Compute perm_size_bound
-    let perm_size_bound = total_num_proofs_bound;
+    let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
     timer_commit.stop();
 
     // --
@@ -2635,11 +2656,14 @@ impl SNARK {
     {
       let timer_sat_proof = Timer::new("Block Correctness Sat");
       let block_challenges = self.block_r1cs_sat_proof.verify(
-        (2, 0, 0),
         block_num_instances,
         block_max_num_proofs,
         block_num_proofs,
         num_vars,
+        2,
+        vec![false, false],
+        vec![false, false],
+        vec![num_ios, num_vars],
         block_num_cons,
         &vars_gens,
         &self.block_inst_evals_bound_rp,
@@ -2685,11 +2709,14 @@ impl SNARK {
     {
       let timer_sat_proof = Timer::new("Consis Comb Sat");
       let consis_comb_challenges = self.consis_comb_r1cs_sat_proof.verify(
-        (4, 0, 1),
         1,
         consis_num_proofs,
         &vec![consis_num_proofs],
-        num_vars,
+        num_ios,
+        4,
+        vec![true, false, false, false],
+        vec![true, false, false, false],
+        vec![num_ios, num_ios, num_ios, 4],
         consis_comb_num_cons,
         &vars_gens,
         &self.consis_comb_inst_evals,
@@ -2725,7 +2752,7 @@ impl SNARK {
       let consis_check_challenges = self.consis_check_r1cs_sat_proof.verify_single(
         1,
         consis_check_num_cons_base,
-        num_vars,
+        4,
         total_num_proofs_bound,
         consis_num_proofs,
         &vec![consis_num_proofs],
@@ -2761,11 +2788,14 @@ impl SNARK {
     {
       let timer_sat_proof = Timer::new("Perm Prelim Sat");
       let perm_prelim_challenges = self.perm_prelim_r1cs_sat_proof.verify(
-        (1, 0, 0),
         1,
         1,
         &vec![1],
-        num_vars,
+        num_ios,
+        1,
+        vec![false],
+        vec![false],
+        vec![num_ios],
         perm_prelim_num_cons,
         &vars_gens,
         &self.perm_prelim_inst_evals,
@@ -2815,11 +2845,14 @@ impl SNARK {
     {
       let timer_sat_proof = Timer::new("Perm Block Root Sat");
       let perm_block_root_challenges = self.perm_block_root_r1cs_sat_proof.verify(
-        (4, 0, 1),
         block_num_instances,
         block_max_num_proofs,
         block_num_proofs,
-        num_vars,
+        num_ios,
+        4,
+        vec![true, false, false, false],
+        vec![true, false, false, false],
+        vec![num_ios, num_ios, num_ios, 4],
         perm_root_num_cons,
         &vars_gens,
         &self.perm_block_root_inst_evals,
@@ -2855,7 +2888,7 @@ impl SNARK {
       let perm_block_poly_challenges = self.perm_block_poly_r1cs_sat_proof.verify_single(
         block_num_instances,
         perm_poly_num_cons_base,
-        num_vars,
+        4,
         perm_size_bound,
         block_max_num_proofs,
         &block_num_proofs,
@@ -2886,7 +2919,7 @@ impl SNARK {
       // COMPUTE POLY FOR PERM_BLOCK
       let mut perm_block_poly_bound_tau = Scalar::one();
       for p in 0..block_num_instances {
-          let r_len = (block_num_proofs[p] * num_vars).log_2();
+          let r_len = (block_num_proofs[p] * 4).log_2();
           self.proof_eval_perm_block_prod_list[p].verify_plain(
             &proofs_times_vars_gens.gens_pc,
             transcript,
@@ -2906,11 +2939,14 @@ impl SNARK {
     {
       let timer_sat_proof = Timer::new("Perm Exec Root Sat");
       let perm_exec_root_challenges = self.perm_exec_root_r1cs_sat_proof.verify(
-        (4, 0, 1),
         1,
         consis_num_proofs,
         &vec![consis_num_proofs],
-        num_vars,
+        num_ios,
+        4,
+        vec![true, false, false, false],
+        vec![true, false, false, false],
+        vec![num_ios, num_ios, num_ios, 4],
         perm_root_num_cons,
         &vars_gens,
         &self.perm_exec_root_inst_evals,
@@ -2946,7 +2982,7 @@ impl SNARK {
       let perm_exec_poly_challenges = self.perm_exec_poly_r1cs_sat_proof.verify_single(
         1,
         perm_poly_num_cons_base,
-        num_vars,
+        4,
         perm_size_bound,
         consis_num_proofs,
         &vec![consis_num_proofs],
@@ -2975,7 +3011,7 @@ impl SNARK {
       timer_eval_proof.stop();
 
       // COMPUTE POLY FOR PERM_EXEC
-      let r_len = (consis_num_proofs * num_vars).log_2();
+      let r_len = (consis_num_proofs * 4).log_2();
       self.proof_eval_perm_exec_prod.verify_plain(
         &proofs_times_vars_gens.gens_pc,
         transcript,
@@ -3004,15 +3040,18 @@ impl SNARK {
       {
         let timer_sat_proof = Timer::new("Mem Extract Sat");
         let mem_extract_challenges = mem_block_proofs.mem_extract_r1cs_sat_proof.verify(
-          (4, 1, 1),
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
           num_vars,
+          4,
+          vec![true, false, false, false],
+          vec![true, true, false, false],
+          vec![4, max_block_num_mem_accesses.next_power_of_two(), num_vars, num_vars],
           mem_extract_num_cons,
           &vars_gens,
           &mem_block_proofs.mem_extract_inst_evals,
-          vec![&self.perm_comm_w0, &mem_block_comm_mask_list, &self.block_comm_vars_list, &self.mem_block_comm_w3_list],
+          vec![&self.mem_addr_comm_w0, &mem_block_comm_mask_list, &self.block_comm_vars_list, &self.mem_block_comm_w3_list],
           transcript,
         )?;
         timer_sat_proof.stop();
@@ -3043,7 +3082,7 @@ impl SNARK {
         let timer_sat_proof = Timer::new("Mem Block Poly Sat");
         let mem_block_poly_challenges = mem_block_proofs.mem_block_poly_r1cs_sat_proof.verify_single(
           block_num_instances,
-          perm_poly_num_cons_base,
+          mem_block_poly_num_cons_base,
           num_vars,
           perm_size_bound,
           block_max_num_proofs,
@@ -3063,11 +3102,11 @@ impl SNARK {
         Cr.append_to_transcript(b"Cr_claim", transcript);
         let [_, rx, ry] = &mem_block_poly_challenges;
         mem_block_proofs.mem_block_poly_r1cs_eval_proof.verify(
-          &perm_poly_comm.comm,
+          &mem_block_poly_comm.comm,
           rx,
           ry,
           &mem_block_proofs.mem_block_poly_inst_evals,
-          &perm_poly_gens.gens_r1cs_eval,
+          &mem_block_poly_gens.gens_r1cs_eval,
           transcript,
         )?;
         timer_eval_proof.stop();
@@ -3140,11 +3179,14 @@ impl SNARK {
           {
             let timer_sat_proof = Timer::new("Mem Addr Comb Sat");
             let mem_addr_comb_challenges = mem_addr_proofs.mem_addr_comb_r1cs_sat_proof.verify(
-              (4, 0, 1),
               1,
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
               4,
+              4,
+              vec![true, false, false, false],
+              vec![true, false, false, false],
+              vec![4, 4, 4, 4],
               mem_addr_comb_num_cons,
               &vars_gens,
               &mem_addr_proofs.mem_addr_comb_inst_evals,
@@ -3195,7 +3237,7 @@ impl SNARK {
             let timer_sat_proof = Timer::new("Mem Addr Poly Sat");
             let mem_addr_poly_challenges = mem_addr_proofs.mem_addr_poly_r1cs_sat_proof.verify_single(
               1,
-              mem_addr_poly_num_cons_base,
+              perm_poly_num_cons_base,
               4,
               total_num_mem_accesses_bound,
               total_num_mem_accesses,
@@ -3215,11 +3257,11 @@ impl SNARK {
             Cr.append_to_transcript(b"Cr_claim", transcript);
             let [_, rx, ry] = &mem_addr_poly_challenges;
             mem_addr_proofs.mem_addr_poly_r1cs_eval_proof.verify(
-              &mem_addr_poly_comm.comm,
+              &perm_poly_comm.comm,
               rx,
               ry,
               &mem_addr_proofs.mem_addr_poly_inst_evals,
-              &mem_addr_poly_gens.gens_r1cs_eval,
+              &perm_poly_gens.gens_r1cs_eval,
               transcript,
             )?;
             timer_eval_proof.stop();
@@ -3255,7 +3297,8 @@ impl SNARK {
     let timer_proof = Timer::new("IO Proofs");
     self.io_proof.verify(
       &self.exec_comm_inputs[0],
-      num_vars,
+      num_ios,
+      num_inputs_unpadded,
       consis_num_proofs,
       input_block_num,
       output_block_num,

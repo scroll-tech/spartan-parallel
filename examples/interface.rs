@@ -361,8 +361,10 @@ fn main() {
   println!("Preprocessing instances...");
   let block_num_instances_bound = ctk.block_num_instances;
   let num_vars = ctk.num_vars;
-  // num_inputs_unpadded is only used by consis_comb
+  // num_inputs_unpadded is the actual size of the input
   let num_inputs_unpadded = ctk.num_inputs_unpadded;
+  // num_ios is the width used by all input related computations
+  let num_ios = (num_inputs_unpadded * 2).next_power_of_two();
   let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
   let total_num_mem_accesses_bound = ctk.total_num_mem_accesses_bound.next_power_of_two();
@@ -389,9 +391,9 @@ fn main() {
   // CONSIS_CHECK checks that these values indeed matches
   // There is only one copy for CONSIS_CHECK
   // CONSIS_COMB
-  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_inputs_unpadded, num_vars);
+  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_inputs_unpadded, num_ios);
   // CONSIS_CHECK
-  let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(num_vars, total_num_proofs_bound);
+  let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(total_num_proofs_bound);
   println!("Finished Consis");
 
   // PERM INSTANCES
@@ -403,11 +405,12 @@ fn main() {
   // The product is defined by PROD = \prod(\tau - (\sum_i a_i * r^{i-1}))
   // There is only one proof
   // PERM_PRELIM
-  let (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst) = Instance::gen_perm_prelim_inst(num_inputs_unpadded, num_vars);
+  let (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst) = Instance::gen_perm_prelim_inst(num_inputs_unpadded, num_ios);
   // PERM_ROOT
-  let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_vars);
-  // PERM_POLY (for PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY), MEM_ADDR_POLY
-  let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(num_vars, total_num_proofs_bound);
+  let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_ios);
+  // PERM_POLY for PERM_BLOCK_POLY, PERM_EXEC_POLY, & MEM_ADDR_POLY
+  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
+  let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(perm_size_bound, 4);
   println!("Finished Perm");
 
   // MEM INSTANCES
@@ -417,11 +420,10 @@ fn main() {
   let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(num_vars, max_block_num_mem_accesses);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound_padded);
-  // MEM_BLOCK_POLY is PERM_BLOCK_POLY
+  // MEM_BLOCK_POLY
+  let (mem_block_poly_num_cons_base, mem_block_poly_num_non_zero_entries, mem_block_poly_inst) = Instance::gen_perm_poly_inst(total_num_proofs_bound, num_vars);
   // MEM_ADDR_COMB
   let (mem_addr_comb_num_cons, mem_addr_comb_num_non_zero_entries, mem_addr_comb_inst) = Instance::gen_mem_addr_comb_inst();
-  // MEM_ADDR_POLY
-  let (mem_addr_poly_num_cons_base, mem_addr_poly_num_non_zero_entries, mem_addr_poly_inst) = Instance::gen_mem_addr_poly_inst(total_num_mem_accesses_bound_padded);
   println!("Finished Mem");
 
   // --
@@ -429,22 +431,21 @@ fn main() {
   // --
   println!("Producing Public Parameters...");
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
-  let perm_size_bound = total_num_proofs_bound;
   let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
-  let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound_padded;
-  let mem_addr_poly_num_cons = mem_addr_poly_num_cons_base * total_num_mem_accesses_bound_padded;
+  let mem_block_poly_num_cons = mem_block_poly_num_cons_base * total_num_proofs_bound;
+  let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound;
 
   // produce public parameters
-  let block_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound, block_num_non_zero_entries);
-  let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_vars, 1, consis_comb_num_non_zero_entries);
-  let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * num_vars, 1, consis_check_num_non_zero_entries);
-  let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_vars, 1, perm_prelim_num_non_zero_entries);
-  let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_vars, 1, perm_root_num_non_zero_entries);
-  let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * num_vars, 1, perm_poly_num_non_zero_entries);
+  let block_gens = SNARKGens::new(block_num_cons, 2 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
+  let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_ios, 1, consis_comb_num_non_zero_entries);
+  let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * 4, 1, consis_check_num_non_zero_entries);
+  let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_ios, 1, perm_prelim_num_non_zero_entries);
+  let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
+  let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, 1, mem_extract_num_non_zero_entries);
-  let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
+  let mem_block_poly_gens = SNARKGens::new(mem_block_poly_num_cons, total_num_proofs_bound * num_vars, 1, mem_block_poly_num_non_zero_entries);
+  let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
-  let mem_addr_poly_gens = SNARKGens::new(mem_addr_poly_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_addr_poly_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   // for size VAR
   let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
@@ -463,14 +464,14 @@ fn main() {
   let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
   println!("Finished Perm");
   let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
+  let (mem_block_poly_comm, mem_block_poly_decomm) = SNARK::encode(&mem_block_poly_inst, &mem_block_poly_gens);
   let (mem_cohere_comm, mem_cohere_decomm) = SNARK::encode(&mem_cohere_inst, &mem_cohere_gens);
   let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
-  let (mem_addr_poly_comm, mem_addr_poly_decomm) = SNARK::encode(&mem_addr_poly_inst, &mem_addr_poly_gens);
   println!("Finished Mem");
 
   // Mask vector for mem_extract
   let (mem_block_mask_list, mem_block_mask_poly_list, mem_block_mask_comm_list) = 
-    Instance::gen_mem_extract_mask(block_num_instances_bound, num_vars, &block_num_mem_accesses, &vars_gens);
+    Instance::gen_mem_extract_mask(block_num_instances_bound, max_block_num_mem_accesses.next_power_of_two(), &block_num_mem_accesses, &vars_gens);
 
   // --
   // WITNESS PREPROCESSING
@@ -500,6 +501,7 @@ fn main() {
     rtk.output_exec_num,
     
     num_vars,
+    num_ios,
     num_inputs_unpadded,
     total_num_proofs_bound,
     block_num_instances_bound,
@@ -541,6 +543,12 @@ fn main() {
     &mem_extract_decomm,
     &mem_extract_gens,
 
+    mem_block_poly_num_cons_base,
+    &mem_block_poly_inst,
+    &mem_block_poly_comm,
+    &mem_block_poly_decomm,
+    &mem_block_poly_gens,
+
     total_num_mem_accesses_bound,
     rtk.total_num_mem_accesses,
     mem_cohere_num_cons_base,
@@ -553,12 +561,6 @@ fn main() {
     &mem_addr_comb_comm,
     &mem_addr_comb_decomm,
     &mem_addr_comb_gens,
-
-    mem_addr_poly_num_cons_base,
-    &mem_addr_poly_inst,
-    &mem_addr_poly_comm,
-    &mem_addr_poly_decomm,
-    &mem_addr_poly_gens,
 
     block_vars_matrix,
     block_inputs_matrix,
@@ -587,6 +589,8 @@ fn main() {
     rtk.output_exec_num,
 
     num_vars,
+    num_ios,
+    num_inputs_unpadded,
     total_num_proofs_bound,
     block_num_instances_bound, 
     rtk.block_max_num_proofs, 
@@ -613,9 +617,13 @@ fn main() {
     &perm_poly_comm,
     &perm_poly_gens,
 
+    max_block_num_mem_accesses,
     mem_extract_num_cons,
     &mem_extract_comm,
     &mem_extract_gens,
+    mem_block_poly_num_cons_base,
+    &mem_block_poly_comm,
+    &mem_block_poly_gens,
     total_num_mem_accesses_bound,
     rtk.total_num_mem_accesses,
     mem_cohere_num_cons_base,
@@ -624,9 +632,6 @@ fn main() {
     mem_addr_comb_num_cons,
     &mem_addr_comb_comm,
     &mem_addr_comb_gens,
-    mem_addr_poly_num_cons_base,
-    &mem_addr_poly_comm,
-    &mem_addr_poly_gens,
 
     &mem_block_mask_comm_list,
 
