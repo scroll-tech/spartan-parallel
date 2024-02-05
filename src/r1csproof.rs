@@ -499,9 +499,6 @@ impl R1CSProof {
     let eval_vars_at_ry = poly_vars.evaluate(&rp);
     let comm_vars_at_ry = eval_vars_at_ry.commit(&ZERO, &gens.gens_pc.gens.gens_1).compress();
 
-    println!("CLAIM: {:?}", Z_poly[0]);
-    println!("EXPECTED: {:?}", eval_vars_at_ry);
-
     // prove the final step of sum-check #2
     let blind_expected_claim_postsc2 = ZERO;
     let claim_post_phase2 = claims_phase2[0] * claims_phase2[1] * claims_phase2[2];

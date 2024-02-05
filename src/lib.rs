@@ -387,7 +387,7 @@ struct VerifierWitnessSecInfo<'comm> {
 impl<'comm> VerifierWitnessSecInfo<'comm> {
   // Unfortunately, cannot obtain all metadata from the commitment
   fn new(is_short: bool, num_inputs: Vec<usize>, comm_w: &'comm Vec<PolyCommitment>) -> VerifierWitnessSecInfo<'comm> {
-    assert_eq!(num_inputs.len(), comm_w.len());
+    assert!(comm_w.len() == 0 || num_inputs.len() == comm_w.len());
     VerifierWitnessSecInfo {
       is_single: comm_w.len() == 1 && is_short,
       is_short,
@@ -1946,7 +1946,7 @@ impl SNARK {
               block_num_instances,
               block_max_num_proofs,
               block_num_proofs,
-              num_vars,
+              max(num_vars, addr_block_w3_size),
               4,
               vec![&mem_w0_prover, &mem_block_mask_prover, &block_vars_prover, &mem_block_w3_prover],
               &mem_extract_inst.inst,
@@ -2658,6 +2658,7 @@ impl SNARK {
 
     let comb_tau = transcript.challenge_scalar(b"challenge_tau");
     let comb_r = transcript.challenge_scalar(b"challenge_r");
+    
     let (
       perm_w0_verifier,
       perm_block_w2_verifier,
@@ -2686,7 +2687,7 @@ impl SNARK {
         VerifierWitnessSecInfo::new(false, vec![4], &self.consis_comm_w3),
       )
     };
-    
+
     let (
       mem_w0_verifier,
       mem_block_w3_verifier
@@ -2702,6 +2703,7 @@ impl SNARK {
         VerifierWitnessSecInfo::new(false, vec![addr_block_w3_size; block_num_instances], &self.mem_block_comm_w3_list),
       )
     };
+
     let (
       mem_addr_w1_verifier,
       mem_addr_w3_verifier
@@ -2715,6 +2717,7 @@ impl SNARK {
         VerifierWitnessSecInfo::new(false, vec![4], &self.mem_addr_comm_w3),
       )
     };
+
     // Compute perm_size_bound
     let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
     timer_commit.stop();
@@ -3089,7 +3092,7 @@ impl SNARK {
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
-          num_vars,
+          max(num_vars, addr_block_w3_size),
           4,
           vec![&mem_w0_verifier, &mem_block_mask_verifier, &block_vars_verifier, &mem_block_w3_verifier],
           mem_extract_num_cons,

@@ -380,9 +380,6 @@ fn main() {
   assert_eq!(num_vars, num_vars.next_power_of_two());
   assert!(ctk.args.len() == block_num_instances_bound);
   assert!(block_num_mem_accesses.len() == block_num_instances_bound);
-  for n in &block_num_mem_accesses {
-    assert!(3 * n <= num_vars - 4);
-  }
   // If output_block_num < block_num_instances, the prover can cheat by executing the program multiple times
   assert!(ctk.output_block_num >= block_num_instances_bound);
 
@@ -424,7 +421,7 @@ fn main() {
   // MEM INSTANCES
   let total_num_mem_accesses_bound_padded = if total_num_mem_accesses_bound == 0 {1} else {total_num_mem_accesses_bound};
   // MEM_EXTRACT
-  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(num_vars, max_block_num_mem_accesses);
+  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(max(num_vars, addr_block_w3_size), max_block_num_mem_accesses);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound_padded);
   // MEM_BLOCK_POLY
@@ -449,7 +446,7 @@ fn main() {
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_ios, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
-  let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * num_vars, 1, mem_extract_num_non_zero_entries);
+  let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * max(num_vars, addr_block_w3_size), 1, mem_extract_num_non_zero_entries);
   let mem_block_poly_gens = SNARKGens::new(mem_block_poly_num_cons, total_num_proofs_bound * addr_block_w3_size, 1, mem_block_poly_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
