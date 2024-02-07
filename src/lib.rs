@@ -3277,7 +3277,7 @@ impl SNARK {
               1,
               perm_poly_num_cons_base,
               4,
-              total_num_mem_accesses_bound,
+              perm_size_bound,
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
               &vars_gens,
