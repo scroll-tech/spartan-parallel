@@ -4,6 +4,7 @@
 #![allow(clippy::assertions_on_result_states)]
 
 // TODO: Can we let number of constraints / inputs vary for different blocks?
+// TODO: Can we allow split in R1CSGens?
 
 extern crate byteorder;
 extern crate core;
@@ -656,7 +657,6 @@ impl SNARK {
     mem_block_comm_mask_list: &Vec<PolyCommitment>,
 
     vars_gens: &R1CSGens,
-    proofs_times_vars_gens: &R1CSGens,
 
     transcript: &mut Transcript,
   ) -> Self {
@@ -1489,7 +1489,7 @@ impl SNARK {
           consis_num_proofs,
           &vec![consis_num_proofs],
           &consis_check_inst.inst,
-          &proofs_times_vars_gens,
+          &vars_gens,
           &vec![consis_w3_prover.w_mat[0].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())],
           &consis_w3_prover.poly_w,
           transcript,
@@ -1713,7 +1713,7 @@ impl SNARK {
           block_max_num_proofs,
           &block_num_proofs,
           &perm_poly_inst.inst,
-          &proofs_times_vars_gens,
+          &vars_gens,
           &perm_block_w3_prover.w_mat.iter().map(|i| i.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())).collect(),
           &perm_block_w3_prover.poly_w,
           transcript,
@@ -1775,7 +1775,7 @@ impl SNARK {
           &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
           &perm_block_poly,
           None,
-          &proofs_times_vars_gens.gens_pc,
+          &vars_gens.gens_pc,
           transcript,
           &mut random_tape,
         );
@@ -1863,7 +1863,7 @@ impl SNARK {
           consis_num_proofs,
           &vec![consis_num_proofs],
           &perm_poly_inst.inst,
-          &proofs_times_vars_gens,
+          &vars_gens,
           &vec![perm_exec_w3_prover.w_mat[0].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())],
           &perm_exec_w3_prover.poly_w,
           transcript,
@@ -1922,7 +1922,7 @@ impl SNARK {
         &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
         &perm_exec_poly,
         None,
-        &proofs_times_vars_gens.gens_pc,
+        &vars_gens.gens_pc,
         transcript,
         &mut random_tape,
       );
@@ -2013,7 +2013,7 @@ impl SNARK {
               block_max_num_proofs,
               &block_num_proofs,
               &mem_block_poly_inst.inst,
-              &proofs_times_vars_gens,
+              &vars_gens,
               &mem_block_w3_prover.w_mat.iter().map(|i| i.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())).collect(),
               &mem_block_w3_prover.poly_w,
               transcript,
@@ -2075,7 +2075,7 @@ impl SNARK {
               &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
               &mem_block_poly,
               None,
-              &proofs_times_vars_gens.gens_pc,
+              &vars_gens.gens_pc,
               transcript,
               &mut random_tape,
             );
@@ -2122,7 +2122,7 @@ impl SNARK {
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
               &mem_cohere_inst.inst,
-              &proofs_times_vars_gens,
+              &vars_gens,
               &vec![addr_mems_prover.w_mat[0].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())],
               &addr_mems_prover.poly_w,
               transcript,
@@ -2274,7 +2274,7 @@ impl SNARK {
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
               &perm_poly_inst.inst,
-              &proofs_times_vars_gens,
+              &vars_gens,
               &vec![mem_addr_w1_prover.w_mat[0].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat())],
               &mem_addr_w1_prover.poly_w,
               transcript,
@@ -2334,7 +2334,7 @@ impl SNARK {
             &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
             &mem_addr_poly,
             None,
-            &proofs_times_vars_gens.gens_pc,
+            &vars_gens.gens_pc,
             transcript,
             &mut random_tape,
           );
@@ -2523,7 +2523,6 @@ impl SNARK {
     mem_block_comm_mask_list: &Vec<PolyCommitment>,
 
     vars_gens: &R1CSGens,
-    proofs_times_vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
     let timer_verify = Timer::new("SNARK::verify");
@@ -2820,7 +2819,7 @@ impl SNARK {
         total_num_proofs_bound,
         consis_num_proofs,
         &vec![consis_num_proofs],
-        &proofs_times_vars_gens,
+        &vars_gens,
         &self.consis_check_inst_evals,
         &self.consis_comm_w3,
         transcript,
@@ -2947,7 +2946,7 @@ impl SNARK {
         perm_size_bound,
         block_max_num_proofs,
         &block_num_proofs,
-        &proofs_times_vars_gens,
+        &vars_gens,
         &self.perm_block_poly_inst_evals,
         &self.perm_block_comm_w3_list,
         transcript,
@@ -2976,7 +2975,7 @@ impl SNARK {
       for p in 0..block_num_instances {
           let r_len = (block_num_proofs[p] * 4).log_2();
           self.proof_eval_perm_block_prod_list[p].verify_plain(
-            &proofs_times_vars_gens.gens_pc,
+            &vars_gens.gens_pc,
             transcript,
             &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
             &self.perm_block_poly_list[p],
@@ -3036,7 +3035,7 @@ impl SNARK {
         perm_size_bound,
         consis_num_proofs,
         &vec![consis_num_proofs],
-        &proofs_times_vars_gens,
+        &vars_gens,
         &self.perm_exec_poly_inst_evals,
         &self.perm_exec_comm_w3,
         transcript,
@@ -3063,7 +3062,7 @@ impl SNARK {
       // COMPUTE POLY FOR PERM_EXEC
       let r_len = (consis_num_proofs * 4).log_2();
       self.proof_eval_perm_exec_prod.verify_plain(
-        &proofs_times_vars_gens.gens_pc,
+        &vars_gens.gens_pc,
         transcript,
         &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
         &self.perm_exec_poly,
@@ -3132,7 +3131,7 @@ impl SNARK {
           total_num_proofs_bound,
           block_max_num_proofs,
           &block_num_proofs,
-          &proofs_times_vars_gens,
+          &vars_gens,
           &mem_block_proofs.mem_block_poly_inst_evals,
           &self.mem_block_comm_w3_list,
           transcript,
@@ -3161,7 +3160,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           let r_len = (block_num_proofs[p] * addr_block_w3_size).log_2();
           mem_block_proofs.proof_eval_mem_block_prod_list[p].verify_plain(
-            &proofs_times_vars_gens.gens_pc,
+            &vars_gens.gens_pc,
             transcript,
             &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
             &mem_block_proofs.mem_block_poly_list[p],
@@ -3191,7 +3190,7 @@ impl SNARK {
               total_num_mem_accesses_bound,
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
-              &proofs_times_vars_gens,
+              &vars_gens,
               &mem_addr_proofs.mem_cohere_inst_evals,
               &self.addr_comm_mems,
               transcript,
@@ -3281,7 +3280,7 @@ impl SNARK {
               total_num_mem_accesses_bound,
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
-              &proofs_times_vars_gens,
+              &vars_gens,
               &mem_addr_proofs.mem_addr_poly_inst_evals,
               &self.mem_addr_comm_w1,
               transcript,
@@ -3308,7 +3307,7 @@ impl SNARK {
             // COMPUTE POLY FOR PERM_EXEC
             let r_len = (total_num_mem_accesses * 4).log_2();
             mem_addr_proofs.proof_eval_mem_addr_prod.verify_plain(
-              &proofs_times_vars_gens.gens_pc,
+              &vars_gens.gens_pc,
               transcript,
               &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
               &mem_addr_proofs.mem_addr_poly,

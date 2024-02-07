@@ -451,10 +451,7 @@ fn main() {
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
   let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
-  // for size VAR
-  let vars_gens = SNARKGens::new(block_num_cons, num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
-  // for size PROOF * VAR
-  let proofs_times_vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, 1, block_num_non_zero_entries).gens_r1cs_sat;
+  let vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   
   // create a commitment to the R1CS instance
   println!("Comitting Circuits...");
@@ -576,7 +573,6 @@ fn main() {
     &mem_block_mask_comm_list,
 
     &vars_gens,
-    &proofs_times_vars_gens,
     &mut prover_transcript,
   );
 
@@ -643,7 +639,6 @@ fn main() {
     &mem_block_mask_comm_list,
 
     &vars_gens,
-    &proofs_times_vars_gens,
     &mut verifier_transcript
   ).is_ok());
   println!("proof verification successful!");

@@ -73,7 +73,7 @@ pub struct R1CSGens {
 impl R1CSGens {
   pub fn new(label: &'static [u8], _num_cons: usize, num_vars: usize) -> Self {
     let num_poly_vars = num_vars.log_2();
-    let gens_pc = PolyCommitmentGens::new(num_poly_vars, label, false);
+    let gens_pc = PolyCommitmentGens::new(num_poly_vars, label);
     let gens_sc = R1CSSumcheckGens::new(label, &gens_pc.gens.gens_1);
     R1CSGens { gens_sc, gens_pc }
   }

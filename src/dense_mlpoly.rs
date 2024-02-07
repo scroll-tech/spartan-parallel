@@ -27,15 +27,10 @@ pub struct PolyCommitmentGens {
 
 impl PolyCommitmentGens {
   // the number of variables in the multilinear polynomial
-  pub fn new(num_vars: usize, label: &'static [u8], split: bool) -> PolyCommitmentGens {
-    if split {
-      let (_left, right) = EqPolynomial::compute_factored_lens(num_vars);
-      let gens = DotProductProofGens::new(right.pow2(), label);
-      PolyCommitmentGens { gens }
-    } else {
-      let gens = DotProductProofGens::new(num_vars.pow2(), label);
-      PolyCommitmentGens { gens }
-    }
+  pub fn new(num_vars: usize, label: &'static [u8]) -> PolyCommitmentGens {
+    let (_left, right) = EqPolynomial::compute_factored_lens(num_vars);
+    let gens = DotProductProofGens::new(right.pow2(), label);
+    PolyCommitmentGens { gens }
   }
 }
 
