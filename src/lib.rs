@@ -2005,7 +2005,7 @@ impl SNARK {
               4,
               // We need to feed the compile-time bound because that is the size of the constraints
               // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
-              total_num_proofs_bound,
+              perm_size_bound,
               block_max_num_proofs,
               &block_num_proofs,
               &perm_poly_inst.inst,
@@ -3125,7 +3125,7 @@ impl SNARK {
           block_num_instances,
           perm_poly_num_cons_base,
           4,
-          total_num_proofs_bound,
+          perm_size_bound,
           block_max_num_proofs,
           &block_num_proofs,
           &vars_gens,
