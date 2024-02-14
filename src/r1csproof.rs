@@ -791,8 +791,6 @@ impl R1CSProof {
       &comm_claim_post_phase2,
     )?;
 
-    println!("DDD");
-
     Ok([rp, rq_rev, rx, ry])
   }
 
