@@ -234,10 +234,6 @@ impl R1CSProof {
     for w in &witness_secs {
       // If a witness_sec is single, it is also short
       assert!(!w.is_single || w.is_short);
-      // wit_sec_num_inputs <= num_inputs
-      for i in &w.num_inputs {
-        assert!(*i <= num_inputs);
-      }
       // assert size of w_mat
       assert!(w.is_single && w.w_mat.len() == 1 || !w.is_single && w.w_mat.len() == num_instances);
       for p in 0..w.w_mat.len() {
@@ -263,8 +259,14 @@ impl R1CSProof {
         for w in &witness_secs {
           let p_w = if w.is_single { 0 } else { p };
           let q_w = if w.is_short { 0 } else { q };
-          z_mat[p][q].extend(w.w_mat[p_w][q_w].clone());
-          z_mat[p][q].extend(vec![ZERO; num_inputs - w.num_inputs[p_w]]);
+          // Only append the first num_inputs_entries of w_mat[p][q]
+          for i in 0..num_inputs {
+            if i < w.w_mat[p_w][q_w].len() {
+              z_mat[p][q].push(w.w_mat[p_w][q_w][i]);
+            } else {
+              z_mat[p][q].push(ZERO);
+            }
+          }
         }
         if num_witness_secs == 3 {
           z_mat[p][q].extend(vec![ZERO; num_inputs]);
@@ -431,6 +433,9 @@ impl R1CSProof {
     assert_eq!(Z_poly.len(), 1);
     assert_eq!(ABC_poly.len(), 1);
 
+    // --
+    // POLY COMMIT
+    // --
     // Commit each witness by instance
     let mut eval_vars_at_ry_list = vec![Vec::new(); num_witness_secs];
     let mut proof_eval_vars_at_ry_list = vec![Vec::new(); num_witness_secs];
@@ -444,18 +449,30 @@ impl R1CSProof {
       ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
     }
 
+    // If w.num_inputs[p] == num_inputs, evaluate ry_baseline on the witness sec
+    let ry_baseline = ry[num_rounds_y - num_inputs.log_2()..].to_vec();
     for i in 0..num_witness_secs {
       let w = witness_secs[i];
       let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
       for p in 0..wit_sec_num_instance {
-        // ry_short is the last wit_sec_num_inputs[w].log_2() entries of ry
-        // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
-        let ry_short = &ry[num_rounds_y - w.num_inputs[p].log_2()..];
         
-        let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
+        // Depending on w.num_inputs[p], ry_short can be two different values
+        let ry_short = {
+          // if w.num_inputs[p] >= num_inputs, need to pad 0's to the front of ry
+          if w.num_inputs[p] >= num_inputs {
+            let ry_pad = vec![ZERO; w.num_inputs[p].log_2() - num_inputs.log_2()];
+            [ry_pad, ry_baseline.clone()].concat()
+          }
+          // Else ry_short is the last w.num_inputs[p].log_2() entries of ry
+          // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
+          else {
+            ry[num_rounds_y - w.num_inputs[p].log_2()..].to_vec()
+          }
+        };
+        let rq_short = rq[num_rounds_q - num_proofs[p].log_2()..].to_vec();
         let poly = w.poly_w[p].clone();
-        let r_concat = [rq_short, ry_short].concat();
-        let r = if w.is_short { ry_short } else { &r_concat };
+        let r_concat = [rq_short, ry_short.clone()].concat();
+        let r = if w.is_short { &ry_short } else { &r_concat };
         let eval_vars_at_ry = poly.evaluate(r);
         let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
           &poly,
@@ -467,7 +484,11 @@ impl R1CSProof {
           transcript,
           random_tape,
         );
-        eval_vars_at_ry_list[i].push(eval_vars_at_ry * ry_factors[num_rounds_y - w.num_inputs[p].log_2()]);
+        if w.num_inputs[p] >= num_inputs {
+          eval_vars_at_ry_list[i].push(eval_vars_at_ry);
+        } else {
+          eval_vars_at_ry_list[i].push(eval_vars_at_ry * ry_factors[num_rounds_y - w.num_inputs[p].log_2()]);
+        }
         proof_eval_vars_at_ry_list[i].push(proof_eval_vars_at_ry);
         comm_vars_at_ry_list[i].push(comm_vars_at_ry);
       }
@@ -574,10 +595,6 @@ impl R1CSProof {
     for w in &witness_secs {
       // If a witness_sec is single, it is also short
       assert!(!w.is_single || w.is_short);
-      // wit_sec_num_inputs <= num_inputs
-      for i in &w.num_inputs {
-        assert!(*i <= num_inputs);
-      }
     }
 
     let z_len = if num_witness_secs == 3 { num_inputs * 4 } else { num_inputs * num_witness_secs };
@@ -698,16 +715,29 @@ impl R1CSProof {
       ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
     }
 
+    // If w.num_inputs[p] == num_inputs, evaluate ry_baseline on the witness sec
+    let ry_baseline = ry[num_rounds_y - num_inputs.log_2()..].to_vec();
     for i in 0..num_witness_secs {
       let w = witness_secs[i];
       let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
       for p in 0..wit_sec_num_instance {
-        // ry_short is the last wit_sec_num_inputs[w].log_2() entries of ry
-        let ry_short = &ry[num_rounds_y - w.num_inputs[p].log_2()..];
-        let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
+        // Depending on w.num_inputs[p], ry_short can be two different values
+        let ry_short = {
+          // if w.num_inputs[p] >= num_inputs, need to pad 0's to the front of ry
+          if w.num_inputs[p] >= num_inputs {
+            let ry_pad = vec![ZERO; w.num_inputs[p].log_2() - num_inputs.log_2()];
+            [ry_pad, ry_baseline.clone()].concat()
+          }
+          // Else ry_short is the last w.num_inputs[p].log_2() entries of ry
+          // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
+          else {
+            ry[num_rounds_y - w.num_inputs[p].log_2()..].to_vec()
+          }
+        };
+        let rq_short = rq[num_rounds_q - num_proofs[p].log_2()..].to_vec();
         let comm = &w.comm_w[p];
-        let r_concat = [rq_short, ry_short].concat();
-        let r = if w.is_short { ry_short } else { &r_concat };
+        let r_concat = [rq_short, ry_short.clone()].concat();
+        let r = if w.is_short { &ry_short } else { &r_concat };
         self.proof_eval_vars_at_ry_list[i][p].verify(
           &gens.gens_pc,
           transcript,
@@ -722,7 +752,12 @@ impl R1CSProof {
     let mut expected_comm_vars_list = Vec::new();
     for p in 0..num_instances {
       let wit_sec_p = |i: usize| if witness_secs[i].is_single { 0 } else { p };
-      let c = |i: usize| self.comm_vars_at_ry_list[i][wit_sec_p(i)].decompress().unwrap() * ry_factors[num_rounds_y - witness_secs[i].num_inputs[wit_sec_p(i)].log_2()];
+      let c = |i: usize| 
+        if witness_secs[i].num_inputs[wit_sec_p(i)] >= num_inputs {
+          self.comm_vars_at_ry_list[i][wit_sec_p(i)].decompress().unwrap()
+        } else {
+          self.comm_vars_at_ry_list[i][wit_sec_p(i)].decompress().unwrap() * ry_factors[num_rounds_y - witness_secs[i].num_inputs[wit_sec_p(i)].log_2()]
+        };
       let mut comm_vars_comb = match num_witness_secs {
         1 => { c(0) }
         2 => { (ONE - ry[0]) * c(0) + ry[0] * c(1) }
@@ -756,6 +791,8 @@ impl R1CSProof {
       &comm_claim_post_phase2,
     )?;
 
+    println!("DDD");
+
     Ok([rp, rq_rev, rx, ry])
   }
 
@@ -780,7 +817,10 @@ impl R1CSProof {
 
     inst: &R1CSInstance,
     gens: &R1CSGens,
-    w_mat: &Vec<Vec<Scalar>>,
+    // The actual input size of the witness
+    // Currently only support w_input_size >= base_input_size
+    w_input_size: usize,
+    w_mat: &Vec<Vec<Vec<Scalar>>>,
     poly_w_list: &Vec<DensePolynomial>,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -798,11 +838,15 @@ impl R1CSProof {
     assert_eq!(max_input_rows, max_input_rows.next_power_of_two());
     assert_eq!(w_mat.len(), num_proofs);
     assert!(inst.get_num_cons() >= max_input_rows * base_constraint_size);
+    assert!(w_input_size >= base_input_size);
     for i in 0..num_proofs {
       let input = input_rows[i];
       assert!(input <= max_input_rows);
       assert_eq!(input, input.next_power_of_two());
-      assert_eq!(w_mat[i].len(), input * base_input_size);
+      assert_eq!(w_mat[i].len(), input);
+      for j in 0..input {
+        assert_eq!(w_mat[i][j].len(), w_input_size);
+      }
     }
     assert!(max_input_rows <= max_input_rows_bound);
 
@@ -811,7 +855,17 @@ impl R1CSProof {
     // --
     let timer_sc_proof_phase1 = Timer::new("prove_sc_phase_one");
     // append input to variables to create a single vector z
-    let z_list = w_mat;
+    // Since w_input_size might not match base_input_size, need to reconstruct z
+    let mut z_list = Vec::new();
+    for p in 0..num_proofs {
+      z_list.push(Vec::new());
+      for q in 0..input_rows[p] {
+        for i in 0..base_input_size {
+          z_list[p].push(w_mat[p][q][i]);
+        }
+      }
+    }
+    let z_list = &z_list;
     let z_len = max_input_rows * base_input_size;
 
     // derive the verifier's challenge tau
@@ -982,8 +1036,18 @@ impl R1CSProof {
     );
     timer_sc_proof_phase2.stop();
 
+    // Separate ry into rq and ry_short,
+    // Keep the original ry for return
+    let (rq, ry_short) = ry.split_at(num_rounds_q);
+    let rq = rq.to_vec();
+    let ry_short = ry_short.to_vec();
+
     assert_eq!(Z_poly.len(), 1);
     assert_eq!(ABC_poly.len(), 1);
+
+    // --
+    // POLY COMMIT
+    // --
 
     // Bind the witnesses and inputs instance-by-instance
     let mut eval_vars_at_ry_list = Vec::new();
@@ -991,16 +1055,19 @@ impl R1CSProof {
     let mut comm_vars_at_ry_list = Vec::new();
     let timer_polyeval = Timer::new("polyeval");
 
+    // If w_input_size > base_input_size, need to pad 0 at the front of ry (but after rq)
+    let ry_pad = &vec![ZERO; w_input_size.log_2() - base_input_size.log_2()];
     for p in 0..num_proofs {
-      // Size of poly_w_list[p].clone() decides how many digits of rq will be used
       let combined_poly = &poly_w_list[p];
-      let r = &ry[num_rounds_q - input_rows[p].log_2()..];
+      // Size of input_rows[p] decides how many digits of rq will be used
+      let rq_short = &rq[num_rounds_q - input_rows[p].log_2()..];
+      let r = &[rq_short, ry_pad, &ry_short].concat();
 
-      let eval_vars_at_ry = combined_poly.evaluate(&r);
+      let eval_vars_at_ry = combined_poly.evaluate(r);
       let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
         combined_poly,
         None,
-        &r,
+        r,
         &eval_vars_at_ry,
         None,
         &gens.gens_pc,
@@ -1086,6 +1153,7 @@ impl R1CSProof {
 
     gens: &R1CSGens,
     evals: &(Scalar, Scalar, Scalar),
+    w_input_size: usize,
     // Commitment for witnesses
     comm_w_list: &Vec<PolyCommitment>,
     transcript: &mut Transcript,
@@ -1190,11 +1258,20 @@ impl R1CSProof {
       transcript,
     )?;
 
+    // Separate ry into rq and ry_short,
+    // Keep the original ry for return
+    let (rq, ry_short) = ry.split_at(num_rounds_q);
+    let rq = rq.to_vec();
+    let ry_short = ry_short.to_vec();
+
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
+    // If w_input_size > base_input_size, need to pad 0 at the front of ry (but after rq)
+    let ry_pad = &vec![ZERO; w_input_size.log_2() - base_input_size.log_2()];
     for p in 0..num_proofs {
-      // Size of poly_w_list[p].clone() decides how many digits of rq will be used
-      let r = &ry[num_rounds_q - input_rows[p].log_2()..];
+      // Size of input_rows[p] decides how many digits of rq will be used
+      let rq_short = &rq[num_rounds_q - input_rows[p].log_2()..];
+      let r = &[rq_short, ry_pad, &ry_short].concat();
 
       self.proof_eval_vars_at_ry_list[0][p].verify(
         &gens.gens_pc,
