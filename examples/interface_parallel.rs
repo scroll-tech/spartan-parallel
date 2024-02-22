@@ -486,7 +486,7 @@ fn main() {
   println!("Running the proof...");
   // produce a proof of satisfiability
   let mut prover_transcript = Transcript::new(b"snark_example");
-  let proof = SNARK::prove(
+  let proof = SNARK::prove_parallel(
     ctk.input_block_num,
     ctk.output_block_num,
     ctk.func_input_width,
@@ -569,7 +569,7 @@ fn main() {
   println!("Verifying the proof...");
   // verify the proof of satisfiability
   let mut verifier_transcript = Transcript::new(b"snark_example");
-  assert!(proof.verify(
+  assert!(proof.verify_parallel(
     ctk.input_block_num,
     ctk.output_block_num,
     ctk.func_input_width,
