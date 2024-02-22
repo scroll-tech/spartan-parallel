@@ -318,7 +318,7 @@ impl SparseMatPolyCommitmentGens {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SparseMatPolyCommitment {
   batch_size: usize,
   num_ops: usize,

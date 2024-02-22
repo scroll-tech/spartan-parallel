@@ -4,7 +4,7 @@ use digest::XofReader;
 use digest::{ExtendableOutput, Input};
 use sha3::Shake256;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MultiCommitGens {
   pub n: usize,
   pub G: Vec<GroupElement>,

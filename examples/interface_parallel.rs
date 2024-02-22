@@ -589,8 +589,8 @@ fn main() {
     rtk.block_max_num_proofs, 
     &block_num_proofs, 
     block_num_cons, 
-    &block_comm,
-    &block_gens,
+    block_comm,
+    block_gens,
 
     rtk.consis_num_proofs, 
     consis_comb_num_cons, 
