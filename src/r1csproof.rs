@@ -716,7 +716,7 @@ impl R1CSProof {
     }
 
     // If w.num_inputs[p] == num_inputs, evaluate ry_baseline on the witness sec
-    let ry_baseline = ry[num_rounds_y - num_inputs.log_2()..].to_vec();
+    let ry_baseline = &ry[num_rounds_y - num_inputs.log_2()..];
     for i in 0..num_witness_secs {
       let w = witness_secs[i];
       let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
@@ -725,8 +725,8 @@ impl R1CSProof {
         let ry_short = {
           // if w.num_inputs[p] >= num_inputs, need to pad 0's to the front of ry
           if w.num_inputs[p] >= num_inputs {
-            let ry_pad = vec![ZERO; w.num_inputs[p].log_2() - num_inputs.log_2()];
-            [ry_pad, ry_baseline.clone()].concat()
+            let ry_pad = &vec![ZERO; w.num_inputs[p].log_2() - num_inputs.log_2()];
+            [ry_pad, ry_baseline].concat()
           }
           // Else ry_short is the last w.num_inputs[p].log_2() entries of ry
           // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
@@ -734,9 +734,9 @@ impl R1CSProof {
             ry[num_rounds_y - w.num_inputs[p].log_2()..].to_vec()
           }
         };
-        let rq_short = rq[num_rounds_q - num_proofs[p].log_2()..].to_vec();
+        let rq_short = &rq[num_rounds_q - num_proofs[p].log_2()..];
         let comm = &w.comm_w[p];
-        let r_concat = [rq_short, ry_short.clone()].concat();
+        let r_concat = [rq_short, &ry_short].concat();
         let r = if w.is_short { &ry_short } else { &r_concat };
         self.proof_eval_vars_at_ry_list[i][p].verify(
           &gens.gens_pc,

@@ -3,8 +3,9 @@
 #![deny(missing_docs)]
 #![allow(clippy::assertions_on_result_states)]
 
-// TODO: Can we let number of constraints / inputs vary for different blocks?
 // TODO: Can we allow split in R1CSGens?
+// TODO: Can we parallelize the proofs?
+// TODO: Double check if all public parameters are hashed for F-S
 
 extern crate byteorder;
 extern crate core;
@@ -687,8 +688,38 @@ impl SNARK {
     // --
     // INSTANCE COMMITMENTS
     // --
+    let input_block_num = Scalar::from(input_block_num as u64);
+    let output_block_num = Scalar::from(output_block_num as u64);
+    let input: Vec<Scalar> = input.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
+    let output: Scalar = Scalar::from_bytes(output).unwrap();
     let timer_commit = Timer::new("inst_commit");
-    // Commit instances
+    // Commit public parameters
+    Scalar::from(func_input_width as u64).append_to_transcript(b"func_input_width", transcript);
+    Scalar::from(input_offset as u64).append_to_transcript(b"input_offset", transcript);
+    Scalar::from(output_offset as u64).append_to_transcript(b"output_offset", transcript);
+    Scalar::from(output_exec_num as u64).append_to_transcript(b"output_exec_num", transcript);
+    Scalar::from(num_vars as u64).append_to_transcript(b"num_vars", transcript);
+    Scalar::from(num_ios as u64).append_to_transcript(b"num_ios", transcript);
+    Scalar::from(addr_block_w3_size as u64).append_to_transcript(b"addr_block_w3_size", transcript);
+    Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
+    Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
+    Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
+    Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
+    Scalar::from(max_block_num_mem_accesses as u64).append_to_transcript(b"max_block_num_mem_accesses", transcript);
+    Scalar::from(total_num_mem_accesses_bound as u64).append_to_transcript(b"total_num_mem_accesses_bound", transcript);
+    Scalar::from(total_num_mem_accesses as u64).append_to_transcript(b"total_num_mem_accesses", transcript);
+    
+    // commit mem_block_mask
+    for c in mem_block_comm_mask_list {
+      c.append_to_transcript(b"mem_block_masks", transcript);
+    }
+    // commit num_proofs
+    Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
+    for n in block_num_proofs {
+      Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
+    }
+
+    // append a commitment to the computation to the transcript
     for c in block_comm {
       c.comm.append_to_transcript(b"block_comm", transcript);
     }
@@ -702,24 +733,11 @@ impl SNARK {
     mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
 
     // Commit io
-    let input_block_num = Scalar::from(input_block_num as u64);
-    let output_block_num = Scalar::from(output_block_num as u64);
-    let input: Vec<Scalar> = input.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
-    let output: Scalar = Scalar::from_bytes(output).unwrap();
     input_block_num.append_to_transcript(b"input_block_num", transcript);
     output_block_num.append_to_transcript(b"output_block_num", transcript);
     input.append_to_transcript(b"input_list", transcript);
     output.append_to_transcript(b"output_list", transcript);
 
-    // Commit num_proofs
-    Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
-    for n in block_num_proofs {
-      Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
-    }
-    // Commit mem_block_mask
-    for c in mem_block_comm_mask_list {
-      c.append_to_transcript(b"mem_block_masks", transcript);
-    }
     timer_commit.stop();
 
     // --
@@ -2543,6 +2561,32 @@ impl SNARK {
     let output: Scalar = Scalar::from_bytes(output).unwrap();
     {
       let timer_commit = Timer::new("inst_commit");
+      // Commit public parameters
+      Scalar::from(func_input_width as u64).append_to_transcript(b"func_input_width", transcript);
+      Scalar::from(input_offset as u64).append_to_transcript(b"input_offset", transcript);
+      Scalar::from(output_offset as u64).append_to_transcript(b"output_offset", transcript);
+      Scalar::from(output_exec_num as u64).append_to_transcript(b"output_exec_num", transcript);
+      Scalar::from(num_vars as u64).append_to_transcript(b"num_vars", transcript);
+      Scalar::from(num_ios as u64).append_to_transcript(b"num_ios", transcript);
+      Scalar::from(addr_block_w3_size as u64).append_to_transcript(b"addr_block_w3_size", transcript);
+      Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
+      Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
+      Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
+      Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
+      Scalar::from(max_block_num_mem_accesses as u64).append_to_transcript(b"max_block_num_mem_accesses", transcript);
+      Scalar::from(total_num_mem_accesses_bound as u64).append_to_transcript(b"total_num_mem_accesses_bound", transcript);
+      Scalar::from(total_num_mem_accesses as u64).append_to_transcript(b"total_num_mem_accesses", transcript);
+      
+      // commit mem_block_mask
+      for c in mem_block_comm_mask_list {
+        c.append_to_transcript(b"mem_block_masks", transcript);
+      }
+      // commit num_proofs
+      Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
+      for n in block_num_proofs {
+        Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
+      }
+
       // append a commitment to the computation to the transcript
       for c in block_comm {
         c.comm.append_to_transcript(b"block_comm", transcript);
@@ -2562,15 +2606,6 @@ impl SNARK {
       input.append_to_transcript(b"input_list", transcript);
       output.append_to_transcript(b"output_list", transcript);
 
-      // Commit num_proofs
-      Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
-      for n in block_num_proofs {
-        Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
-      }
-      // Commit mem_block_mask
-      for c in mem_block_comm_mask_list {
-        c.append_to_transcript(b"mem_block_masks", transcript);
-      }
       timer_commit.stop();
     }
 
