@@ -3490,10 +3490,6 @@ impl SNARK {
   ) -> Self {
     let timer_prove = Timer::new("SNARK::prove");
 
-    // we create a Transcript object seeded with a random Scalar
-    // to aid the prover produce its randomness
-    let mut random_tape = vec![RandomTape::new(b"proof"); NUM_SNARK_PROOFS];
-
     transcript.append_protocol_name(SNARK::protocol_name());
 
     // --
@@ -4187,1035 +4183,1161 @@ impl SNARK {
     // Compute perm_size_bound
     let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
     // Construct vars_info for inputs
-    let block_vars_prover = ProverWitnessSecInfo::new(block_vars_mat, block_poly_vars_list);
-    let block_inputs_prover = ProverWitnessSecInfo::new(block_inputs_mat, block_poly_inputs_list);
-    let exec_inputs_prover = ProverWitnessSecInfo::new(vec![exec_inputs_list], exec_poly_inputs);
-    let addr_mems_prover = ProverWitnessSecInfo::new(vec![addr_mems_list], addr_poly_mems);
-    let mem_block_mask_prover = ProverWitnessSecInfo::new(mem_block_mask, mem_block_poly_mask_list);
+    let block_vars_prover = &ProverWitnessSecInfo::new(block_vars_mat, block_poly_vars_list);
+    let block_inputs_prover = &ProverWitnessSecInfo::new(block_inputs_mat, block_poly_inputs_list);
+    let exec_inputs_prover = &ProverWitnessSecInfo::new(vec![exec_inputs_list], exec_poly_inputs);
+    let addr_mems_prover = &ProverWitnessSecInfo::new(vec![addr_mems_list], addr_poly_mems);
+    let mem_block_mask_prover = &ProverWitnessSecInfo::new(mem_block_mask, mem_block_poly_mask_list);
 
-    // Copy transcript for each proof
-    let mut transcript: Vec<Transcript> = (0..NUM_SNARK_PROOFS).map(|_| transcript.clone()).collect();
+    // Convert shared elements into references
+    let mut transcript0 = transcript.clone();
+    let mut transcript1 = transcript.clone();
+    let mut transcript2 = transcript.clone();
+    let mut transcript3 = transcript.clone();
+    let mut transcript4 = transcript.clone();
+    let mut transcript5 = transcript.clone();
+    let mut transcript6 = transcript.clone();
+    let mut transcript7 = transcript.clone();
+    let mut transcript8 = transcript.clone();
+    let mut transcript9 = transcript.clone();
+    let mut transcript10 = transcript.clone();
+    let mut transcript11 = transcript.clone();
+    let mut transcript12 = transcript.clone();
+    // we create a Transcript object seeded with a random Scalar
+    // to aid the prover produce its randomness
+    let mut random_tape = RandomTape::new(b"proof");
+    let mut random_tape0 = random_tape.clone();
+    let mut random_tape1 = random_tape.clone();
+    let mut random_tape2 = random_tape.clone();
+    let mut random_tape3 = random_tape.clone();
+    let mut random_tape4 = random_tape.clone();
+    let mut random_tape5 = random_tape.clone();
+    let mut random_tape6 = random_tape.clone();
+    let mut random_tape7 = random_tape.clone();
+    let mut random_tape8 = random_tape.clone();
+    let mut random_tape9 = random_tape.clone();
+    let mut random_tape10 = random_tape.clone();
+    let mut random_tape11 = random_tape.clone();
+    let mut random_tape12 = random_tape.clone();
+    // Initialize all 
+    let (
+      block_r1cs_sat_proof,
+      block_inst_evals_bound_rp,
+      block_inst_evals_list,
+      block_r1cs_eval_proof,
 
-    // --
-    // BLOCK CORRECTNESS
-    // --
+      consis_comb_r1cs_sat_proof,
+      consis_comb_inst_evals,
+      consis_comb_r1cs_eval_proof,
 
-    let timer_proof = Timer::new("Block Correctness");
-    let (block_r1cs_sat_proof, block_challenges) = {
-      let (proof, block_challenges) = {
-        R1CSProof::prove(
-          block_num_instances,
-          block_max_num_proofs,
-          block_num_proofs,
-          num_vars,
-          2,
-          vec![&block_inputs_prover, &block_vars_prover],
-          &block_inst.inst,
-          &vars_gens,
-          &mut transcript[0],
-          &mut random_tape[0],
-        )
+      consis_check_r1cs_sat_proof,
+      consis_check_inst_evals,
+      consis_check_r1cs_eval_proof,
+
+      perm_prelim_r1cs_sat_proof,
+      perm_prelim_inst_evals,
+      perm_prelim_r1cs_eval_proof,
+      proof_eval_perm_w0_at_zero,
+      proof_eval_perm_w0_at_one,
+
+      perm_block_root_r1cs_sat_proof,
+      perm_block_root_inst_evals,
+      perm_block_root_r1cs_eval_proof,
+
+      perm_block_poly_r1cs_sat_proof,
+      perm_block_poly_inst_evals,
+      perm_block_poly_r1cs_eval_proof,
+      perm_block_poly_list,
+      proof_eval_perm_block_prod_list,
+
+      perm_exec_root_r1cs_sat_proof,
+      perm_exec_root_inst_evals,
+      perm_exec_root_r1cs_eval_proof,
+
+      perm_exec_poly_r1cs_sat_proof,
+      perm_exec_poly_inst_evals,
+      perm_exec_poly_r1cs_eval_proof,
+      perm_exec_poly,
+      proof_eval_perm_exec_prod,
+
+      mem_block_proofs,
+      mem_addr_proofs
+    ) = thread::scope(|s| {
+      // --
+      // BLOCK CORRECTNESS
+      // --
+
+      let block_correctness_proof = s.spawn(move || {
+        let timer_proof = Timer::new("Block Correctness");
+        let (block_r1cs_sat_proof, block_challenges) = {
+          let (proof, block_challenges) = {
+            R1CSProof::prove(
+              block_num_instances,
+              block_max_num_proofs,
+              block_num_proofs,
+              num_vars,
+              2,
+              vec![&block_inputs_prover, &block_vars_prover],
+              &block_inst.inst,
+              &vars_gens,
+              &mut transcript0,
+              &mut random_tape0,
+            )
+          };
+
+          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+          (proof, block_challenges)
+        };
+
+        // Final evaluation on BLOCK
+        let (block_inst_evals_bound_rp, block_inst_evals_list, block_r1cs_eval_proof) = {
+          let [rp, _, rx, ry] = block_challenges;
+          let inst = block_inst;
+          let timer_eval = Timer::new("eval_sparse_polys");
+
+          let mut r1cs_eval_proof_list = Vec::new();
+          let (inst_evals_list, inst_evals_bound_rp) = inst.inst.multi_evaluate(&rp, &rx, &ry);
+          timer_eval.stop();
+          for i in 0..block_num_instances {
+            let inst_evals = inst_evals_list[i];
+            let (Ar, Br, Cr) = &inst_evals;
+            Ar.append_to_transcript(b"Ar_claim", &mut transcript0);
+            Br.append_to_transcript(b"Br_claim", &mut transcript0);
+            Cr.append_to_transcript(b"Cr_claim", &mut transcript0);
+
+            let r1cs_eval_proof = {
+              let proof = R1CSEvalProof::prove(
+                &block_decomm[i].decomm,
+                &rx,
+                &ry,
+                &inst_evals,
+                &block_gens.gens_r1cs_eval,
+                &mut transcript0,
+                &mut random_tape0,
+              );
+
+              let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+              Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+              proof
+            };
+            r1cs_eval_proof_list.push(r1cs_eval_proof);
+          }
+
+
+          (inst_evals_bound_rp, inst_evals_list, r1cs_eval_proof_list)
+        };
+        timer_proof.stop();
+
+        (block_r1cs_sat_proof, block_inst_evals_bound_rp, block_inst_evals_list, block_r1cs_eval_proof)
+      });
+
+      // --
+      // CONSIS_COMB
+      // --
+
+      let timer_proof = Timer::new("Consis Comb");
+      let (consis_comb_r1cs_sat_proof, consis_comb_challenges) = {
+        let (proof, consis_comb_challenges) = {
+          R1CSProof::prove(
+            1,
+            consis_num_proofs,
+            &vec![consis_num_proofs],
+            num_ios,
+            4,
+            vec![&perm_w0_prover, &exec_inputs_prover, &consis_w2_prover, &consis_w3_prover],
+            &consis_comb_inst.inst,
+            &vars_gens,
+            &mut transcript1,
+            &mut random_tape1,
+          )
+        };
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+        (proof, consis_comb_challenges)
       };
 
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-      (proof, block_challenges)
-    };
-
-    // Final evaluation on BLOCK
-    let (block_inst_evals_bound_rp, block_inst_evals_list, block_r1cs_eval_proof) = {
-      let [rp, _, rx, ry] = block_challenges;
-      let inst = block_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-
-      let mut r1cs_eval_proof_list = Vec::new();
-      let (inst_evals_list, inst_evals_bound_rp) = inst.inst.multi_evaluate(&rp, &rx, &ry);
-      timer_eval.stop();
-      for i in 0..block_num_instances {
-        let inst_evals = inst_evals_list[i];
-        let (Ar, Br, Cr) = &inst_evals;
-        Ar.append_to_transcript(b"Ar_claim", &mut transcript[0]);
-        Br.append_to_transcript(b"Br_claim", &mut transcript[0]);
-        Cr.append_to_transcript(b"Cr_claim", &mut transcript[0]);
+      // Final evaluation on CONSIS_COMB
+      let (consis_comb_inst_evals, consis_comb_r1cs_eval_proof) = {
+        let [_, _, rx, ry] = consis_comb_challenges;
+        let inst = consis_comb_inst;
+        let timer_eval = Timer::new("eval_sparse_polys");
+        let inst_evals = {
+          let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
+          Ar.append_to_transcript(b"Ar_claim", &mut transcript1);
+          Br.append_to_transcript(b"Br_claim", &mut transcript1);
+          Cr.append_to_transcript(b"Cr_claim", &mut transcript1);
+          (Ar, Br, Cr)
+        };
+        timer_eval.stop();
 
         let r1cs_eval_proof = {
           let proof = R1CSEvalProof::prove(
-            &block_decomm[i].decomm,
+            &consis_comb_decomm.decomm,
             &rx,
             &ry,
             &inst_evals,
-            &block_gens.gens_r1cs_eval,
-            &mut transcript[0],
-            &mut random_tape[0],
+            &consis_comb_gens.gens_r1cs_eval,
+            &mut transcript1,
+            &mut random_tape1,
           );
 
           let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
           Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
           proof
         };
-        r1cs_eval_proof_list.push(r1cs_eval_proof);
-      }
 
-
-      (inst_evals_bound_rp, inst_evals_list, r1cs_eval_proof_list)
-    };
-    timer_proof.stop();
-
-    // --
-    // CONSIS_COMB
-    // --
-
-    let timer_proof = Timer::new("Consis Comb");
-    let (consis_comb_r1cs_sat_proof, consis_comb_challenges) = {
-      let (proof, consis_comb_challenges) = {
-        R1CSProof::prove(
-          1,
-          consis_num_proofs,
-          &vec![consis_num_proofs],
-          num_ios,
-          4,
-          vec![&perm_w0_prover, &exec_inputs_prover, &consis_w2_prover, &consis_w3_prover],
-          &consis_comb_inst.inst,
-          &vars_gens,
-          &mut transcript[1],
-          &mut random_tape[1],
-        )
+        (inst_evals, r1cs_eval_proof)
       };
+      timer_proof.stop();
 
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+      // --
+      // CONSIS_CHECK
+      // --
 
-      (proof, consis_comb_challenges)
-    };
-
-    // Final evaluation on CONSIS_COMB
-    let (consis_comb_inst_evals, consis_comb_r1cs_eval_proof) = {
-      let [_, _, rx, ry] = consis_comb_challenges;
-      let inst = consis_comb_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-        Ar.append_to_transcript(b"Ar_claim", &mut transcript[1]);
-        Br.append_to_transcript(b"Br_claim", &mut transcript[1]);
-        Cr.append_to_transcript(b"Cr_claim", &mut transcript[1]);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &consis_comb_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals,
-          &consis_comb_gens.gens_r1cs_eval,
-          &mut transcript[1],
-          &mut random_tape[1],
-        );
+      let timer_proof = Timer::new("Consis Check");
+      let (consis_check_r1cs_sat_proof, consis_check_challenges) = {
+        let (proof, consis_check_challenges) = {
+          R1CSProof::prove_single(
+            1,
+            consis_check_num_cons_base,
+            4,
+            total_num_proofs_bound,
+            consis_num_proofs,
+            &vec![consis_num_proofs],
+            &consis_check_inst.inst,
+            &vars_gens,
+            4,
+            &consis_w3_prover.w_mat,
+            &consis_w3_prover.poly_w,
+            &mut transcript2,
+            &mut random_tape2,
+          )
+        };
 
         let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
+        Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+        (proof, consis_check_challenges)
       };
 
-      (inst_evals, r1cs_eval_proof)
-    };
-    timer_proof.stop();
+      // Final evaluation on CONSIS_CHECK
+      let (consis_check_inst_evals, consis_check_r1cs_eval_proof) = {
+        let [_, rx, ry] = &consis_check_challenges;
+        let inst = consis_check_inst;
+        let timer_eval = Timer::new("eval_sparse_polys");
+        let inst_evals = {
+          let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
+          Ar.append_to_transcript(b"Ar_claim", &mut transcript2);
+          Br.append_to_transcript(b"Br_claim", &mut transcript2);
+          Cr.append_to_transcript(b"Cr_claim", &mut transcript2);
+          (Ar, Br, Cr)
+        };
+        timer_eval.stop();
 
-    // --
-    // CONSIS_CHECK
-    // --
+        let r1cs_eval_proof = {
+          let proof = R1CSEvalProof::prove(
+            &consis_check_decomm.decomm,
+            &rx,
+            &ry,
+            &inst_evals,
+            &consis_check_gens.gens_r1cs_eval,
+            &mut transcript2,
+            &mut random_tape2,
+          );
 
-    let timer_proof = Timer::new("Consis Check");
-    let (consis_check_r1cs_sat_proof, consis_check_challenges) = {
-      let (proof, consis_check_challenges) = {
-        R1CSProof::prove_single(
-          1,
-          consis_check_num_cons_base,
-          4,
-          total_num_proofs_bound,
-          consis_num_proofs,
-          &vec![consis_num_proofs],
-          &consis_check_inst.inst,
-          &vars_gens,
-          4,
-          &consis_w3_prover.w_mat,
-          &consis_w3_prover.poly_w,
-          &mut transcript[2],
-          &mut random_tape[2],
-        )
+          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+          Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+          proof
+        };
+
+        
+        (inst_evals, r1cs_eval_proof)
       };
+      timer_proof.stop();
 
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+      // --
+      // PERM_PRELIM
+      // --
 
-      (proof, consis_check_challenges)
-    };
-
-    // Final evaluation on CONSIS_CHECK
-    let (consis_check_inst_evals, consis_check_r1cs_eval_proof) = {
-      let [_, rx, ry] = &consis_check_challenges;
-      let inst = consis_check_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-        Ar.append_to_transcript(b"Ar_claim", &mut transcript[2]);
-        Br.append_to_transcript(b"Br_claim", &mut transcript[2]);
-        Cr.append_to_transcript(b"Cr_claim", &mut transcript[2]);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &consis_check_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals,
-          &consis_check_gens.gens_r1cs_eval,
-          &mut transcript[2],
-          &mut random_tape[2],
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
-      };
-
-      
-      (inst_evals, r1cs_eval_proof)
-    };
-    timer_proof.stop();
-
-    // --
-    // PERM_PRELIM
-    // --
-
-    let timer_proof = Timer::new("Perm Prelim");
-    let (
-      perm_prelim_r1cs_sat_proof, 
-      perm_prelim_challenges,
-      proof_eval_perm_w0_at_zero,
-      proof_eval_perm_w0_at_one
-    ) = {
-      let (proof, perm_prelim_challenges) = {
-        R1CSProof::prove(
-          1,
-          1,
-          &vec![1],
-          num_ios,
-          1,
-          vec![&perm_w0_prover],
-          &perm_prelim_inst.inst,
-          &vars_gens,
-          &mut transcript[3],
-          &mut random_tape[3],
-        )
-      };
-
-      // Proof that first two entries of perm_w0 are tau and r
-      let ry_len = perm_prelim_challenges[3].len();
-      let (proof_eval_perm_w0_at_zero, _comm_perm_w0_at_zero) = PolyEvalProof::prove(
-        &perm_w0_prover.poly_w[0],
-        None,
-        &vec![ZERO; ry_len],
-        &comb_tau,
-        None,
-        &vars_gens.gens_pc,
-        &mut transcript[3],
-        &mut random_tape[3],
-      );
-      let (proof_eval_perm_w0_at_one, _comm_perm_w0_at_one) = PolyEvalProof::prove(
-        &perm_w0_prover.poly_w[0],
-        None,
-        &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
-        &comb_r,
-        None,
-        &vars_gens.gens_pc,
-        &mut transcript[3],
-        &mut random_tape[3],
-      );
-      
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-      (
-        proof, 
+      let timer_proof = Timer::new("Perm Prelim");
+      let (
+        perm_prelim_r1cs_sat_proof, 
         perm_prelim_challenges,
         proof_eval_perm_w0_at_zero,
         proof_eval_perm_w0_at_one
-      )
-    };
+      ) = {
+        let (proof, perm_prelim_challenges) = {
+          R1CSProof::prove(
+            1,
+            1,
+            &vec![1],
+            num_ios,
+            1,
+            vec![&perm_w0_prover],
+            &perm_prelim_inst.inst,
+            &vars_gens,
+            &mut transcript3,
+            &mut random_tape3,
+          )
+        };
 
-    // Final evaluation on PERM_PRELIM
-    let (perm_prelim_inst_evals, perm_prelim_r1cs_eval_proof) = {
-      let [rp, _, rx, ry] = perm_prelim_challenges;
-      let rx = [rp, rx].concat();
-      let inst = perm_prelim_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-        Ar.append_to_transcript(b"Ar_claim", &mut transcript[3]);
-        Br.append_to_transcript(b"Br_claim", &mut transcript[3]);
-        Cr.append_to_transcript(b"Cr_claim", &mut transcript[3]);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &perm_prelim_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals,
-          &perm_prelim_gens.gens_r1cs_eval,
-          &mut transcript[3],
-          &mut random_tape[3],
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
-      };
-
-      
-      (inst_evals, r1cs_eval_proof)
-    };
-    timer_proof.stop();
-
-    // --
-    // PERM_BLOCK_ROOT
-    // --
-
-    let timer_proof = Timer::new("Perm Block Root");
-    let (perm_block_root_r1cs_sat_proof, perm_block_root_challenges) = {
-      let (proof, perm_block_root_challenges) = {
-        R1CSProof::prove(
-          block_num_instances,
-          block_max_num_proofs,
-          block_num_proofs,
-          num_ios,
-          4,
-          vec![&perm_w0_prover, &block_inputs_prover, &perm_block_w2_prover, &perm_block_w3_prover],
-          &perm_root_inst.inst,
-          &vars_gens,
-          &mut transcript[4],
-          &mut random_tape[4],
-        )
-      };
-
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-      (proof, perm_block_root_challenges)
-    };
-
-    // Final evaluation on PERM_BLOCK_ROOT
-    let (perm_block_root_inst_evals, perm_block_root_r1cs_eval_proof) = {
-      let [_, _, rx, ry] = perm_block_root_challenges;
-      let inst = perm_root_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-        Ar.append_to_transcript(b"Ar_claim", &mut transcript[4]);
-        Br.append_to_transcript(b"Br_claim", &mut transcript[4]);
-        Cr.append_to_transcript(b"Cr_claim", &mut transcript[4]);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &perm_root_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals,
-          &perm_root_gens.gens_r1cs_eval,
-          &mut transcript[4],
-          &mut random_tape[4],
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
-      };
-
-      
-      (inst_evals, r1cs_eval_proof)
-    };
-    timer_proof.stop();
-
-    // --
-    // PERM_BLOCK_POLY
-    // --
-
-    let timer_proof = Timer::new("Perm Block Poly");
-    let (perm_block_poly_r1cs_sat_proof, perm_block_poly_challenges) = {
-      let (proof, perm_block_poly_challenges) = {
-        R1CSProof::prove_single(
-          block_num_instances,
-          perm_poly_num_cons_base,
-          4,
-          // We need to feed the compile-time bound because that is the size of the constraints
-          // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
-          perm_size_bound,
-          block_max_num_proofs,
-          &block_num_proofs,
-          &perm_poly_inst.inst,
-          &vars_gens,
-          4,
-          &perm_block_w3_prover.w_mat,
-          &perm_block_w3_prover.poly_w,
-          &mut transcript[5],
-          &mut random_tape[5],
-        )
-      };
-
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-      (proof, perm_block_poly_challenges)
-    };
-
-    // Final evaluation on PERM_BLOCK_POLY
-    let (perm_block_poly_inst_evals, perm_block_poly_r1cs_eval_proof) = {
-      let [_, rx, ry] = &perm_block_poly_challenges;
-      let inst = perm_poly_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-        Ar.append_to_transcript(b"Ar_claim", &mut transcript[5]);
-        Br.append_to_transcript(b"Br_claim", &mut transcript[5]);
-        Cr.append_to_transcript(b"Cr_claim", &mut transcript[5]);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &perm_poly_decomm.decomm,
-          rx,
-          ry,
-          &inst_evals,
-          &perm_poly_gens.gens_r1cs_eval,
-          &mut transcript[5],
-          &mut random_tape[5],
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
-      };
-
-      
-      (inst_evals, r1cs_eval_proof)
-    };
-
-    // Record the prod of each instance
-    let (perm_block_poly_list, proof_eval_perm_block_prod_list) = {
-      let mut perm_block_poly_list = Vec::new();
-      let mut proof_eval_perm_block_prod_list = Vec::new();
-      for p in 0..block_num_instances {
-        let r_len = (block_num_proofs[p] * 4).log_2();
-        // Prod is the 3rd entry
-        let perm_block_poly = perm_block_w3_prover.poly_w[p][3];
-        let (proof_eval_perm_block_prod, _comm_perm_block_prod) = PolyEvalProof::prove(
-          &perm_block_w3_prover.poly_w[p],
+        // Proof that first two entries of perm_w0 are tau and r
+        let ry_len = perm_prelim_challenges[3].len();
+        let (proof_eval_perm_w0_at_zero, _comm_perm_w0_at_zero) = PolyEvalProof::prove(
+          &perm_w0_prover.poly_w[0],
           None,
-          &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
-          &perm_block_poly,
+          &vec![ZERO; ry_len],
+          &comb_tau,
           None,
           &vars_gens.gens_pc,
-          &mut transcript[5],
-          &mut random_tape[5],
+          &mut transcript3,
+          &mut random_tape3,
         );
-        perm_block_poly_list.push(perm_block_poly);
-        proof_eval_perm_block_prod_list.push(proof_eval_perm_block_prod);
-      }
-      (perm_block_poly_list, proof_eval_perm_block_prod_list)
-    };
-    timer_proof.stop();
+        let (proof_eval_perm_w0_at_one, _comm_perm_w0_at_one) = PolyEvalProof::prove(
+          &perm_w0_prover.poly_w[0],
+          None,
+          &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
+          &comb_r,
+          None,
+          &vars_gens.gens_pc,
+          &mut transcript3,
+          &mut random_tape3,
+        );
+        
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-    // --
-    // PERM_EXEC_ROOT
-    // --
-
-    let timer_proof = Timer::new("Perm Exec Root");
-    let (perm_exec_root_r1cs_sat_proof, perm_exec_root_challenges) = {
-      let (proof, perm_exec_root_challenges) = {
-        R1CSProof::prove(
-          1,
-          consis_num_proofs,
-          &vec![consis_num_proofs],
-          num_ios,
-          4,
-          vec![&perm_w0_prover, &exec_inputs_prover, &perm_exec_w2_prover, &perm_exec_w3_prover],
-          &perm_root_inst.inst,
-          &vars_gens,
-          &mut transcript[6],
-          &mut random_tape[6],
+        (
+          proof, 
+          perm_prelim_challenges,
+          proof_eval_perm_w0_at_zero,
+          proof_eval_perm_w0_at_one
         )
       };
 
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-      (proof, perm_exec_root_challenges)
-    };
-
-    // Final evaluation on PERM_EXEC_ROOT
-    let (perm_exec_root_inst_evals, perm_exec_root_r1cs_eval_proof) = {
-      let [_, _, rx, ry] = perm_exec_root_challenges;
-      let inst = perm_root_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-        Ar.append_to_transcript(b"Ar_claim", &mut transcript[6]);
-        Br.append_to_transcript(b"Br_claim", &mut transcript[6]);
-        Cr.append_to_transcript(b"Cr_claim", &mut transcript[6]);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &perm_root_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals,
-          &perm_root_gens.gens_r1cs_eval,
-          &mut transcript[6],
-          &mut random_tape[6],
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
-      };
-
-      
-      (inst_evals, r1cs_eval_proof)
-    };
-    timer_proof.stop();
-
-    // --
-    // PERM_EXEC_POLY
-    // --
-
-    let timer_proof = Timer::new("Perm Exec Poly");
-    let (perm_exec_poly_r1cs_sat_proof, perm_exec_poly_challenges) = {
-      let (proof, perm_exec_poly_challenges) = {
-        R1CSProof::prove_single(
-          1,
-          perm_poly_num_cons_base,
-          4,
-          perm_size_bound,
-          consis_num_proofs,
-          &vec![consis_num_proofs],
-          &perm_poly_inst.inst,
-          &vars_gens,
-          4,
-          &perm_exec_w3_prover.w_mat,
-          &perm_exec_w3_prover.poly_w,
-          &mut transcript[7],
-          &mut random_tape[7],
-        )
-      };
-
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-      (proof, perm_exec_poly_challenges)
-    };
-
-    // Final evaluation on PERM_EXEC_POLY
-    let (perm_exec_poly_inst_evals, perm_exec_poly_r1cs_eval_proof) = {
-      let [_, rx, ry] = &perm_exec_poly_challenges;
-      let inst = perm_poly_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-        Ar.append_to_transcript(b"Ar_claim", &mut transcript[7]);
-        Br.append_to_transcript(b"Br_claim", &mut transcript[7]);
-        Cr.append_to_transcript(b"Cr_claim", &mut transcript[7]);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &perm_poly_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals,
-          &perm_poly_gens.gens_r1cs_eval,
-          &mut transcript[7],
-          &mut random_tape[7],
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
-      };
-
-      
-      (inst_evals, r1cs_eval_proof)
-    };
-
-    // Record the prod of instance
-    let (perm_exec_poly, proof_eval_perm_exec_prod) = {
-      let r_len = (consis_num_proofs * 4).log_2();
-      // Prod is the 3rd entry
-      let perm_exec_poly = perm_exec_w3_prover.poly_w[0][3];
-      let (proof_eval_perm_exec_prod, _comm_perm_exec_prod) = PolyEvalProof::prove(
-        &perm_exec_w3_prover.poly_w[0],
-        None,
-        &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
-        &perm_exec_poly,
-        None,
-        &vars_gens.gens_pc,
-        &mut transcript[7],
-        &mut random_tape[7],
-      );
-      (perm_exec_poly, proof_eval_perm_exec_prod)
-    };
-    timer_proof.stop();
-
-    // --
-    // MEM_BLOCK
-    // --
-
-    let mem_block_proofs = {
-      if total_num_mem_accesses_bound > 0 {
-        // --
-        // MEM_EXTRACT
-        // --
-        let timer_proof = Timer::new("Mem Extract");
-        let (mem_extract_r1cs_sat_proof, mem_extract_challenges) = {
-          let (proof, mem_extract_challenges) = {
-            R1CSProof::prove(
-              block_num_instances,
-              block_max_num_proofs,
-              block_num_proofs,
-              addr_block_w3_size,
-              4,
-              vec![&mem_w0_prover, &mem_block_mask_prover, &block_vars_prover, &mem_block_w3_prover],
-              &mem_extract_inst.inst,
-              &vars_gens,
-              &mut transcript[8],
-              &mut random_tape[8],
-            )
-          };
-    
-          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-    
-          (proof, mem_extract_challenges)
+      // Final evaluation on PERM_PRELIM
+      let (perm_prelim_inst_evals, perm_prelim_r1cs_eval_proof) = {
+        let [rp, _, rx, ry] = perm_prelim_challenges;
+        let rx = [rp, rx].concat();
+        let inst = perm_prelim_inst;
+        let timer_eval = Timer::new("eval_sparse_polys");
+        let inst_evals = {
+          let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
+          Ar.append_to_transcript(b"Ar_claim", &mut transcript3);
+          Br.append_to_transcript(b"Br_claim", &mut transcript3);
+          Cr.append_to_transcript(b"Cr_claim", &mut transcript3);
+          (Ar, Br, Cr)
         };
-    
-        // Final evaluation on MEM_EXTRACT
-        let (mem_extract_inst_evals, mem_extract_r1cs_eval_proof) = {
-          let [_, _, rx, ry] = mem_extract_challenges;
-          let inst = mem_extract_inst;
-          let timer_eval = Timer::new("eval_sparse_polys");
-          let inst_evals = {
-            let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-            Ar.append_to_transcript(b"Ar_claim", &mut transcript[8]);
-            Br.append_to_transcript(b"Br_claim", &mut transcript[8]);
-            Cr.append_to_transcript(b"Cr_claim", &mut transcript[8]);
-            (Ar, Br, Cr)
-          };
-          timer_eval.stop();
-    
-          let r1cs_eval_proof = {
-            let proof = R1CSEvalProof::prove(
-              &mem_extract_decomm.decomm,
-              &rx,
-              &ry,
-              &inst_evals,
-              &mem_extract_gens.gens_r1cs_eval,
-              &mut transcript[8],
-              &mut random_tape[8],
-            );
-    
-            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-            proof
-          };
-    
-          
-          (inst_evals, r1cs_eval_proof)
-        };
-        timer_proof.stop();
+        timer_eval.stop();
 
-        // --
-        // MEM_BLOCK_POLY
-        // --
-        let timer_proof = Timer::new("Mem Block Poly");
-        let (mem_block_poly_r1cs_sat_proof, mem_block_poly_challenges) = {
-          let (proof, mem_block_poly_challenges) = {
-            R1CSProof::prove_single(
-              block_num_instances,
-              perm_poly_num_cons_base,
-              4,
-              // We need to feed the compile-time bound because that is the size of the constraints
-              // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
-              perm_size_bound,
-              block_max_num_proofs,
-              &block_num_proofs,
-              &perm_poly_inst.inst,
-              &vars_gens,
-              addr_block_w3_size,
-              &mem_block_w3_prover.w_mat,
-              &mem_block_w3_prover.poly_w,
-              &mut transcript[9],
-              &mut random_tape[9],
-            )
-          };
-    
-          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-    
-          (proof, mem_block_poly_challenges)
-        };
-    
-        // Final evaluation on MEM_BLOCK_POLY
-        let (mem_block_poly_inst_evals, mem_block_poly_r1cs_eval_proof) = {
-          let [_, rx, ry] = &mem_block_poly_challenges;
-          let inst = perm_poly_inst;
-          let timer_eval = Timer::new("eval_sparse_polys");
-          let inst_evals = {
-            let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-            Ar.append_to_transcript(b"Ar_claim", &mut transcript[9]);
-            Br.append_to_transcript(b"Br_claim", &mut transcript[9]);
-            Cr.append_to_transcript(b"Cr_claim", &mut transcript[9]);
-            (Ar, Br, Cr)
-          };
-          timer_eval.stop();
-    
-          let r1cs_eval_proof = {
-            let proof = R1CSEvalProof::prove(
-              &perm_poly_decomm.decomm,
-              &rx,
-              &ry,
-              &inst_evals,
-              &perm_poly_gens.gens_r1cs_eval,
-              &mut transcript[9],
-              &mut random_tape[9],
-            );
-    
-            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-            proof
-          };
-    
-          
-          (inst_evals, r1cs_eval_proof)
-        };
-    
-        // Record the prod of each instance
-        let (mem_block_poly_list, proof_eval_mem_block_prod_list) = {
-          let mut mem_block_poly_list = Vec::new();
-          let mut proof_eval_mem_block_prod_list = Vec::new();
-          for p in 0..block_num_instances {
-            let r_len = (block_num_proofs[p] * addr_block_w3_size).log_2();
-            // Prod is the 3rd entry
-            let mem_block_poly = mem_block_w3_prover.poly_w[p][3];
-            let (proof_eval_mem_block_prod, _comm_mem_block_prod) = PolyEvalProof::prove(
-              &mem_block_w3_prover.poly_w[p],
-              None,
-              &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
-              &mem_block_poly,
-              None,
-              &vars_gens.gens_pc,
-              &mut transcript[9],
-              &mut random_tape[9],
-            );
-            mem_block_poly_list.push(mem_block_poly);
-            proof_eval_mem_block_prod_list.push(proof_eval_mem_block_prod);
-          }
-          (mem_block_poly_list, proof_eval_mem_block_prod_list)
-        };
-        timer_proof.stop();
-
-        Some(MemBlockProofs {
-          mem_extract_r1cs_sat_proof,
-          mem_extract_inst_evals,
-          mem_extract_r1cs_eval_proof,
-    
-          mem_block_poly_r1cs_sat_proof,
-          mem_block_poly_inst_evals,
-          mem_block_poly_r1cs_eval_proof,
-          mem_block_poly_list,
-          proof_eval_mem_block_prod_list,
-        })
-      } else {
-        None
-      }
-    };
-
-    // --
-    // MEM_ADDR
-    // --
-
-    let mem_addr_proofs = {
-      if total_num_mem_accesses > 0 {
-        // --
-        // MEM_COHERE
-        // --
-        let timer_proof = Timer::new("Mem Cohere");
-        let (mem_cohere_r1cs_sat_proof, mem_cohere_challenges) = {
-          let (proof, mem_cohere_challenges) = {
-            R1CSProof::prove_single(
-              1,
-              mem_cohere_num_cons_base,
-              4,
-              total_num_mem_accesses_bound,
-              total_num_mem_accesses,
-              &vec![total_num_mem_accesses],
-              &mem_cohere_inst.inst,
-              &vars_gens,
-              4,
-              &addr_mems_prover.w_mat,
-              &addr_mems_prover.poly_w,
-              &mut transcript[10],
-              &mut random_tape[10],
-            )
-          };
-    
-          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-    
-          (proof, mem_cohere_challenges)
-        };
-    
-        // Final evaluation on MEM_COHERE
-        let (mem_cohere_inst_evals, mem_cohere_r1cs_eval_proof) = {
-          let [_, rx, ry] = &mem_cohere_challenges;
-          let inst = mem_cohere_inst;
-          let timer_eval = Timer::new("eval_sparse_polys");
-          let inst_evals = {
-            let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-            Ar.append_to_transcript(b"Ar_claim", &mut transcript[10]);
-            Br.append_to_transcript(b"Br_claim", &mut transcript[10]);
-            Cr.append_to_transcript(b"Cr_claim", &mut transcript[10]);
-            (Ar, Br, Cr)
-          };
-          timer_eval.stop();
-    
-          let r1cs_eval_proof = {
-            let proof = R1CSEvalProof::prove(
-              &mem_cohere_decomm.decomm,
-              &rx,
-              &ry,
-              &inst_evals,
-              &mem_cohere_gens.gens_r1cs_eval,
-              &mut transcript[10],
-              &mut random_tape[10],
-            );
-    
-            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-            proof
-          };
-    
-          
-          (inst_evals, r1cs_eval_proof)
-        };
-        timer_proof.stop();
-
-        // --
-        // MEM_ADDR_COMB
-        // --
-        let timer_proof = Timer::new("Mem Addr Comb");
-        let (
-          mem_addr_comb_r1cs_sat_proof, 
-          mem_addr_comb_challenges,
-          proof_eval_mem_w0_at_zero,
-          proof_eval_mem_w0_at_one
-        ) = {
-          let (proof, mem_addr_comb_challenges) = {
-            R1CSProof::prove(
-              1,
-              total_num_mem_accesses,
-              &vec![total_num_mem_accesses],
-              4,
-              4,
-              vec![&mem_w0_prover, &mem_addr_w1_prover, &addr_mems_prover, &mem_addr_w3_prover],
-              &mem_addr_comb_inst.inst,
-              &vars_gens,
-              &mut transcript[11],
-              &mut random_tape[11],
-            )
-          };
-
-          // Proof that first two entries of mem_w0 are tau and r
-          let ry_len = 2;
-          let (proof_eval_mem_w0_at_zero, _comm_mem_w0_at_zero) = PolyEvalProof::prove(
-            &mem_w0_prover.poly_w[0],
-            None,
-            &vec![ZERO; ry_len],
-            &comb_tau,
-            None,
-            &vars_gens.gens_pc,
-            &mut transcript[11],
-            &mut random_tape[11],
-          );
-          let (proof_eval_mem_w0_at_one, _comm_mem_w0_at_one) = PolyEvalProof::prove(
-            &mem_w0_prover.poly_w[0],
-            None,
-            &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
-            &comb_r,
-            None,
-            &vars_gens.gens_pc,
-            &mut transcript[11],
-            &mut random_tape[11],
+        let r1cs_eval_proof = {
+          let proof = R1CSEvalProof::prove(
+            &perm_prelim_decomm.decomm,
+            &rx,
+            &ry,
+            &inst_evals,
+            &perm_prelim_gens.gens_r1cs_eval,
+            &mut transcript3,
+            &mut random_tape3,
           );
 
           let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-          (proof, mem_addr_comb_challenges, proof_eval_mem_w0_at_zero, proof_eval_mem_w0_at_one)
+          Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+          proof
         };
 
-        // Final evaluation on MEM_ADDR_COMB
-        let (mem_addr_comb_inst_evals, mem_addr_comb_r1cs_eval_proof) = {
-          let [_, _, rx, ry] = mem_addr_comb_challenges;
-          let inst = mem_addr_comb_inst;
-          let timer_eval = Timer::new("eval_sparse_polys");
-          let inst_evals = {
-            let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-            Ar.append_to_transcript(b"Ar_claim", &mut transcript[11]);
-            Br.append_to_transcript(b"Br_claim", &mut transcript[11]);
-            Cr.append_to_transcript(b"Cr_claim", &mut transcript[11]);
-            (Ar, Br, Cr)
-          };
-          timer_eval.stop();
+        
+        (inst_evals, r1cs_eval_proof)
+      };
+      timer_proof.stop();
 
-          let r1cs_eval_proof = {
-            let proof = R1CSEvalProof::prove(
-              &mem_addr_comb_decomm.decomm,
-              &rx,
-              &ry,
-              &inst_evals,
-              &mem_addr_comb_gens.gens_r1cs_eval,
-              &mut transcript[11],
-              &mut random_tape[11],
-            );
+      // --
+      // PERM_BLOCK_ROOT
+      // --
 
-            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-            proof
-          };
-
-          
-          (inst_evals, r1cs_eval_proof)
+      let timer_proof = Timer::new("Perm Block Root");
+      let (perm_block_root_r1cs_sat_proof, perm_block_root_challenges) = {
+        let (proof, perm_block_root_challenges) = {
+          R1CSProof::prove(
+            block_num_instances,
+            block_max_num_proofs,
+            block_num_proofs,
+            num_ios,
+            4,
+            vec![&perm_w0_prover, &block_inputs_prover, &perm_block_w2_prover, &perm_block_w3_prover],
+            &perm_root_inst.inst,
+            &vars_gens,
+            &mut transcript4,
+            &mut random_tape4,
+          )
         };
-        timer_proof.stop();
 
-        // --
-        // MEM_ADDR_POLY
-        // --
-        let timer_proof = Timer::new("Mem Addr Poly");
-        let (mem_addr_poly_r1cs_sat_proof, mem_addr_poly_challenges) = {
-          let (proof, mem_addr_poly_challenges) = {
-            R1CSProof::prove_single(
-              1,
-              perm_poly_num_cons_base,
-              4,
-              perm_size_bound,
-              total_num_mem_accesses,
-              &vec![total_num_mem_accesses],
-              &perm_poly_inst.inst,
-              &vars_gens,
-              4,
-              &mem_addr_w1_prover.w_mat,
-              &mem_addr_w1_prover.poly_w,
-              &mut transcript[12],
-              &mut random_tape[12],
-            )
-          };
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+        (proof, perm_block_root_challenges)
+      };
+
+      // Final evaluation on PERM_BLOCK_ROOT
+      let (perm_block_root_inst_evals, perm_block_root_r1cs_eval_proof) = {
+        let [_, _, rx, ry] = perm_block_root_challenges;
+        let inst = perm_root_inst;
+        let timer_eval = Timer::new("eval_sparse_polys");
+        let inst_evals = {
+          let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
+          Ar.append_to_transcript(b"Ar_claim", &mut transcript4);
+          Br.append_to_transcript(b"Br_claim", &mut transcript4);
+          Cr.append_to_transcript(b"Cr_claim", &mut transcript4);
+          (Ar, Br, Cr)
+        };
+        timer_eval.stop();
+
+        let r1cs_eval_proof = {
+          let proof = R1CSEvalProof::prove(
+            &perm_root_decomm.decomm,
+            &rx,
+            &ry,
+            &inst_evals,
+            &perm_root_gens.gens_r1cs_eval,
+            &mut transcript4,
+            &mut random_tape4,
+          );
 
           let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-          (proof, mem_addr_poly_challenges)
+          Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+          proof
         };
 
-        // Final evaluation on MEM_ADDR_POLY
-        let (mem_addr_poly_inst_evals, mem_addr_poly_r1cs_eval_proof) = {
-          let [_, rx, ry] = &mem_addr_poly_challenges;
-          let inst = perm_poly_inst;
-          let timer_eval = Timer::new("eval_sparse_polys");
-          let inst_evals = {
-            let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-            Ar.append_to_transcript(b"Ar_claim", &mut transcript[12]);
-            Br.append_to_transcript(b"Br_claim", &mut transcript[12]);
-            Cr.append_to_transcript(b"Cr_claim", &mut transcript[12]);
-            (Ar, Br, Cr)
-          };
-          timer_eval.stop();
+        
+        (inst_evals, r1cs_eval_proof)
+      };
+      timer_proof.stop();
 
-          let r1cs_eval_proof = {
-            let proof = R1CSEvalProof::prove(
-              &perm_poly_decomm.decomm,
-              &rx,
-              &ry,
-              &inst_evals,
-              &perm_poly_gens.gens_r1cs_eval,
-              &mut transcript[12],
-              &mut random_tape[12],
-            );
+      // --
+      // PERM_BLOCK_POLY
+      // --
 
-            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-            proof
-          };
-
-          
-          (inst_evals, r1cs_eval_proof)
+      let timer_proof = Timer::new("Perm Block Poly");
+      let (perm_block_poly_r1cs_sat_proof, perm_block_poly_challenges) = {
+        let (proof, perm_block_poly_challenges) = {
+          R1CSProof::prove_single(
+            block_num_instances,
+            perm_poly_num_cons_base,
+            4,
+            // We need to feed the compile-time bound because that is the size of the constraints
+            // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
+            perm_size_bound,
+            block_max_num_proofs,
+            &block_num_proofs,
+            &perm_poly_inst.inst,
+            &vars_gens,
+            4,
+            &perm_block_w3_prover.w_mat,
+            &perm_block_w3_prover.poly_w,
+            &mut transcript5,
+            &mut random_tape5,
+          )
         };
-        timer_proof.stop();
 
-        // Record the prod of instance
-        let (mem_addr_poly, proof_eval_mem_addr_prod) = {
-          let r_len = (total_num_mem_accesses * 4).log_2();
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+        (proof, perm_block_poly_challenges)
+      };
+
+      // Final evaluation on PERM_BLOCK_POLY
+      let (perm_block_poly_inst_evals, perm_block_poly_r1cs_eval_proof) = {
+        let [_, rx, ry] = &perm_block_poly_challenges;
+        let inst = perm_poly_inst;
+        let timer_eval = Timer::new("eval_sparse_polys");
+        let inst_evals = {
+          let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
+          Ar.append_to_transcript(b"Ar_claim", &mut transcript5);
+          Br.append_to_transcript(b"Br_claim", &mut transcript5);
+          Cr.append_to_transcript(b"Cr_claim", &mut transcript5);
+          (Ar, Br, Cr)
+        };
+        timer_eval.stop();
+
+        let r1cs_eval_proof = {
+          let proof = R1CSEvalProof::prove(
+            &perm_poly_decomm.decomm,
+            rx,
+            ry,
+            &inst_evals,
+            &perm_poly_gens.gens_r1cs_eval,
+            &mut transcript5,
+            &mut random_tape5,
+          );
+
+          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+          Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+          proof
+        };
+
+        
+        (inst_evals, r1cs_eval_proof)
+      };
+
+      // Record the prod of each instance
+      let (perm_block_poly_list, proof_eval_perm_block_prod_list) = {
+        let mut perm_block_poly_list = Vec::new();
+        let mut proof_eval_perm_block_prod_list = Vec::new();
+        for p in 0..block_num_instances {
+          let r_len = (block_num_proofs[p] * 4).log_2();
           // Prod is the 3rd entry
-          let mem_addr_poly = mem_addr_w1_prover.poly_w[0][3];
-          let (proof_eval_mem_addr_prod, _comm_mem_addr_prod) = PolyEvalProof::prove(
-            &mem_addr_w1_prover.poly_w[0],
+          let perm_block_poly = perm_block_w3_prover.poly_w[p][3];
+          let (proof_eval_perm_block_prod, _comm_perm_block_prod) = PolyEvalProof::prove(
+            &perm_block_w3_prover.poly_w[p],
             None,
             &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
-            &mem_addr_poly,
+            &perm_block_poly,
             None,
             &vars_gens.gens_pc,
-            &mut transcript[12],
-            &mut random_tape[12],
+            &mut transcript5,
+            &mut random_tape5,
           );
-          (mem_addr_poly, proof_eval_mem_addr_prod)
+          perm_block_poly_list.push(perm_block_poly);
+          proof_eval_perm_block_prod_list.push(proof_eval_perm_block_prod);
+        }
+        (perm_block_poly_list, proof_eval_perm_block_prod_list)
+      };
+      timer_proof.stop();
+
+      // --
+      // PERM_EXEC_ROOT
+      // --
+
+      let timer_proof = Timer::new("Perm Exec Root");
+      let (perm_exec_root_r1cs_sat_proof, perm_exec_root_challenges) = {
+        let (proof, perm_exec_root_challenges) = {
+          R1CSProof::prove(
+            1,
+            consis_num_proofs,
+            &vec![consis_num_proofs],
+            num_ios,
+            4,
+            vec![&perm_w0_prover, &exec_inputs_prover, &perm_exec_w2_prover, &perm_exec_w3_prover],
+            &perm_root_inst.inst,
+            &vars_gens,
+            &mut transcript6,
+            &mut random_tape6,
+          )
         };
-        Some(MemAddrProofs {
-          mem_cohere_r1cs_sat_proof,
-          mem_cohere_inst_evals,
-          mem_cohere_r1cs_eval_proof,
-          
-          mem_addr_comb_r1cs_sat_proof,
-          mem_addr_comb_inst_evals,
-          mem_addr_comb_r1cs_eval_proof,
-          proof_eval_mem_w0_at_zero,
-          proof_eval_mem_w0_at_one,
-    
-          mem_addr_poly_r1cs_sat_proof,
-          mem_addr_poly_inst_evals,
-          mem_addr_poly_r1cs_eval_proof,
-          mem_addr_poly,
-          proof_eval_mem_addr_prod,
-        })
-      } else {
-        None
-      }
-    };
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+        (proof, perm_exec_root_challenges)
+      };
+
+      // Final evaluation on PERM_EXEC_ROOT
+      let (perm_exec_root_inst_evals, perm_exec_root_r1cs_eval_proof) = {
+        let [_, _, rx, ry] = perm_exec_root_challenges;
+        let inst = perm_root_inst;
+        let timer_eval = Timer::new("eval_sparse_polys");
+        let inst_evals = {
+          let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
+          Ar.append_to_transcript(b"Ar_claim", &mut transcript6);
+          Br.append_to_transcript(b"Br_claim", &mut transcript6);
+          Cr.append_to_transcript(b"Cr_claim", &mut transcript6);
+          (Ar, Br, Cr)
+        };
+        timer_eval.stop();
+
+        let r1cs_eval_proof = {
+          let proof = R1CSEvalProof::prove(
+            &perm_root_decomm.decomm,
+            &rx,
+            &ry,
+            &inst_evals,
+            &perm_root_gens.gens_r1cs_eval,
+            &mut transcript6,
+            &mut random_tape6,
+          );
+
+          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+          Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+          proof
+        };
+
+        
+        (inst_evals, r1cs_eval_proof)
+      };
+      timer_proof.stop();
+
+      // --
+      // PERM_EXEC_POLY
+      // --
+
+      let timer_proof = Timer::new("Perm Exec Poly");
+      let (perm_exec_poly_r1cs_sat_proof, perm_exec_poly_challenges) = {
+        let (proof, perm_exec_poly_challenges) = {
+          R1CSProof::prove_single(
+            1,
+            perm_poly_num_cons_base,
+            4,
+            perm_size_bound,
+            consis_num_proofs,
+            &vec![consis_num_proofs],
+            &perm_poly_inst.inst,
+            &vars_gens,
+            4,
+            &perm_exec_w3_prover.w_mat,
+            &perm_exec_w3_prover.poly_w,
+            &mut transcript7,
+            &mut random_tape7,
+          )
+        };
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+        (proof, perm_exec_poly_challenges)
+      };
+
+      // Final evaluation on PERM_EXEC_POLY
+      let (perm_exec_poly_inst_evals, perm_exec_poly_r1cs_eval_proof) = {
+        let [_, rx, ry] = &perm_exec_poly_challenges;
+        let inst = perm_poly_inst;
+        let timer_eval = Timer::new("eval_sparse_polys");
+        let inst_evals = {
+          let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
+          Ar.append_to_transcript(b"Ar_claim", &mut transcript7);
+          Br.append_to_transcript(b"Br_claim", &mut transcript7);
+          Cr.append_to_transcript(b"Cr_claim", &mut transcript7);
+          (Ar, Br, Cr)
+        };
+        timer_eval.stop();
+
+        let r1cs_eval_proof = {
+          let proof = R1CSEvalProof::prove(
+            &perm_poly_decomm.decomm,
+            &rx,
+            &ry,
+            &inst_evals,
+            &perm_poly_gens.gens_r1cs_eval,
+            &mut transcript7,
+            &mut random_tape7,
+          );
+
+          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+          Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+          proof
+        };
+
+        
+        (inst_evals, r1cs_eval_proof)
+      };
+
+      // Record the prod of instance
+      let (perm_exec_poly, proof_eval_perm_exec_prod) = {
+        let r_len = (consis_num_proofs * 4).log_2();
+        // Prod is the 3rd entry
+        let perm_exec_poly = perm_exec_w3_prover.poly_w[0][3];
+        let (proof_eval_perm_exec_prod, _comm_perm_exec_prod) = PolyEvalProof::prove(
+          &perm_exec_w3_prover.poly_w[0],
+          None,
+          &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
+          &perm_exec_poly,
+          None,
+          &vars_gens.gens_pc,
+          &mut transcript7,
+          &mut random_tape7,
+        );
+        (perm_exec_poly, proof_eval_perm_exec_prod)
+      };
+      timer_proof.stop();
+
+      // --
+      // MEM_BLOCK
+      // --
+
+      let mem_block_proofs = {
+        if total_num_mem_accesses_bound > 0 {
+          // --
+          // MEM_EXTRACT
+          // --
+          let timer_proof = Timer::new("Mem Extract");
+          let (mem_extract_r1cs_sat_proof, mem_extract_challenges) = {
+            let (proof, mem_extract_challenges) = {
+              R1CSProof::prove(
+                block_num_instances,
+                block_max_num_proofs,
+                block_num_proofs,
+                addr_block_w3_size,
+                4,
+                vec![&mem_w0_prover, &mem_block_mask_prover, &block_vars_prover, &mem_block_w3_prover],
+                &mem_extract_inst.inst,
+                &vars_gens,
+                &mut transcript8,
+                &mut random_tape8,
+              )
+            };
+      
+            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+            Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+      
+            (proof, mem_extract_challenges)
+          };
+      
+          // Final evaluation on MEM_EXTRACT
+          let (mem_extract_inst_evals, mem_extract_r1cs_eval_proof) = {
+            let [_, _, rx, ry] = mem_extract_challenges;
+            let inst = mem_extract_inst;
+            let timer_eval = Timer::new("eval_sparse_polys");
+            let inst_evals = {
+              let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
+              Ar.append_to_transcript(b"Ar_claim", &mut transcript8);
+              Br.append_to_transcript(b"Br_claim", &mut transcript8);
+              Cr.append_to_transcript(b"Cr_claim", &mut transcript8);
+              (Ar, Br, Cr)
+            };
+            timer_eval.stop();
+      
+            let r1cs_eval_proof = {
+              let proof = R1CSEvalProof::prove(
+                &mem_extract_decomm.decomm,
+                &rx,
+                &ry,
+                &inst_evals,
+                &mem_extract_gens.gens_r1cs_eval,
+                &mut transcript8,
+                &mut random_tape8,
+              );
+      
+              let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+              Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+              proof
+            };
+      
+            
+            (inst_evals, r1cs_eval_proof)
+          };
+          timer_proof.stop();
+
+          // --
+          // MEM_BLOCK_POLY
+          // --
+          let timer_proof = Timer::new("Mem Block Poly");
+          let (mem_block_poly_r1cs_sat_proof, mem_block_poly_challenges) = {
+            let (proof, mem_block_poly_challenges) = {
+              R1CSProof::prove_single(
+                block_num_instances,
+                perm_poly_num_cons_base,
+                4,
+                // We need to feed the compile-time bound because that is the size of the constraints
+                // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
+                perm_size_bound,
+                block_max_num_proofs,
+                &block_num_proofs,
+                &perm_poly_inst.inst,
+                &vars_gens,
+                addr_block_w3_size,
+                &mem_block_w3_prover.w_mat,
+                &mem_block_w3_prover.poly_w,
+                &mut transcript9,
+                &mut random_tape9,
+              )
+            };
+      
+            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+            Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+      
+            (proof, mem_block_poly_challenges)
+          };
+      
+          // Final evaluation on MEM_BLOCK_POLY
+          let (mem_block_poly_inst_evals, mem_block_poly_r1cs_eval_proof) = {
+            let [_, rx, ry] = &mem_block_poly_challenges;
+            let inst = perm_poly_inst;
+            let timer_eval = Timer::new("eval_sparse_polys");
+            let inst_evals = {
+              let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
+              Ar.append_to_transcript(b"Ar_claim", &mut transcript9);
+              Br.append_to_transcript(b"Br_claim", &mut transcript9);
+              Cr.append_to_transcript(b"Cr_claim", &mut transcript9);
+              (Ar, Br, Cr)
+            };
+            timer_eval.stop();
+      
+            let r1cs_eval_proof = {
+              let proof = R1CSEvalProof::prove(
+                &perm_poly_decomm.decomm,
+                &rx,
+                &ry,
+                &inst_evals,
+                &perm_poly_gens.gens_r1cs_eval,
+                &mut transcript9,
+                &mut random_tape9,
+              );
+      
+              let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+              Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+              proof
+            };
+      
+            
+            (inst_evals, r1cs_eval_proof)
+          };
+      
+          // Record the prod of each instance
+          let (mem_block_poly_list, proof_eval_mem_block_prod_list) = {
+            let mut mem_block_poly_list = Vec::new();
+            let mut proof_eval_mem_block_prod_list = Vec::new();
+            for p in 0..block_num_instances {
+              let r_len = (block_num_proofs[p] * addr_block_w3_size).log_2();
+              // Prod is the 3rd entry
+              let mem_block_poly = mem_block_w3_prover.poly_w[p][3];
+              let (proof_eval_mem_block_prod, _comm_mem_block_prod) = PolyEvalProof::prove(
+                &mem_block_w3_prover.poly_w[p],
+                None,
+                &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
+                &mem_block_poly,
+                None,
+                &vars_gens.gens_pc,
+                &mut transcript9,
+                &mut random_tape9,
+              );
+              mem_block_poly_list.push(mem_block_poly);
+              proof_eval_mem_block_prod_list.push(proof_eval_mem_block_prod);
+            }
+            (mem_block_poly_list, proof_eval_mem_block_prod_list)
+          };
+          timer_proof.stop();
+
+          Some(MemBlockProofs {
+            mem_extract_r1cs_sat_proof,
+            mem_extract_inst_evals,
+            mem_extract_r1cs_eval_proof,
+      
+            mem_block_poly_r1cs_sat_proof,
+            mem_block_poly_inst_evals,
+            mem_block_poly_r1cs_eval_proof,
+            mem_block_poly_list,
+            proof_eval_mem_block_prod_list,
+          })
+        } else {
+          None
+        }
+      };
+
+      // --
+      // MEM_ADDR
+      // --
+
+      let mem_addr_proofs = {
+        if total_num_mem_accesses > 0 {
+          // --
+          // MEM_COHERE
+          // --
+          let timer_proof = Timer::new("Mem Cohere");
+          let (mem_cohere_r1cs_sat_proof, mem_cohere_challenges) = {
+            let (proof, mem_cohere_challenges) = {
+              R1CSProof::prove_single(
+                1,
+                mem_cohere_num_cons_base,
+                4,
+                total_num_mem_accesses_bound,
+                total_num_mem_accesses,
+                &vec![total_num_mem_accesses],
+                &mem_cohere_inst.inst,
+                &vars_gens,
+                4,
+                &addr_mems_prover.w_mat,
+                &addr_mems_prover.poly_w,
+                &mut transcript10,
+                &mut random_tape10,
+              )
+            };
+      
+            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+            Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+      
+            (proof, mem_cohere_challenges)
+          };
+      
+          // Final evaluation on MEM_COHERE
+          let (mem_cohere_inst_evals, mem_cohere_r1cs_eval_proof) = {
+            let [_, rx, ry] = &mem_cohere_challenges;
+            let inst = mem_cohere_inst;
+            let timer_eval = Timer::new("eval_sparse_polys");
+            let inst_evals = {
+              let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
+              Ar.append_to_transcript(b"Ar_claim", &mut transcript10);
+              Br.append_to_transcript(b"Br_claim", &mut transcript10);
+              Cr.append_to_transcript(b"Cr_claim", &mut transcript10);
+              (Ar, Br, Cr)
+            };
+            timer_eval.stop();
+      
+            let r1cs_eval_proof = {
+              let proof = R1CSEvalProof::prove(
+                &mem_cohere_decomm.decomm,
+                &rx,
+                &ry,
+                &inst_evals,
+                &mem_cohere_gens.gens_r1cs_eval,
+                &mut transcript10,
+                &mut random_tape10,
+              );
+      
+              let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+              Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+              proof
+            };
+      
+            
+            (inst_evals, r1cs_eval_proof)
+          };
+          timer_proof.stop();
+
+          // --
+          // MEM_ADDR_COMB
+          // --
+          let timer_proof = Timer::new("Mem Addr Comb");
+          let (
+            mem_addr_comb_r1cs_sat_proof, 
+            mem_addr_comb_challenges,
+            proof_eval_mem_w0_at_zero,
+            proof_eval_mem_w0_at_one
+          ) = {
+            let (proof, mem_addr_comb_challenges) = {
+              R1CSProof::prove(
+                1,
+                total_num_mem_accesses,
+                &vec![total_num_mem_accesses],
+                4,
+                4,
+                vec![&mem_w0_prover, &mem_addr_w1_prover, &addr_mems_prover, &mem_addr_w3_prover],
+                &mem_addr_comb_inst.inst,
+                &vars_gens,
+                &mut transcript11,
+                &mut random_tape11,
+              )
+            };
+
+            // Proof that first two entries of mem_w0 are tau and r
+            let ry_len = 2;
+            let (proof_eval_mem_w0_at_zero, _comm_mem_w0_at_zero) = PolyEvalProof::prove(
+              &mem_w0_prover.poly_w[0],
+              None,
+              &vec![ZERO; ry_len],
+              &comb_tau,
+              None,
+              &vars_gens.gens_pc,
+              &mut transcript11,
+              &mut random_tape11,
+            );
+            let (proof_eval_mem_w0_at_one, _comm_mem_w0_at_one) = PolyEvalProof::prove(
+              &mem_w0_prover.poly_w[0],
+              None,
+              &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
+              &comb_r,
+              None,
+              &vars_gens.gens_pc,
+              &mut transcript11,
+              &mut random_tape11,
+            );
+
+            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+            Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+            (proof, mem_addr_comb_challenges, proof_eval_mem_w0_at_zero, proof_eval_mem_w0_at_one)
+          };
+
+          // Final evaluation on MEM_ADDR_COMB
+          let (mem_addr_comb_inst_evals, mem_addr_comb_r1cs_eval_proof) = {
+            let [_, _, rx, ry] = mem_addr_comb_challenges;
+            let inst = mem_addr_comb_inst;
+            let timer_eval = Timer::new("eval_sparse_polys");
+            let inst_evals = {
+              let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
+              Ar.append_to_transcript(b"Ar_claim", &mut transcript11);
+              Br.append_to_transcript(b"Br_claim", &mut transcript11);
+              Cr.append_to_transcript(b"Cr_claim", &mut transcript11);
+              (Ar, Br, Cr)
+            };
+            timer_eval.stop();
+
+            let r1cs_eval_proof = {
+              let proof = R1CSEvalProof::prove(
+                &mem_addr_comb_decomm.decomm,
+                &rx,
+                &ry,
+                &inst_evals,
+                &mem_addr_comb_gens.gens_r1cs_eval,
+                &mut transcript11,
+                &mut random_tape11,
+              );
+
+              let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+              Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+              proof
+            };
+
+            
+            (inst_evals, r1cs_eval_proof)
+          };
+          timer_proof.stop();
+
+          // --
+          // MEM_ADDR_POLY
+          // --
+          let timer_proof = Timer::new("Mem Addr Poly");
+          let (mem_addr_poly_r1cs_sat_proof, mem_addr_poly_challenges) = {
+            let (proof, mem_addr_poly_challenges) = {
+              R1CSProof::prove_single(
+                1,
+                perm_poly_num_cons_base,
+                4,
+                perm_size_bound,
+                total_num_mem_accesses,
+                &vec![total_num_mem_accesses],
+                &perm_poly_inst.inst,
+                &vars_gens,
+                4,
+                &mem_addr_w1_prover.w_mat,
+                &mem_addr_w1_prover.poly_w,
+                &mut transcript12,
+                &mut random_tape12,
+              )
+            };
+
+            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+            Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+            (proof, mem_addr_poly_challenges)
+          };
+
+          // Final evaluation on MEM_ADDR_POLY
+          let (mem_addr_poly_inst_evals, mem_addr_poly_r1cs_eval_proof) = {
+            let [_, rx, ry] = &mem_addr_poly_challenges;
+            let inst = perm_poly_inst;
+            let timer_eval = Timer::new("eval_sparse_polys");
+            let inst_evals = {
+              let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
+              Ar.append_to_transcript(b"Ar_claim", &mut transcript12);
+              Br.append_to_transcript(b"Br_claim", &mut transcript12);
+              Cr.append_to_transcript(b"Cr_claim", &mut transcript12);
+              (Ar, Br, Cr)
+            };
+            timer_eval.stop();
+
+            let r1cs_eval_proof = {
+              let proof = R1CSEvalProof::prove(
+                &perm_poly_decomm.decomm,
+                &rx,
+                &ry,
+                &inst_evals,
+                &perm_poly_gens.gens_r1cs_eval,
+                &mut transcript12,
+                &mut random_tape12,
+              );
+
+              let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+              Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+              proof
+            };
+
+            
+            (inst_evals, r1cs_eval_proof)
+          };
+          timer_proof.stop();
+
+          // Record the prod of instance
+          let (mem_addr_poly, proof_eval_mem_addr_prod) = {
+            let r_len = (total_num_mem_accesses * 4).log_2();
+            // Prod is the 3rd entry
+            let mem_addr_poly = mem_addr_w1_prover.poly_w[0][3];
+            let (proof_eval_mem_addr_prod, _comm_mem_addr_prod) = PolyEvalProof::prove(
+              &mem_addr_w1_prover.poly_w[0],
+              None,
+              &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
+              &mem_addr_poly,
+              None,
+              &vars_gens.gens_pc,
+              &mut transcript12,
+              &mut random_tape12,
+            );
+            (mem_addr_poly, proof_eval_mem_addr_prod)
+          };
+          Some(MemAddrProofs {
+            mem_cohere_r1cs_sat_proof,
+            mem_cohere_inst_evals,
+            mem_cohere_r1cs_eval_proof,
+            
+            mem_addr_comb_r1cs_sat_proof,
+            mem_addr_comb_inst_evals,
+            mem_addr_comb_r1cs_eval_proof,
+            proof_eval_mem_w0_at_zero,
+            proof_eval_mem_w0_at_one,
+      
+            mem_addr_poly_r1cs_sat_proof,
+            mem_addr_poly_inst_evals,
+            mem_addr_poly_r1cs_eval_proof,
+            mem_addr_poly,
+            proof_eval_mem_addr_prod,
+          })
+        } else {
+          None
+        }
+      };
+
+      let (block_r1cs_sat_proof, 
+        block_inst_evals_bound_rp, 
+        block_inst_evals_list, 
+        block_r1cs_eval_proof
+      ) = block_correctness_proof.join().unwrap();
+
+      (
+        block_r1cs_sat_proof,
+        block_inst_evals_bound_rp,
+        block_inst_evals_list,
+        block_r1cs_eval_proof,
+
+        consis_comb_r1cs_sat_proof,
+        consis_comb_inst_evals,
+        consis_comb_r1cs_eval_proof,
+
+        consis_check_r1cs_sat_proof,
+        consis_check_inst_evals,
+        consis_check_r1cs_eval_proof,
+
+        perm_prelim_r1cs_sat_proof,
+        perm_prelim_inst_evals,
+        perm_prelim_r1cs_eval_proof,
+        proof_eval_perm_w0_at_zero,
+        proof_eval_perm_w0_at_one,
+
+        perm_block_root_r1cs_sat_proof,
+        perm_block_root_inst_evals,
+        perm_block_root_r1cs_eval_proof,
+
+        perm_block_poly_r1cs_sat_proof,
+        perm_block_poly_inst_evals,
+        perm_block_poly_r1cs_eval_proof,
+        perm_block_poly_list,
+        proof_eval_perm_block_prod_list,
+
+        perm_exec_root_r1cs_sat_proof,
+        perm_exec_root_inst_evals,
+        perm_exec_root_r1cs_eval_proof,
+
+        perm_exec_poly_r1cs_sat_proof,
+        perm_exec_poly_inst_evals,
+        perm_exec_poly_r1cs_eval_proof,
+        perm_exec_poly,
+        proof_eval_perm_exec_prod,
+
+        mem_block_proofs,
+        mem_addr_proofs
+      )
+    });
 
     // --
     // IO_PROOFS
@@ -5236,8 +5358,8 @@ impl SNARK {
       output,
       output_exec_num,
       vars_gens,
-      &mut transcript[13],
-      &mut random_tape[13]
+      transcript,
+      &mut random_tape
     );
     timer_proof.stop();
 
