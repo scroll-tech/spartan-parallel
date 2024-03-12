@@ -5,7 +5,7 @@
 
 // TODO: Can we allow split in R1CSGens?
 // TODO: Can we parallelize the proofs?
-// TODO: Double check if all public parameters are hashed for F-S
+// TODO: Problem when there is only one block & one execution
 
 extern crate byteorder;
 extern crate core;
@@ -59,8 +59,6 @@ use std::thread;
 
 const ZERO: Scalar = Scalar::zero();
 const ONE: Scalar = Scalar::one();
-// Total number of SNARK proofs
-const NUM_SNARK_PROOFS: usize = 14;
 
 /// `ComputationCommitment` holds a public preprocessed NP statement (e.g., R1CS)
 #[derive(Clone)]
