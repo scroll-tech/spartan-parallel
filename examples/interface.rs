@@ -414,7 +414,7 @@ fn main() {
   // PERM_ROOT
   let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_ios);
   // PERM_POLY for PERM_BLOCK_POLY, PERM_EXEC_POLY, & MEM_ADDR_POLY
-  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound);
+  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound) * 4;
   let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(perm_size_bound, 4);
   println!("Finished Perm");
 

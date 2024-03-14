@@ -203,7 +203,6 @@ impl R1CSProof {
     // How many sections does each Z vector have?
     // num_witness_secs can be 1, 2, 3, or 4
     // if num_witness_secs is 3, w3 is just 0s
-    num_witness_secs: usize,
     // For each witness sec, record the following:
     // IS_SINGLE: does it have just one copy across all blocks?
     // IS_SHORT: does it have only one copy per block? A single witness sect must also be short
@@ -219,6 +218,8 @@ impl R1CSProof {
   ) -> (R1CSProof, [Vec<Scalar>; 4]) { 
     let timer_prove = Timer::new("R1CSProof::prove");
     transcript.append_protocol_name(R1CSProof::protocol_name());
+
+    let num_witness_secs = witness_secs.len();
 
     // Assert everything is a power of 2, except num_instances
     assert_eq!(max_num_proofs, max_num_proofs.next_power_of_two());
@@ -575,7 +576,6 @@ impl R1CSProof {
     // How many sections does each Z vector have?
     // num_witness_secs can be 1, 2, 3, or 4
     // if num_witness_secs is 3, w3 is just 0s
-    num_witness_secs: usize,
     // For each witness sec, record the following:
     // IS_SINGLE: does it have just one copy across all blocks?
     // IS_SHORT: does it have only one copy per block? A single witness sect must also be short
@@ -590,6 +590,8 @@ impl R1CSProof {
     transcript: &mut Transcript,
   ) -> Result<[Vec<Scalar>; 4], ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
+
+    let num_witness_secs = witness_secs.len();
 
     // Assert num_witness_secs is valid
     assert!(num_witness_secs >= 1 && num_witness_secs <= 4);
@@ -817,9 +819,9 @@ impl R1CSProof {
 
     inst: &R1CSInstance,
     gens: &R1CSGens,
-    // The actual input size of the witness
+    // The actual input size of the witness, can be different per proof
     // Currently only support w_input_size >= base_input_size
-    w_input_size: usize,
+    w_input_size: &Vec<usize>,
     w_mat: &Vec<Vec<Vec<Scalar>>>,
     poly_w_list: &Vec<DensePolynomial>,
     transcript: &mut Transcript,
@@ -836,16 +838,17 @@ impl R1CSProof {
     assert!(num_proofs <= input_rows.len());
     assert_eq!(base_input_size, base_input_size.next_power_of_two());
     assert_eq!(max_input_rows, max_input_rows.next_power_of_two());
+    assert_eq!(w_input_size.len(), num_proofs);
     assert_eq!(w_mat.len(), num_proofs);
     assert!(inst.get_num_cons() >= max_input_rows * base_constraint_size);
-    assert!(w_input_size >= base_input_size);
     for i in 0..num_proofs {
       let input = input_rows[i];
       assert!(input <= max_input_rows);
       assert_eq!(input, input.next_power_of_two());
       assert_eq!(w_mat[i].len(), input);
+      assert!(w_input_size[i] >= base_input_size);
       for j in 0..input {
-        assert_eq!(w_mat[i][j].len(), w_input_size);
+        assert_eq!(w_mat[i][j].len(), w_input_size[i]);
       }
     }
     assert!(max_input_rows <= max_input_rows_bound);
@@ -871,6 +874,7 @@ impl R1CSProof {
     // derive the verifier's challenge tau
     let (num_rounds_p, num_rounds_q, num_rounds_xb, num_rounds_yb) = 
       (num_proofs.next_power_of_two().log_2(), max_input_rows.log_2(), base_constraint_size.log_2(), base_input_size.log_2());
+      
     let tau_p = transcript.challenge_vector(b"challenge_tau_p", num_rounds_p);
     let tau_q = transcript.challenge_vector(b"challenge_tau_q", num_rounds_q);
     let tau_xb = transcript.challenge_vector(b"challenge_tau_x", num_rounds_xb);
@@ -965,6 +969,7 @@ impl R1CSProof {
     // Separate the result rx into rp, rq, and rx
     let (rx, rq_rev) = rx.split_at(num_rounds_xb);
     let (rq_rev, rp) = rq_rev.split_at(num_rounds_q);
+
     let rx = [rq_rev.iter().copied().rev().collect(), rx.to_vec()].concat();
     let rp = rp.to_vec();
 
@@ -1007,6 +1012,7 @@ impl R1CSProof {
     // Here we have p length-q*y Z, want to bind to rp
     let mut n = num_proofs.next_power_of_two() / 2;
     let mut z_list = z_list.clone();
+  
     for r in &rp {
       for p in 0..n {
         for x in 0..z_list[p].len() {
@@ -1055,9 +1061,9 @@ impl R1CSProof {
     let mut comm_vars_at_ry_list = Vec::new();
     let timer_polyeval = Timer::new("polyeval");
 
-    // If w_input_size > base_input_size, need to pad 0 at the front of ry (but after rq)
-    let ry_pad = &vec![ZERO; w_input_size.log_2() - base_input_size.log_2()];
     for p in 0..num_proofs {
+      // If w_input_size > base_input_size, need to pad 0 at the front of ry (but after rq)
+      let ry_pad = &vec![ZERO; w_input_size[p].log_2() - base_input_size.log_2()];
       let combined_poly = &poly_w_list[p];
       // Size of input_rows[p] decides how many digits of rq will be used
       let rq_short = &rq[num_rounds_q - input_rows[p].log_2()..];
@@ -1153,7 +1159,7 @@ impl R1CSProof {
 
     gens: &R1CSGens,
     evals: &(Scalar, Scalar, Scalar),
-    w_input_size: usize,
+    w_input_size: &Vec<usize>,
     // Commitment for witnesses
     comm_w_list: &Vec<PolyCommitment>,
     transcript: &mut Transcript,
@@ -1266,9 +1272,9 @@ impl R1CSProof {
 
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
-    // If w_input_size > base_input_size, need to pad 0 at the front of ry (but after rq)
-    let ry_pad = &vec![ZERO; w_input_size.log_2() - base_input_size.log_2()];
     for p in 0..num_proofs {
+      // If w_input_size > base_input_size, need to pad 0 at the front of ry (but after rq)
+      let ry_pad = &vec![ZERO; w_input_size[p].log_2() - base_input_size.log_2()];
       // Size of input_rows[p] decides how many digits of rq will be used
       let rq_short = &rq[num_rounds_q - input_rows[p].log_2()..];
       let r = &[rq_short, ry_pad, &ry_short].concat();
