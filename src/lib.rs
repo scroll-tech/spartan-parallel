@@ -581,7 +581,6 @@ pub struct SNARK {
   consis_comm_w2: Vec<PolyCommitment>,
   consis_comm_w3: Vec<PolyCommitment>,
   mem_block_comm_w3_list: Vec<PolyCommitment>,
-  mem_comm_w0: Vec<PolyCommitment>,
   mem_addr_comm_w1: Vec<PolyCommitment>,
   mem_addr_comm_w3: Vec<PolyCommitment>,
 
@@ -645,8 +644,6 @@ struct MemAddrProofs {
   mem_addr_comb_r1cs_sat_proof: R1CSProof,
   mem_addr_comb_inst_evals: (Scalar, Scalar, Scalar),
   mem_addr_comb_r1cs_eval_proof: R1CSEvalProof,
-  proof_eval_mem_w0_at_zero: PolyEvalProof,
-  proof_eval_mem_w0_at_one: PolyEvalProof,
 }
 
 // Sort block_num_proofs and record where each entry is
@@ -1244,8 +1241,6 @@ impl SNARK {
 
     // Memory-per-block
     let (
-      mem_w0_prover,
-      mem_comm_w0,
       mem_block_w3_prover,
       mem_block_comm_w3_list
     ) = {
@@ -1253,16 +1248,6 @@ impl SNARK {
         // mask is unary representation of block_num_mem_accesses[p]
         let zero = ZERO;
         let one = ONE;
-
-        // mem_w0 is (tau, r, 0, 0)
-        // We don't use perm_w0 because we want mem_w0 to have width 4
-        let mem_w0 = vec![comb_tau, comb_r, ZERO, ZERO];
-        // create a multilinear polynomial using the supplied assignment for variables
-        let mem_poly_w0 = DensePolynomial::new(mem_w0.clone());
-        // produce a commitment to the satisfying assignment
-        let (mem_comm_w0, _blinds_vars) = mem_poly_w0.commit(&vars_gens.gens_pc, None);
-        // add the commitment to the prover's transcript
-        mem_comm_w0.append_to_transcript(b"poly_commitment", transcript);
 
         // w3 is (v, x, pi, D, MR, MD, MC, MR, MR, MC, ...)
         let mut mem_block_w3 = Vec::new();
@@ -1324,19 +1309,14 @@ impl SNARK {
           mem_block_comm_w3_list.push(mem_block_comm_w3);
         }
 
-        let mem_w0_prover = ProverWitnessSecInfo::new(vec![vec![mem_w0]], vec![mem_poly_w0]);
         let mem_block_w3_prover = ProverWitnessSecInfo::new(mem_block_w3, mem_block_poly_w3_list);
 
         (
-          mem_w0_prover,
-          vec![mem_comm_w0],
           mem_block_w3_prover,
           mem_block_comm_w3_list
         )
       } else {
         (
-          ProverWitnessSecInfo::dummy(),
-          Vec::new(),
           ProverWitnessSecInfo::dummy(),
           Vec::new()
         )
@@ -1807,7 +1787,7 @@ impl SNARK {
               block_max_num_proofs,
               block_num_proofs,
               addr_block_w3_size,
-              vec![&mem_w0_prover, &mem_block_mask_prover, &block_vars_prover, &mem_block_w3_prover],
+              vec![&perm_w0_prover, &mem_block_mask_prover, &block_vars_prover, &mem_block_w3_prover],
               &mem_extract_inst.inst,
               &vars_gens,
               transcript,
@@ -1943,8 +1923,6 @@ impl SNARK {
         let (
           mem_addr_comb_r1cs_sat_proof, 
           mem_addr_comb_challenges,
-          proof_eval_mem_w0_at_zero,
-          proof_eval_mem_w0_at_one
         ) = {
           let (proof, mem_addr_comb_challenges) = {
             R1CSProof::prove(
@@ -1952,7 +1930,7 @@ impl SNARK {
               total_num_mem_accesses,
               &vec![total_num_mem_accesses],
               4,
-              vec![&mem_w0_prover, &mem_addr_w1_prover, &addr_mems_prover, &mem_addr_w3_prover],
+              vec![&perm_w0_prover, &mem_addr_w1_prover, &addr_mems_prover, &mem_addr_w3_prover],
               &mem_addr_comb_inst.inst,
               &vars_gens,
               transcript,
@@ -1960,33 +1938,10 @@ impl SNARK {
             )
           };
 
-          // Proof that first two entries of mem_w0 are tau and r
-          let ry_len = 2;
-          let (proof_eval_mem_w0_at_zero, _comm_mem_w0_at_zero) = PolyEvalProof::prove(
-            &mem_w0_prover.poly_w[0],
-            None,
-            &vec![ZERO; ry_len],
-            &comb_tau,
-            None,
-            &vars_gens.gens_pc,
-            transcript,
-            &mut random_tape,
-          );
-          let (proof_eval_mem_w0_at_one, _comm_mem_w0_at_one) = PolyEvalProof::prove(
-            &mem_w0_prover.poly_w[0],
-            None,
-            &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
-            &comb_r,
-            None,
-            &vars_gens.gens_pc,
-            transcript,
-            &mut random_tape,
-          );
-
           let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
           Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-          (proof, mem_addr_comb_challenges, proof_eval_mem_w0_at_zero, proof_eval_mem_w0_at_one)
+          (proof, mem_addr_comb_challenges)
         };
 
         // Final evaluation on MEM_ADDR_COMB
@@ -2032,8 +1987,6 @@ impl SNARK {
           mem_addr_comb_r1cs_sat_proof,
           mem_addr_comb_inst_evals,
           mem_addr_comb_r1cs_eval_proof,
-          proof_eval_mem_w0_at_zero,
-          proof_eval_mem_w0_at_one,
         })
       } else {
         None
@@ -2177,7 +2130,6 @@ impl SNARK {
       consis_comm_w3,
 
       mem_block_comm_w3_list,
-      mem_comm_w0,
       mem_addr_comm_w1,
       mem_addr_comm_w3,
 
@@ -2470,24 +2422,14 @@ impl SNARK {
       )
     };
 
-    let (
-      mem_w0_verifier,
-      mem_block_w3_verifier
-    ) = {
+    let mem_block_w3_verifier = {
       if total_num_mem_accesses_bound > 0 {
-        self.mem_comm_w0[0].append_to_transcript(b"poly_commitment", transcript);
         for p in 0..block_num_instances {
           self.mem_block_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
         }
-        (
-          VerifierWitnessSecInfo::new(true, vec![4], &vec![1], &self.mem_comm_w0),
-          VerifierWitnessSecInfo::new(false, vec![addr_block_w3_size; block_num_instances], &block_num_proofs, &self.mem_block_comm_w3_list),
-        )
+        VerifierWitnessSecInfo::new(false, vec![addr_block_w3_size; block_num_instances], &block_num_proofs, &self.mem_block_comm_w3_list)
       } else {
-        (
-          VerifierWitnessSecInfo::dummy(),
-          VerifierWitnessSecInfo::dummy(),
-        )
+        VerifierWitnessSecInfo::dummy()
       }
     };
 
@@ -2738,7 +2680,7 @@ impl SNARK {
           block_max_num_proofs,
           block_num_proofs,
           addr_block_w3_size,
-          vec![&mem_w0_verifier, &mem_block_mask_verifier, &block_vars_verifier, &mem_block_w3_verifier],
+          vec![&perm_w0_verifier, &mem_block_mask_verifier, &block_vars_verifier, &mem_block_w3_verifier],
           mem_extract_num_cons,
           &vars_gens,
           &mem_block_proofs.mem_extract_inst_evals,
@@ -2818,27 +2760,11 @@ impl SNARK {
             total_num_mem_accesses,
             &vec![total_num_mem_accesses],
             4,
-            vec![&mem_w0_verifier, &mem_addr_w1_verifier, &addr_mems_verifier, &mem_addr_w3_verifier],
+            vec![&perm_w0_verifier, &mem_addr_w1_verifier, &addr_mems_verifier, &mem_addr_w3_verifier],
             mem_addr_comb_num_cons,
             &vars_gens,
             &mem_addr_proofs.mem_addr_comb_inst_evals,
             transcript,
-          )?;
-          // Proof that first two entries of mem_w0 are tau and r
-          let ry_len = 2;
-          mem_addr_proofs.proof_eval_mem_w0_at_zero.verify_plain(
-            &vars_gens.gens_pc,
-            transcript,
-            &vec![ZERO; ry_len],
-            &comb_tau,
-            &self.mem_comm_w0[0],
-          )?;
-          mem_addr_proofs.proof_eval_mem_w0_at_one.verify_plain(
-            &vars_gens.gens_pc,
-            transcript,
-            &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
-            &comb_r,
-            &self.mem_comm_w0[0],
           )?;
           timer_sat_proof.stop();
 

@@ -598,7 +598,7 @@ impl Instance {
   /// Input composition: 
   ///           Challenges                            Masks                              Vars                                   W3
   /// 0   1   2   3   4   5   6   7   |   0   1   2   3   4   5   6   7   |   0   1   2   3   4   5   6   7    |  0   1   2   3     4   5   6   7
-  /// tau r   _   _   _   _   _   _   |   1   1   0   0   _   _   _   _   |   w   A0  V0  A1  V1  Z0  Z1 ...   |  v   x  pi   D  | MR  MD  MC  MR ...
+  /// tau r  r^2  _   _   _   _   _   |   1   1   0   0   _   _   _   _   |   w   A0  V0  A1  V1  Z0  Z1 ...   |  v   x  pi   D  | MR  MD  MC  MR ...
   ///
   /// All memory accesses should be in the form (A0, V0, A1, V1, ...) at the front of the witnesses
   /// Mask is the unary representation of L
