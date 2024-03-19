@@ -745,57 +745,6 @@ impl Instance {
     (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst)
   }
 
-  /// Generates MEM_ADDR_COMB instance based on parameters
-  /// MEM_ADDR_COMB converts (v, _, addr, val) to (v, x, pi, D)
-  pub fn gen_mem_addr_comb_inst() -> (usize, usize, Instance) {
-    let mem_addr_comb_num_cons = 3;
-    let mem_addr_comb_num_non_zero_entries = 5;
-    
-    let mem_addr_comb_inst = {
-      let mut A_list = Vec::new();
-      let mut B_list = Vec::new();
-      let mut C_list = Vec::new();
-
-      // Input width is 4!
-      let width = 4;
-      // 0   1   2   3  |  0   1   2   3  |  0   1   2   3  |  0   1   2   3
-      // tau r   _   _  |  v   _ addr val |  MR  _   _   _  |  v   x  pi   D
-      let V_tau = 0;
-      let V_r = 1;
-      let V_valid = width;
-      let V_addr = width + 2;
-      let V_val = width + 3;
-      let V_MR = 2 * width;
-      let V_v = 3 * width;
-      let V_x = 3 * width + 1;
-
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-
-        // MR = r * val
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          0, vec![(V_r, 1)], vec![(V_val, 1)], vec![(V_MR, 1)]);
-        // w3[0] = v
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          1, vec![], vec![], vec![(V_v, 1), (V_valid, -1)]);
-        // w3[1] = x = v * (tau - addr - MR)
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          2, vec![(V_v, 1)], vec![(V_tau, 1), (V_addr, -1), (V_MR, -1)], vec![(V_x, 1)]);
-        (A, B, C)
-      };
-
-      A_list.push(A);
-      B_list.push(B);
-      C_list.push(C);
-
-      let mem_addr_comb_inst = Instance::new(1, mem_addr_comb_num_cons, 4 * width, &A_list, &B_list, &C_list).unwrap();
-      mem_addr_comb_inst
-    };
-    (mem_addr_comb_num_cons, mem_addr_comb_num_non_zero_entries, mem_addr_comb_inst)
-  }
-
   /*
   /// Checks if a given R1CSInstance is satisfiable with a given variables and inputs assignments
   pub fn is_sat(

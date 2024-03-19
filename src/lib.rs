@@ -644,10 +644,6 @@ struct MemAddrProofs {
   mem_cohere_r1cs_sat_proof: R1CSProof,
   mem_cohere_inst_evals: (Scalar, Scalar, Scalar),
   mem_cohere_r1cs_eval_proof: R1CSEvalProof,
-
-  mem_addr_comb_r1cs_sat_proof: R1CSProof,
-  mem_addr_comb_inst_evals: (Scalar, Scalar, Scalar),
-  mem_addr_comb_r1cs_eval_proof: R1CSEvalProof,
 }
 
 // Sort block_num_proofs and record where each entry is
@@ -783,11 +779,6 @@ impl SNARK {
     mem_cohere_decomm: &ComputationDecommitment,
     mem_cohere_gens: &SNARKGens,
 
-    mem_addr_comb_inst: &Instance,
-    mem_addr_comb_comm: &ComputationCommitment,
-    mem_addr_comb_decomm: &ComputationDecommitment,
-    mem_addr_comb_gens: &SNARKGens,
-
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
     exec_inputs_list: Vec<InputsAssignment>,
@@ -878,7 +869,6 @@ impl SNARK {
     perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_cohere_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
 
     // Commit io
     input_block_num.append_to_transcript(b"input_block_num", transcript);
@@ -1318,12 +1308,12 @@ impl SNARK {
       mem_addr_comm_w3
     ) = {
       if total_num_mem_accesses > 0 {
-        // mem_addr_w2 is (MR, _, _, _)
+        // mem_addr_w2 is (_, _, addr, r * val)
         let mut mem_addr_w2 = Vec::new();
         for q in 0..total_num_mem_accesses {
           mem_addr_w2.push(vec![ZERO; 4]);
-          // MR = r * val
-          mem_addr_w2[q][0] = comb_r * addr_mems_list[q][3];
+          mem_addr_w2[q][2] = addr_mems_list[q][2];
+          mem_addr_w2[q][3] = comb_r * addr_mems_list[q][3];
         }
         // mem_addr_w3 is (v, x, pi, D) 
         let mut mem_addr_w3 = vec![vec![ZERO; 4]; total_num_mem_accesses];
@@ -1696,67 +1686,6 @@ impl SNARK {
     timer_proof.stop();
 
     // --
-    // PERM_BLOCK_ROOT & PERM_EXEC_ROOT
-    // --
-    let timer_proof = Timer::new("Perm Root");
-    let inputs_prover = ProverWitnessSecInfo::concat(&exec_inputs_prover, &block_inputs_prover);
-    let (perm_root_r1cs_sat_proof, perm_root_challenges) = {
-      let (proof, perm_root_challenges) = {
-        R1CSProof::prove(
-          block_num_instances + 1,
-          consis_num_proofs,
-          &perm_num_proofs,
-          num_ios,
-          vec![&perm_w0_prover, &inputs_prover, &perm_w2_prover, &perm_w3_prover],
-          &perm_root_inst.inst,
-          &vars_gens,
-          transcript,
-          &mut random_tape,
-        )
-      };
-
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-      (proof, perm_root_challenges)
-    };
-
-    // Final evaluation on PERM_BLOCK_ROOT
-    let (perm_root_inst_evals, perm_root_r1cs_eval_proof) = {
-      let [_, _, rx, ry] = perm_root_challenges;
-      let inst = perm_root_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-        Ar.append_to_transcript(b"Ar_claim", transcript);
-        Br.append_to_transcript(b"Br_claim", transcript);
-        Cr.append_to_transcript(b"Cr_claim", transcript);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &perm_root_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals,
-          &perm_root_gens.gens_r1cs_eval,
-          transcript,
-          &mut random_tape,
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
-      };
-
-      
-      (inst_evals, r1cs_eval_proof)
-    };
-    timer_proof.stop();
-
-    // --
     // MEM_BLOCK
     // --
 
@@ -1902,82 +1831,83 @@ impl SNARK {
         };
         timer_proof.stop();
 
-        // --
-        // MEM_ADDR_COMB
-        // --
-        let timer_proof = Timer::new("Mem Addr Comb");
-        let (
-          mem_addr_comb_r1cs_sat_proof, 
-          mem_addr_comb_challenges,
-        ) = {
-          let (proof, mem_addr_comb_challenges) = {
-            R1CSProof::prove(
-              1,
-              total_num_mem_accesses,
-              &vec![total_num_mem_accesses],
-              4,
-              vec![&perm_w0_prover, &addr_mems_prover, &mem_addr_w2_prover, &mem_addr_w3_prover],
-              &mem_addr_comb_inst.inst,
-              &vars_gens,
-              transcript,
-              &mut random_tape,
-            )
-          };
-
-          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-          (proof, mem_addr_comb_challenges)
-        };
-
-        // Final evaluation on MEM_ADDR_COMB
-        let (mem_addr_comb_inst_evals, mem_addr_comb_r1cs_eval_proof) = {
-          let [_, _, rx, ry] = mem_addr_comb_challenges;
-          let inst = mem_addr_comb_inst;
-          let timer_eval = Timer::new("eval_sparse_polys");
-          let inst_evals = {
-            let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-            Ar.append_to_transcript(b"Ar_claim", transcript);
-            Br.append_to_transcript(b"Br_claim", transcript);
-            Cr.append_to_transcript(b"Cr_claim", transcript);
-            (Ar, Br, Cr)
-          };
-          timer_eval.stop();
-
-          let r1cs_eval_proof = {
-            let proof = R1CSEvalProof::prove(
-              &mem_addr_comb_decomm.decomm,
-              &rx,
-              &ry,
-              &inst_evals,
-              &mem_addr_comb_gens.gens_r1cs_eval,
-              transcript,
-              &mut random_tape,
-            );
-
-            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-            proof
-          };
-
-          
-          (inst_evals, r1cs_eval_proof)
-        };
-        timer_proof.stop();
-
         Some(MemAddrProofs {
           mem_cohere_r1cs_sat_proof,
           mem_cohere_inst_evals,
           mem_cohere_r1cs_eval_proof,
-          
-          mem_addr_comb_r1cs_sat_proof,
-          mem_addr_comb_inst_evals,
-          mem_addr_comb_r1cs_eval_proof,
         })
       } else {
         None
       }
     };
+
+    // --
+    // PERM_BLOCK_ROOT, PERM_EXEC_ROOT, MEM_ADDR_ROOT
+    // --
+    let perm_size = max(consis_num_proofs, total_num_mem_accesses);
+
+    let timer_proof = Timer::new("Perm Root");
+    let perm_root_num_instances = block_num_instances + 2;
+    let (perm_root_w1_prover, _) = ProverWitnessSecInfo::merge(vec![&exec_inputs_prover, &block_inputs_prover, &addr_mems_prover]);
+    let (perm_root_w2_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_w2_prover, &mem_addr_w2_prover]);
+    let (perm_root_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_w3_prover, &mem_addr_w3_prover]);
+    let mut perm_root_num_proofs: Vec<usize> = perm_root_w1_prover.w_mat.iter().map(|i| i.len()).collect();
+    perm_root_num_proofs.extend(vec![1; perm_root_num_instances.next_power_of_two() - perm_root_num_instances]);
+    let (perm_root_r1cs_sat_proof, perm_root_challenges) = {
+      let (proof, perm_root_challenges) = {
+        R1CSProof::prove(
+          perm_root_num_instances,
+          perm_size,
+          &perm_root_num_proofs,
+          num_ios,
+          vec![&perm_w0_prover, &perm_root_w1_prover, &perm_root_w2_prover, &perm_root_w3_prover],
+          &perm_root_inst.inst,
+          &vars_gens,
+          transcript,
+          &mut random_tape,
+        )
+      };
+
+      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+
+      (proof, perm_root_challenges)
+    };
+
+    // Final evaluation on PERM_ROOT
+    let (perm_root_inst_evals, perm_root_r1cs_eval_proof) = {
+      let [_, _, rx, ry] = perm_root_challenges;
+      let inst = perm_root_inst;
+      let timer_eval = Timer::new("eval_sparse_polys");
+      let inst_evals = {
+        let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        (Ar, Br, Cr)
+      };
+      timer_eval.stop();
+
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &perm_root_decomm.decomm,
+          &rx,
+          &ry,
+          &inst_evals,
+          &perm_root_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
+
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
+
+      
+      (inst_evals, r1cs_eval_proof)
+    };
+    timer_proof.stop();
 
     // --
     // PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY, MEM_ADDR_POLY
@@ -1986,7 +1916,6 @@ impl SNARK {
     let timer_proof = Timer::new("Perm Mem Poly");
     let (perm_mem_w3_prover, inst_map) = ProverWitnessSecInfo::merge(vec![&perm_w3_prover, &mem_block_w3_prover, &mem_addr_w3_prover]);
     let perm_mem_num_instances = perm_mem_w3_prover.w_mat.len();
-    let perm_mem_size = max(consis_num_proofs, total_num_mem_accesses);
     let mut perm_mem_num_proofs: Vec<usize> = perm_mem_w3_prover.w_mat.iter().map(|i| i.len()).collect();
     perm_mem_num_proofs.extend(vec![1; perm_mem_num_instances.next_power_of_two() - perm_mem_num_instances]);
     // mem_block has size addr_block_w3_size, everything else takes size 4
@@ -2000,7 +1929,7 @@ impl SNARK {
           // We need to feed the compile-time bound because that is the size of the constraints
           // Unlike other instances, where the runtime bound is sufficient because that's the number of copies
           perm_size_bound,
-          perm_mem_size,
+          perm_size,
           &perm_mem_num_proofs,
           &perm_poly_inst.inst,
           &vars_gens,
@@ -2213,10 +2142,6 @@ impl SNARK {
     mem_cohere_comm: &ComputationCommitment,
     mem_cohere_gens: &SNARKGens,
 
-    mem_addr_comb_num_cons: usize,
-    mem_addr_comb_comm: &ComputationCommitment,
-    mem_addr_comb_gens: &SNARKGens,
-
     mem_block_comm_mask_list: &Vec<PolyCommitment>,
 
     vars_gens: &R1CSGens,
@@ -2284,7 +2209,6 @@ impl SNARK {
       perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
       mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
       mem_cohere_comm.comm.append_to_transcript(b"consis_comm", transcript);
-      mem_addr_comb_comm.comm.append_to_transcript(b"block_comm", transcript);
 
       // Commit io
       input_block_num.append_to_transcript(b"input_block_num", transcript);
@@ -2610,43 +2534,6 @@ impl SNARK {
     }
 
     // --
-    // PERM_BLOCK_ROOT & PERM_EXEC_ROOT
-    // --
-    let inputs_verifier = VerifierWitnessSecInfo::concat(&exec_inputs_verifier, &block_inputs_verifier);
-    {
-      let timer_sat_proof = Timer::new("Perm Root Sat");
-      let perm_block_root_challenges = self.perm_root_r1cs_sat_proof.verify(
-        block_num_instances + 1,
-        consis_num_proofs,
-        &perm_num_proofs,
-        num_ios,
-        vec![&perm_w0_verifier, &inputs_verifier, &perm_w2_verifier, &perm_w3_verifier],
-        perm_root_num_cons,
-        &vars_gens,
-        &self.perm_root_inst_evals,
-        transcript,
-      )?;
-      timer_sat_proof.stop();
-
-      let timer_eval_proof = Timer::new("Perm Root Eval");
-      // Verify Evaluation on PERM_BLOCK_ROOT
-      let (Ar, Br, Cr) = &self.perm_root_inst_evals;
-      Ar.append_to_transcript(b"Ar_claim", transcript);
-      Br.append_to_transcript(b"Br_claim", transcript);
-      Cr.append_to_transcript(b"Cr_claim", transcript);
-      let [_, _, rx, ry] = perm_block_root_challenges;
-      self.perm_root_r1cs_eval_proof.verify(
-        &perm_root_comm.comm,
-        &rx,
-        &ry,
-        &self.perm_root_inst_evals,
-        &perm_root_gens.gens_r1cs_eval,
-        transcript,
-      )?;
-      timer_eval_proof.stop();
-    }
-
-    // --
     // MEM_BLOCK and MEM_ADDR
     // --
     if total_num_mem_accesses_bound > 0 {
@@ -2731,44 +2618,52 @@ impl SNARK {
           )?;
           timer_eval_proof.stop();
         };
-
-        // --
-        // MEM_ADDR_COMB
-        // --
-        {
-          let timer_sat_proof = Timer::new("Mem Addr Comb Sat");
-          let mem_addr_comb_challenges = mem_addr_proofs.mem_addr_comb_r1cs_sat_proof.verify(
-            1,
-            total_num_mem_accesses,
-            &vec![total_num_mem_accesses],
-            4,
-            vec![&perm_w0_verifier, &addr_mems_verifier, &mem_addr_w2_verifier, &mem_addr_w3_verifier],
-            mem_addr_comb_num_cons,
-            &vars_gens,
-            &mem_addr_proofs.mem_addr_comb_inst_evals,
-            transcript,
-          )?;
-          timer_sat_proof.stop();
-
-          let timer_eval_proof = Timer::new("Mem Addr Comb Eval");
-          // Verify Evaluation on PERM_EXEC_ROOT
-          let (Ar, Br, Cr) = &mem_addr_proofs.mem_addr_comb_inst_evals;
-          Ar.append_to_transcript(b"Ar_claim", transcript);
-          Br.append_to_transcript(b"Br_claim", transcript);
-          Cr.append_to_transcript(b"Cr_claim", transcript);
-          let [_, _, rx, ry] = mem_addr_comb_challenges;
-          mem_addr_proofs.mem_addr_comb_r1cs_eval_proof.verify(
-            &mem_addr_comb_comm.comm,
-            &rx,
-            &ry,
-            &mem_addr_proofs.mem_addr_comb_inst_evals,
-            &mem_addr_comb_gens.gens_r1cs_eval,
-            transcript,
-          )?;
-          timer_eval_proof.stop();
-        }
       }
     }
+
+    // --
+    // PERM_BLOCK_ROOT, PERM_EXEC_ROOT, MEM_ADDR_ROOT
+    // --
+    let perm_size = max(consis_num_proofs, total_num_mem_accesses);
+    {
+      let timer_sat_proof = Timer::new("Perm Root Sat");
+      let perm_root_num_instances = block_num_instances + 2;
+      let (perm_root_w1_verifier, _) = VerifierWitnessSecInfo::merge(vec![&exec_inputs_verifier, &block_inputs_verifier, &addr_mems_verifier]);
+      let (perm_root_w2_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_w2_verifier, &mem_addr_w2_verifier]);
+      let (perm_root_w3_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_w3_verifier, &mem_addr_w3_verifier]);
+      let mut perm_root_num_proofs: Vec<usize> = perm_root_w1_verifier.num_proofs.clone();
+      perm_root_num_proofs.extend(vec![1; perm_root_num_instances.next_power_of_two() - perm_root_num_instances]);
+      let perm_block_root_challenges = self.perm_root_r1cs_sat_proof.verify(
+        perm_root_num_instances,
+        perm_size,
+        &perm_root_num_proofs,
+        num_ios,
+        vec![&perm_w0_verifier, &perm_root_w1_verifier, &perm_root_w2_verifier, &perm_root_w3_verifier],
+        perm_root_num_cons,
+        &vars_gens,
+        &self.perm_root_inst_evals,
+        transcript,
+      )?;
+      timer_sat_proof.stop();
+
+      let timer_eval_proof = Timer::new("Perm Root Eval");
+      // Verify Evaluation on PERM_BLOCK_ROOT
+      let (Ar, Br, Cr) = &self.perm_root_inst_evals;
+      Ar.append_to_transcript(b"Ar_claim", transcript);
+      Br.append_to_transcript(b"Br_claim", transcript);
+      Cr.append_to_transcript(b"Cr_claim", transcript);
+      let [_, _, rx, ry] = perm_block_root_challenges;
+      self.perm_root_r1cs_eval_proof.verify(
+        &perm_root_comm.comm,
+        &rx,
+        &ry,
+        &self.perm_root_inst_evals,
+        &perm_root_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      timer_eval_proof.stop();
+    }
+
 
     // --
     // PERM_BLOCK_POLY, PERM_EXEC_POLY, MEM_BLOCK_POLY, MEM_ADDR_POLY
@@ -2780,7 +2675,6 @@ impl SNARK {
         vec![&perm_w3_verifier, &mem_block_w3_verifier, &mem_addr_w3_verifier]
       );
       let perm_mem_num_instances = perm_mem_w3_verifier.num_proofs.len();
-      let perm_mem_size = max(consis_num_proofs, total_num_mem_accesses);
       let mut perm_mem_num_proofs: Vec<usize> = perm_mem_w3_verifier.num_proofs;
       perm_mem_num_proofs.extend(vec![1; perm_mem_num_instances.next_power_of_two() - perm_mem_num_instances]);
       // mem_block has size addr_block_w3_size, everything else takes size 4
@@ -2791,7 +2685,7 @@ impl SNARK {
         perm_poly_num_cons_base,
         4,
         perm_size_bound,
-        perm_mem_size,
+        perm_size,
         &perm_mem_num_proofs,
         &vars_gens,
         &self.perm_mem_poly_inst_evals,

@@ -424,8 +424,6 @@ fn main() {
   let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(addr_block_w3_size, max_block_num_mem_accesses);
   // MEM_COHERE
   let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound_padded);
-  // MEM_ADDR_COMB
-  let (mem_addr_comb_num_cons, mem_addr_comb_num_non_zero_entries, mem_addr_comb_inst) = Instance::gen_mem_addr_comb_inst();
   println!("Finished Mem");
 
   // --
@@ -445,7 +443,6 @@ fn main() {
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * addr_block_w3_size, 1, mem_extract_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
-  let mem_addr_comb_gens = SNARKGens::new(mem_addr_comb_num_cons, 4 * 4, 1, mem_addr_comb_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   let vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   
@@ -462,7 +459,6 @@ fn main() {
   println!("Finished Perm");
   let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
   let (mem_cohere_comm, mem_cohere_decomm) = SNARK::encode(&mem_cohere_inst, &mem_cohere_gens);
-  let (mem_addr_comb_comm, mem_addr_comb_decomm) = SNARK::encode(&mem_addr_comb_inst, &mem_addr_comb_gens);
   println!("Finished Mem");
 
   // Mask vector for mem_extract
@@ -549,11 +545,6 @@ fn main() {
     &mem_cohere_decomm,
     &mem_cohere_gens,
 
-    &mem_addr_comb_inst,
-    &mem_addr_comb_comm,
-    &mem_addr_comb_decomm,
-    &mem_addr_comb_gens,
-
     block_vars_matrix,
     block_inputs_matrix,
     rtk.exec_inputs,
@@ -619,9 +610,6 @@ fn main() {
     mem_cohere_num_cons_base,
     &mem_cohere_comm,
     &mem_cohere_gens,
-    mem_addr_comb_num_cons,
-    &mem_addr_comb_comm,
-    &mem_addr_comb_gens,
 
     &mem_block_mask_comm_list,
 

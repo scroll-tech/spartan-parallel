@@ -15,4 +15,5 @@ writeups/backend_overview/*
 writeups/spartan_parallel/*
 !writeups/backend_overview/*.tex
 !writeups/spartan_parallel/*.tex
+!writeups/runtime_comparison/*.txt
 .DS_Store
