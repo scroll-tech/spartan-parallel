@@ -1360,7 +1360,11 @@ impl SNARK {
     let block_vars_prover = ProverWitnessSecInfo::new(block_vars_mat, block_poly_vars_list);
     let block_inputs_prover = ProverWitnessSecInfo::new(block_inputs_mat, block_poly_inputs_list);
     let exec_inputs_prover = ProverWitnessSecInfo::new(vec![exec_inputs_list], exec_poly_inputs);
-    let addr_mems_prover = ProverWitnessSecInfo::new(vec![addr_mems_list], addr_poly_mems);
+    let addr_mems_prover = if total_num_mem_accesses_bound > 0 {
+      ProverWitnessSecInfo::new(vec![addr_mems_list], addr_poly_mems)
+    } else {
+      ProverWitnessSecInfo::dummy()
+    };
     let mem_block_mask_prover = ProverWitnessSecInfo::new(mem_block_mask, mem_block_poly_mask_list);
 
     // --
@@ -1655,10 +1659,10 @@ impl SNARK {
     let perm_size = max(consis_num_proofs, total_num_mem_accesses);
 
     let timer_proof = Timer::new("Perm Root");
-    let perm_root_num_instances = block_num_instances + 2;
     let (perm_root_w1_prover, _) = ProverWitnessSecInfo::merge(vec![&exec_inputs_prover, &block_inputs_prover, &addr_mems_prover]);
     let (perm_root_w2_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w2_prover, &perm_block_w2_prover, &mem_addr_w2_prover]);
     let (perm_root_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_w3_prover, &mem_addr_w3_prover]);
+    let perm_root_num_instances = perm_root_w1_prover.w_mat.len();
     let mut perm_root_num_proofs: Vec<usize> = perm_root_w1_prover.w_mat.iter().map(|i| i.len()).collect();
     perm_root_num_proofs.extend(vec![1; perm_root_num_instances.next_power_of_two() - perm_root_num_instances]);
     let (perm_root_r1cs_sat_proof, perm_root_challenges) = {
@@ -2341,10 +2345,10 @@ impl SNARK {
     let perm_size = max(consis_num_proofs, total_num_mem_accesses);
     {
       let timer_sat_proof = Timer::new("Perm Root Sat");
-      let perm_root_num_instances = block_num_instances + 2;
       let (perm_root_w1_verifier, _) = VerifierWitnessSecInfo::merge(vec![&exec_inputs_verifier, &block_inputs_verifier, &addr_mems_verifier]);
       let (perm_root_w2_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w2_verifier, &perm_block_w2_verifier, &mem_addr_w2_verifier]);
       let (perm_root_w3_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_w3_verifier, &mem_addr_w3_verifier]);
+      let perm_root_num_instances = perm_root_w1_verifier.num_proofs.len();
       let mut perm_root_num_proofs: Vec<usize> = perm_root_w1_verifier.num_proofs.clone();
       perm_root_num_proofs.extend(vec![1; perm_root_num_instances.next_power_of_two() - perm_root_num_instances]);
       let perm_block_root_challenges = self.perm_root_r1cs_sat_proof.verify(
