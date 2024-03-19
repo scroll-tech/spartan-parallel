@@ -248,82 +248,10 @@ impl Instance {
     (block_num_cons, block_num_non_zero_entries, block_inst)
   }
 
-  /// Generates CONSIS_COMB instance based on parameters
-  /// CONSIS_COMB takes in 4 witness lists as inputs:
-  /// - perm_w0: <tau, r, r^2, r^3, ...>, see PERM_PRELIM below
-  /// - exec_inputs: <v, 0, i0, i1, i2, ..., o0, o1, o2, ...>
-  /// - consis_w2: <i, o, i0 * r, i1 * r^2, ..., o0 * r, o1 * r^2, ...>
-  ///   where i = v * (v + i0 * r + i1 * r^2 + i2 * r^3 + ...) and o = v * (v + o0 * r + o1 * r^2 + o2 * r^3 + ...)
-  /// Note: if v is 1, it is almost impossible to have i = 0
-  /// Note: Only combine the first num_inputs_unpadded inputs since the rest are unused
-  pub fn gen_consis_comb_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
-    let consis_comb_num_cons = 2 * num_inputs_unpadded + 1;
-    let consis_comb_num_non_zero_entries = 4 * num_inputs_unpadded - 1;
-  
-    let V_valid = num_vars;
-    let V_cnst = V_valid;
-    let r_pow = |i: usize| 1 + i;
-    let V_input = |i: usize| num_vars + 2 + i;
-    let V_output = |i: usize| num_vars + 2 + (num_inputs_unpadded - 1) + i;
-    let V_input_root = 2 * num_vars;
-    let V_output_root = 2 * num_vars + 1;
-    let V_input_dot_prod = |i: usize| 2 * num_vars + 2 + i;
-    let V_output_dot_prod = |i: usize| 2 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
-  
-    let consis_comb_inst = {
-      let mut A_list = Vec::new();
-      let mut B_list = Vec::new();
-      let mut C_list = Vec::new();
-      
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-  
-        let mut constraint_count = 0;
-  
-        // R1CS:
-        // Dot Products
-        for i in 0..num_inputs_unpadded - 1 {
-          // Dot product for inputs
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, vec![(r_pow(i), 1)], vec![(V_input(i), 1)], vec![(V_input_dot_prod(i), 1)]);
-          constraint_count += 1;
-          // Dot product for outputs
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, vec![(r_pow(i), 1)], vec![(V_output(i), 1)], vec![(V_output_dot_prod(i), 1)]);
-          constraint_count += 1;
-        }
-        // I and O
-        (A, B, C) = Instance::gen_constr(A, B, C, // V_input_root
-          constraint_count, 
-          vec![(V_valid, 1)], 
-          [vec![(V_cnst, 1)], (0..num_inputs_unpadded - 1).map(|i| (V_input_dot_prod(i), 1)).collect()].concat(),
-          vec![(V_input_root, 1)]
-        );
-        constraint_count += 1;
-        (A, B, C) = Instance::gen_constr(A, B, C, // V_output_root
-          constraint_count, 
-          vec![(V_valid, 1)], 
-          [vec![(V_cnst, 1)], (0..num_inputs_unpadded - 1).map(|i| (V_output_dot_prod(i), 1)).collect()].concat(),
-          vec![(V_output_root, 1)]
-        );
-  
-        (A, B, C)
-      };
-      A_list.push(A);
-      B_list.push(B);
-      C_list.push(C);
-  
-      let consis_comb_inst = Instance::new(1, consis_comb_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
-      
-      consis_comb_inst
-    };
-    (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst)
-  }
-
   /// Generates CONSIS_CHECK instance based on parameters
   /// CONSIS_CHECK takes in consis_w2 = <i, o>
+  /// where i = v * (v + i0 * r + i1 * r^2 + i2 * r^3 + ...) and o = v * (v + o0 * r + o1 * r^2 + o2 * r^3 + ...)
+  /// See perm_root
   /// and verifies (o[k] - i[k + 1]) * i[k + 1] = 0 for all k
   pub fn gen_consis_check_inst(total_num_proofs_bound: usize) -> (usize, usize, Instance) {
     let num_vars = 2;
@@ -406,14 +334,18 @@ impl Instance {
   /// Witnesses of PERM_ROOT is consisted of [w0, w1, w2, w3], each of size num_vars
   /// w0: tau, r, r^2, ...
   /// w1: one block_inputs entry: v, _, i0, i1, ..., o0, o1, ...
-  /// w2: one block_inputs entry dot product <r>: _, _, i0, r * i1, r^2 * i2, r^3 * i3, ...
+  /// w2: one block_inputs entry dot product <r>: I, O, ZO, r * i1, r^2 * i2, r^3 * i3, ...
+  /// where I = v * (v + i0 + r * i1 + r^2 * i2 + ...),
+  ///       ZO * r^n = r^n * o0 + r^(n + 1) * o1, ...,
+  ///       O = v * (v + ZO)
+  /// are used by the consistency check
   /// w3[0]: valid bit, should match block_inputs[0]
   /// w3[1]: one root of the polynomial: v * (tau - i0 - r * i1 - r^2 * i2 - ...)
   /// Note: Only process the first num_inputs_unpadded inputs since the rest are unused
   pub fn gen_perm_root_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
 
-    let perm_root_num_cons = 2 * num_inputs_unpadded + 2;
-    let perm_root_num_non_zero_entries = 4 * num_inputs_unpadded + 2;
+    let perm_root_num_cons = 2 * num_inputs_unpadded + 4;
+    let perm_root_num_non_zero_entries = 4 * num_inputs_unpadded + 1;
     let perm_root_inst = {
       let (A, B, C) = {
         let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -427,16 +359,15 @@ impl Instance {
         let V_cnst = V_valid;
         let V_input = |i: usize| num_vars + 2 + i;
         let V_output = |i: usize| num_vars + 2 + (num_inputs_unpadded - 1) + i;
-        let V_input_dot_prod = |i: usize| 2 * num_vars + 2 + i;
+        let V_I = 2 * num_vars;
+        let V_O = 2 * num_vars + 1;
+        let V_ZO = 2 * num_vars + 2;
+        let V_input_dot_prod = |i: usize| if i == 0 { V_input(0) } else { 2 * num_vars + 2 + i };
         let V_output_dot_prod = |i: usize| 2 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
 
         let mut constraint_count = 0;
   
         // correctness of w2
-        // for i0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          constraint_count, vec![], vec![], vec![(V_input(0), 1), (V_input_dot_prod(0), -1)]);
-        constraint_count += 1;
         // for i1..
         for i in 1..num_inputs_unpadded - 1 {
           (A, B, C) = Instance::gen_constr(A, B, C,
@@ -449,6 +380,30 @@ impl Instance {
             constraint_count, vec![(V_output(i), 1)], vec![(V_r(i + num_inputs_unpadded - 1), 1)], vec![(V_output_dot_prod(i), 1)]);
           constraint_count += 1;
         }
+        // I = v * (v + i0 + r * i1 + r^2 * i2 + ...)
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          constraint_count, 
+          vec![(V_valid, 1)], 
+          [vec![(V_cnst, 1)], (0..num_inputs_unpadded - 1).map(|i| (V_input_dot_prod(i), 1)).collect()].concat(),
+          vec![(V_I, 1)]
+        );
+        constraint_count += 1;
+        // ZO * r^n = r^n * o0 + r^(n + 1) * o1, ...
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          constraint_count, 
+          vec![(V_ZO, 1)], 
+          vec![(V_r(num_inputs_unpadded - 1), 1)],
+          (0..num_inputs_unpadded - 1).map(|i| (V_output_dot_prod(i), 1)).collect()
+        );
+        constraint_count += 1;
+        // O = v * (v + ZO)
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          constraint_count, 
+          vec![(V_valid, 1)], 
+          vec![(V_valid, 1), (V_ZO, 1)],
+          vec![(V_O, 1)]
+        );
+        constraint_count += 1;
         // correctness of w3[0]
         (A, B, C) = Instance::gen_constr(A, B, C, 
           constraint_count, vec![], vec![], vec![(V_cnst, 1), (3 * num_vars, -1)]);

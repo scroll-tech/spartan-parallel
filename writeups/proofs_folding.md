@@ -1,5 +1,4 @@
-## Overview
-This document records the method to fold `mem_addr_comb` into `perm_root`.
+# Folding `mem_addr_comb` into `perm_root`
 
 ## Original Approach
 Originally, `perm_root` takes in the following witnesses:
@@ -24,7 +23,7 @@ In which we note:
 3. `x` matches with the corresponding root in `mem_extract`, and we restrict that the value of `x` must be able to obtain using one additional witness (in our case, w2[0])
 4. w3 must be of form `v, x, _, _`, whereas content of w2 is unrestricted
 
-## Folding `mem_addr_comb` into `perm_root`
+## Folding
 If we try to apply `perm_root` on a memory entry to form w3 = `v, x, _, _`, we encounter the following problems:
 1. `D` will be included in w3, which we don't want
 2. Even if we remove `D`, x = `v * (tau - valid - r * addr - r^2 * val)`, which cannot be expressed using one additional variable, as we need either:
@@ -39,3 +38,35 @@ With the new `x` we can rewrite memory entry as `valid, D, addr, val`, so a root
 ```
 x = valid * (tau - addr - r * val)
 ```
+
+# Folding `consis_comb` into `perm_root`
+
+The above transformation allows us to perform another proof folding: `consis_comb` into `perm_root`
+
+## Original Approach
+After the previous folding, `consis_comb` takes in the following witnesses:
+* w0: challenges, `tau, r, r^2, ...`
+* w1: one block_inputs entry, `v, _, i0, i1, ..., o0, o1, ...`
+* **consis_w2**: one block_inputs entry dot product <r>, `i, o, i0, r * i1, r^2 * i2, ..., o0, r * o1, r^2 * o2, ...`
+
+where `i = v * (v + i0 + r * i1 + r^2 * i2 + ...)` and `o = v * (v + o0 + r * o1 + r^2 * o2 + ...)` are the only witnesses used elsewhere
+
+Note:
+* If `v = 0`, then soundness requires `i = 0` and `o = 0`
+* If `v != 0`, then soundness requires `i != 0` and `o != 0`
+* The above construction satisfies the requirement because `v` can only be 0 or 1, and block correctness restricts `i0` & `o0` to never be -1
+
+## Folding
+
+We note that w2 for `consis_comb` is extremely similar to w2 of `perm_root`, which is expressed as
+* **perm_root_w2**: `_, _, i0, r * i1, r^2 * i2, ..., r^n * o0, r^(n + 1) * o1, ...`, where `n` is the size of the input
+
+Observe that we don't really need `i0` to appear in w2, so we can three empty slots at the front of perm_root_w2.
+
+The only thing left is to add `i` and `o` to perm_root_w2 and assert:
+1. `i = v * (v + i0 + r * i1 + r^2 * i2 + ...)`
+2. `Zo * r^n = r^n * o0 + r^(n + 1) * o1, ...`
+3. `o = v * (v + Zo)`
+
+So, with three additional constraints, we can use perm_root_w2 to express consis_w2:
+* **perm_root_w2**: `i, o, Zo, r * i1, r^2 * i2, ..., r^n * o0, r^(n + 1) * o1, ...`, where `n` is the size of the input

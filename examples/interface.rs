@@ -390,25 +390,11 @@ fn main() {
   println!("Finished Block");
 
   // CONSIS INSTANCES
-  // CONSIS is consisted of two instances
-  // CONSIS_COMB performs random linear combination on inputs and outputs to a single value
-  // It is parallelized for consis_num_proofs copies
-  // CONSIS_CHECK checks that these values indeed matches
-  // There is only one copy for CONSIS_CHECK
-  // CONSIS_COMB
-  let (consis_comb_num_cons, consis_comb_num_non_zero_entries, consis_comb_inst) = Instance::gen_consis_comb_inst(num_inputs_unpadded, num_ios);
   // CONSIS_CHECK
   let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(total_num_proofs_bound);
   println!("Finished Consis");
 
   // PERM INSTANCES
-  // PERM is consisted of four instances
-  // PERM_PRELIM checks the correctness of (r, r^2, ...)
-  // PERM_ROOT and PERM_BLOCK_POLY compute the polynomial defined by block_inputs
-  // PERM_ROOT and PERM_EXEC_POLY compute the polynomial defined by exec_inputs
-  // Finally, the verifier checks that the two products are the same
-  // The product is defined by PROD = \prod(\tau - (\sum_i a_i * r^{i-1}))
-  // There is only one proof
   // PERM_PRELIM
   let (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst) = Instance::gen_perm_prelim_inst(num_inputs_unpadded, num_ios);
   // PERM_ROOT
@@ -436,7 +422,6 @@ fn main() {
 
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, 2 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
-  let consis_comb_gens = SNARKGens::new(consis_comb_num_cons, 4 * num_ios, 1, consis_comb_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * 4, 1, consis_check_num_non_zero_entries);
   let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_ios, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
@@ -450,7 +435,6 @@ fn main() {
   println!("Comitting Circuits...");
   let (block_comm, block_decomm) = SNARK::multi_encode(&block_inst, &block_gens);
   println!("Finished Block");
-  let (consis_comb_comm, consis_comb_decomm) = SNARK::encode(&consis_comb_inst, &consis_comb_gens);
   let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
   println!("Finished Consis");
   let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
@@ -507,10 +491,6 @@ fn main() {
     &block_gens,
     
     rtk.consis_num_proofs,
-    &consis_comb_inst,
-    &consis_comb_comm,
-    &consis_comb_decomm,
-    &consis_comb_gens,
     consis_check_num_cons_base,
     &consis_check_inst,
     &consis_check_comm,
@@ -584,9 +564,6 @@ fn main() {
     &block_gens,
 
     rtk.consis_num_proofs, 
-    consis_comb_num_cons, 
-    &consis_comb_comm,
-    &consis_comb_gens,
     consis_check_num_cons_base, 
     &consis_check_comm,
     &consis_check_gens,
