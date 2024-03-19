@@ -251,7 +251,7 @@ impl Instance {
   /// Generates CONSIS_COMB instance based on parameters
   /// CONSIS_COMB takes in 4 witness lists as inputs:
   /// - perm_w0: <tau, r, r^2, r^3, ...>, see PERM_PRELIM below
-  /// - exec_inputs: <v, i0, i1, i2, ..., 0, o0, o1, o2, ...>
+  /// - exec_inputs: <v, 0, i0, i1, i2, ..., o0, o1, o2, ...>
   /// - consis_w2: <i, o, i0 * r, i1 * r^2, ..., o0 * r, o1 * r^2, ...>
   ///   where i = v * (v + i0 * r + i1 * r^2 + i2 * r^3 + ...) and o = v * (v + o0 * r + o1 * r^2 + o2 * r^3 + ...)
   /// Note: if v is 1, it is almost impossible to have i = 0
@@ -263,8 +263,8 @@ impl Instance {
     let V_valid = num_vars;
     let V_cnst = V_valid;
     let r_pow = |i: usize| 1 + i;
-    let V_input = |i: usize| num_vars + 1 + i;
-    let V_output = |i: usize| num_vars + 1 + (num_inputs_unpadded - 1) + 1 + i;
+    let V_input = |i: usize| num_vars + 2 + i;
+    let V_output = |i: usize| num_vars + 2 + (num_inputs_unpadded - 1) + i;
     let V_input_root = 2 * num_vars;
     let V_output_root = 2 * num_vars + 1;
     let V_input_dot_prod = |i: usize| 2 * num_vars + 2 + i;
@@ -405,10 +405,10 @@ impl Instance {
   /// Generates PERM_ROOT instance based on parameters
   /// Witnesses of PERM_ROOT is consisted of [w0, w1, w2, w3], each of size num_vars
   /// w0: tau, r, r^2, ...
-  /// w1: one block_inputs entry: i0, i1, ...
-  /// w2: one block_inputs entry dot product <r>: i0, i1 * r, i2 * r^2, i3 * r^3, ...
+  /// w1: one block_inputs entry: v, _, i0, i1, ..., o0, o1, ...
+  /// w2: one block_inputs entry dot product <r>: _, _, i0, r * i1, r^2 * i2, r^3 * i3, ...
   /// w3[0]: valid bit, should match block_inputs[0]
-  /// w3[1]: one root of the polynomial: (tau - (i0 + i1 * r + i2 * r^2 - ...)), 0 if invalid
+  /// w3[1]: one root of the polynomial: v * (tau - i0 - r * i1 - r^2 * i2 - ...)
   /// Note: Only process the first num_inputs_unpadded inputs since the rest are unused
   pub fn gen_perm_root_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
 
@@ -423,10 +423,12 @@ impl Instance {
         let V_tau = 0;
         // V_r(0) == tau and should be skipped!
         let V_r = |i: usize| i;
-        let V_input = |i: usize| num_vars + i;
-        let V_output = |i: usize| num_vars + num_inputs_unpadded + i;
-        let V_input_dot_prod = |i: usize| 2 * num_vars + i;
-        let V_output_dot_prod = |i: usize| 2 * num_vars + num_inputs_unpadded + i;
+        let V_valid = num_vars;
+        let V_cnst = V_valid;
+        let V_input = |i: usize| num_vars + 2 + i;
+        let V_output = |i: usize| num_vars + 2 + (num_inputs_unpadded - 1) + i;
+        let V_input_dot_prod = |i: usize| 2 * num_vars + 2 + i;
+        let V_output_dot_prod = |i: usize| 2 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
 
         let mut constraint_count = 0;
   
@@ -436,20 +438,20 @@ impl Instance {
           constraint_count, vec![], vec![], vec![(V_input(0), 1), (V_input_dot_prod(0), -1)]);
         constraint_count += 1;
         // for i1..
-        for i in 1..num_inputs_unpadded {
+        for i in 1..num_inputs_unpadded - 1 {
           (A, B, C) = Instance::gen_constr(A, B, C,
             constraint_count, vec![(V_input(i), 1)], vec![(V_r(i), 1)], vec![(V_input_dot_prod(i), 1)]);
           constraint_count += 1;
         }
         // for o0, o1..
-        for i in 0..num_inputs_unpadded {
+        for i in 0..num_inputs_unpadded - 1 {
           (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, vec![(V_output(i), 1)], vec![(V_r(i + num_inputs_unpadded), 1)], vec![(V_output_dot_prod(i), 1)]);
+            constraint_count, vec![(V_output(i), 1)], vec![(V_r(i + num_inputs_unpadded - 1), 1)], vec![(V_output_dot_prod(i), 1)]);
           constraint_count += 1;
         }
         // correctness of w3[0]
         (A, B, C) = Instance::gen_constr(A, B, C, 
-          constraint_count, vec![], vec![], vec![(num_vars, 1), (3 * num_vars, -1)]);
+          constraint_count, vec![], vec![], vec![(V_cnst, 1), (3 * num_vars, -1)]);
         constraint_count += 1;
         // correctness of w3[1]
         (A, B, C) = Instance::gen_constr(A, B, C, constraint_count,
@@ -671,7 +673,7 @@ impl Instance {
   }
 
   /// Generates MEM_COHERE instance based on parameters
-  /// MEM_COHERE takes in addr_mem = <v, addr, val, D>
+  /// MEM_COHERE takes in addr_mem = <v, D, addr, val>
   /// and verifies that
   /// 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
   /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
@@ -685,9 +687,9 @@ impl Instance {
     let mem_cohere_inst = {
       let V_valid = 0;
       let V_cnst = V_valid;
-      let V_addr = 1;
-      let V_val = 2;
-      let V_D = 3;
+      let V_D = 1;
+      let V_addr = 2;
+      let V_val = 3;
       let width = 4;
   
       let mut A_list = Vec::new();
@@ -744,7 +746,7 @@ impl Instance {
   }
 
   /// Generates MEM_ADDR_COMB instance based on parameters
-  /// MEM_ADDR_COMB converts (v, addr, val, _) to (v, x, pi, D)
+  /// MEM_ADDR_COMB converts (v, _, addr, val) to (v, x, pi, D)
   pub fn gen_mem_addr_comb_inst() -> (usize, usize, Instance) {
     let mem_addr_comb_num_cons = 3;
     let mem_addr_comb_num_non_zero_entries = 5;
@@ -756,16 +758,16 @@ impl Instance {
 
       // Input width is 4!
       let width = 4;
-      // 0   1   2   3 | 0   1   2   3 | 0   1   2   3 | 0   1   2   3
-      // tau r   _   _ | v   x  pi   D | v addr val  _ | MR  _   _   _
+      // 0   1   2   3  |  0   1   2   3  |  0   1   2   3  |  0   1   2   3
+      // tau r   _   _  |  v   _ addr val |  MR  _   _   _  |  v   x  pi   D
       let V_tau = 0;
       let V_r = 1;
-      let V_v = width;
-      let V_x = width + 1;
-      let V_valid = 2 * width;
-      let V_addr = 2 * width + 1;
-      let V_val = 2 * width + 2;
-      let V_MR = 3 * width;
+      let V_valid = width;
+      let V_addr = width + 2;
+      let V_val = width + 3;
+      let V_MR = 2 * width;
+      let V_v = 3 * width;
+      let V_x = 3 * width + 1;
 
       let (A, B, C) = {
         let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -775,10 +777,10 @@ impl Instance {
         // MR = r * val
         (A, B, C) = Instance::gen_constr(A, B, C,
           0, vec![(V_r, 1)], vec![(V_val, 1)], vec![(V_MR, 1)]);
-        // w1[0] = v
+        // w3[0] = v
         (A, B, C) = Instance::gen_constr(A, B, C,
           1, vec![], vec![], vec![(V_v, 1), (V_valid, -1)]);
-        // w1[1] = x = v * (tau - addr - MR)
+        // w3[1] = x = v * (tau - addr - MR)
         (A, B, C) = Instance::gen_constr(A, B, C,
           2, vec![(V_v, 1)], vec![(V_tau, 1), (V_addr, -1), (V_MR, -1)], vec![(V_x, 1)]);
         (A, B, C)
