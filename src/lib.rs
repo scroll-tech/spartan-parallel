@@ -380,28 +380,6 @@ impl ProverWitnessSecInfo {
     }
   }
 
-  // Concatnate two ProverWitnessSec without checking for correctness
-  fn concat(left: &ProverWitnessSecInfo, right: &ProverWitnessSecInfo) -> ProverWitnessSecInfo {
-    // If either is dummy, return the other one
-    if left.num_inputs.len() == 0 { return right.clone(); }
-    else if right.num_inputs.len() == 0 { return left.clone(); }
-    assert!(!left.is_single);
-    assert!(!right.is_single);
-    assert_eq!(left.is_short, right.is_short);
-    let is_single = false;
-    let is_short = left.is_short;
-    let num_inputs = [left.num_inputs.clone(), right.num_inputs.clone()].concat();
-    let w_mat = [left.w_mat.clone(), right.w_mat.clone()].concat();
-    let poly_w = [left.poly_w.clone(), right.poly_w.clone()].concat();
-    ProverWitnessSecInfo {
-      is_single,
-      is_short,
-      num_inputs,
-      w_mat,
-      poly_w,
-    }
-  }
-
   // Merge multiple ProverWitnessSec, sort them by decreasing number of proofs
   // Assume all components are sorted
   // Returns: 1. the merged ProverWitnessSec, 
@@ -495,29 +473,6 @@ impl VerifierWitnessSecInfo {
     }
   }
 
-  // Concatnate two VerifierWitnessSec without checking for correctness
-  fn concat(left: &VerifierWitnessSecInfo, right: &VerifierWitnessSecInfo) -> VerifierWitnessSecInfo {
-    // If either is dummy, return the other one
-    if left.num_inputs.len() == 0 { return right.clone(); }
-    else if right.num_inputs.len() == 0 { return left.clone(); }
-    
-    assert!(!left.is_single);
-    assert!(!right.is_single);
-    assert_eq!(left.is_short, right.is_short);
-    let is_single = false;
-    let is_short = left.is_short;
-    let num_inputs = [left.num_inputs.clone(), right.num_inputs.clone()].concat();
-    let num_proofs = [left.num_proofs.clone(), right.num_proofs.clone()].concat();
-    let comm_w = [left.comm_w.clone(), right.comm_w.clone()].concat();
-    VerifierWitnessSecInfo {
-      is_single,
-      is_short,
-      num_inputs,
-      num_proofs,
-      comm_w,
-    }
-  }
-
   // Merge multiple VerifierWitnessSec, sort them by decreasing number of proofs
   // Assume all components are sorted
   // Returns: 1. the merged VerifierWitnessSec, 
@@ -580,7 +535,6 @@ pub struct SNARK {
   exec_comm_inputs: Vec<PolyCommitment>,
   addr_comm_mems: Vec<PolyCommitment>,
 
-  perm_comm_w0: Vec<PolyCommitment>,
   perm_exec_comm_w2_list: Vec<PolyCommitment>,
   perm_block_comm_w2_list: Vec<PolyCommitment>,
   perm_comm_w3_list: Vec<PolyCommitment>,
@@ -596,12 +550,6 @@ pub struct SNARK {
   consis_check_r1cs_sat_proof: R1CSProof,
   consis_check_inst_evals: (Scalar, Scalar, Scalar),
   consis_check_r1cs_eval_proof: R1CSEvalProof,
-
-  perm_prelim_r1cs_sat_proof: R1CSProof,
-  perm_prelim_inst_evals: (Scalar, Scalar, Scalar),
-  perm_prelim_r1cs_eval_proof: R1CSEvalProof,
-  proof_eval_perm_w0_at_zero: PolyEvalProof,
-  proof_eval_perm_w0_at_one: PolyEvalProof,
 
   perm_root_r1cs_sat_proof: R1CSProof,
   perm_root_inst_evals: (Scalar, Scalar, Scalar),
@@ -740,11 +688,6 @@ impl SNARK {
     consis_check_decomm: &ComputationDecommitment,
     consis_check_gens: &SNARKGens,
 
-    perm_prelim_inst: &Instance,
-    perm_prelim_comm: &ComputationCommitment,
-    perm_prelim_decomm: &ComputationDecommitment,
-    perm_prelim_gens: &SNARKGens,
-
     perm_root_inst: &Instance,
     perm_root_comm: &ComputationCommitment,
     perm_root_decomm: &ComputationDecommitment,
@@ -854,7 +797,6 @@ impl SNARK {
       c.comm.append_to_transcript(b"block_comm", transcript);
     }
     consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    perm_prelim_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
     mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
@@ -1044,7 +986,6 @@ impl SNARK {
       comb_tau,
       comb_r,
       perm_w0_prover,
-      perm_comm_w0,
       perm_exec_w2_prover,
       perm_exec_comm_w2_list,
       perm_block_w2_prover,
@@ -1224,7 +1165,6 @@ impl SNARK {
         comb_r,
 
         perm_w0_prover,
-        vec![perm_comm_w0],
         perm_exec_w2_prover,
         vec![perm_exec_comm_w2],
         perm_block_w2_prover,
@@ -1539,101 +1479,6 @@ impl SNARK {
           &ry,
           &inst_evals,
           &consis_check_gens.gens_r1cs_eval,
-          transcript,
-          &mut random_tape,
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
-      };
-
-      
-      (inst_evals, r1cs_eval_proof)
-    };
-    timer_proof.stop();
-
-    // --
-    // PERM_PRELIM
-    // --
-
-    let timer_proof = Timer::new("Perm Prelim");
-    let (
-      perm_prelim_r1cs_sat_proof, 
-      perm_prelim_challenges,
-      proof_eval_perm_w0_at_zero,
-      proof_eval_perm_w0_at_one
-    ) = {
-      let (proof, perm_prelim_challenges) = {
-        R1CSProof::prove(
-          1,
-          1,
-          &vec![1],
-          num_ios,
-          vec![&perm_w0_prover],
-          &perm_prelim_inst.inst,
-          &vars_gens,
-          transcript,
-          &mut random_tape,
-        )
-      };
-
-      // Proof that first two entries of perm_w0 are tau and r
-      let ry_len = perm_prelim_challenges[3].len();
-      let (proof_eval_perm_w0_at_zero, _comm_perm_w0_at_zero) = PolyEvalProof::prove(
-        &perm_w0_prover.poly_w[0],
-        None,
-        &vec![ZERO; ry_len],
-        &comb_tau,
-        None,
-        &vars_gens.gens_pc,
-        transcript,
-        &mut random_tape,
-      );
-      let (proof_eval_perm_w0_at_one, _comm_perm_w0_at_one) = PolyEvalProof::prove(
-        &perm_w0_prover.poly_w[0],
-        None,
-        &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
-        &comb_r,
-        None,
-        &vars_gens.gens_pc,
-        transcript,
-        &mut random_tape,
-      );
-      
-      let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-      Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-
-      (
-        proof, 
-        perm_prelim_challenges,
-        proof_eval_perm_w0_at_zero,
-        proof_eval_perm_w0_at_one
-      )
-    };
-
-    // Final evaluation on PERM_PRELIM
-    let (perm_prelim_inst_evals, perm_prelim_r1cs_eval_proof) = {
-      let [rp, _, rx, ry] = perm_prelim_challenges;
-      let rx = [rp, rx].concat();
-      let inst = perm_prelim_inst;
-      let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(&rx, &ry);
-        Ar.append_to_transcript(b"Ar_claim", transcript);
-        Br.append_to_transcript(b"Br_claim", transcript);
-        Cr.append_to_transcript(b"Cr_claim", transcript);
-        (Ar, Br, Cr)
-      };
-      timer_eval.stop();
-
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &perm_prelim_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals,
-          &perm_prelim_gens.gens_r1cs_eval,
           transcript,
           &mut random_tape,
         );
@@ -2000,7 +1845,6 @@ impl SNARK {
       exec_comm_inputs,
       addr_comm_mems,
 
-      perm_comm_w0,
       perm_exec_comm_w2_list,
       perm_block_comm_w2_list,
       perm_comm_w3_list,
@@ -2017,12 +1861,6 @@ impl SNARK {
       consis_check_r1cs_sat_proof,
       consis_check_inst_evals,
       consis_check_r1cs_eval_proof,
-
-      perm_prelim_r1cs_sat_proof,
-      perm_prelim_inst_evals,
-      perm_prelim_r1cs_eval_proof,
-      proof_eval_perm_w0_at_zero,
-      proof_eval_perm_w0_at_one,
 
       perm_root_r1cs_sat_proof,
       perm_root_inst_evals,
@@ -2072,10 +1910,6 @@ impl SNARK {
     consis_check_num_cons_base: usize,
     consis_check_comm: &ComputationCommitment,
     consis_check_gens: &SNARKGens,
-
-    perm_prelim_num_cons: usize,
-    perm_prelim_comm: &ComputationCommitment,
-    perm_prelim_gens: &SNARKGens,
 
     perm_root_num_cons: usize,
     perm_root_comm: &ComputationCommitment,
@@ -2157,7 +1991,6 @@ impl SNARK {
         c.comm.append_to_transcript(b"block_comm", transcript);
       }
       consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
-      perm_prelim_comm.comm.append_to_transcript(b"block_comm", transcript);
       perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
       perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
       mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
@@ -2267,7 +2100,21 @@ impl SNARK {
       perm_block_w2_verifier,
       perm_w3_verifier,
     ) = {
-      self.perm_comm_w0[0].append_to_transcript(b"poly_commitment", transcript);
+      // Let the verifier generate perm_w0 itself
+      let mut perm_w0 = vec![comb_tau];
+      let mut r_tmp = comb_r;
+      for _ in 1..2 * num_inputs_unpadded {
+        perm_w0.push(r_tmp);
+        r_tmp *= comb_r;
+      }
+      perm_w0.extend(vec![Scalar::zero(); num_ios - 2 * num_inputs_unpadded]);
+      // create a multilinear polynomial using the supplied assignment for variables
+      let perm_poly_w0 = DensePolynomial::new(perm_w0.clone());
+      // produce a commitment to the satisfying assignment
+      let (perm_comm_w0, _blinds_vars) = perm_poly_w0.commit(&vars_gens.gens_pc, None);
+      // add the commitment to the prover's transcript
+      perm_comm_w0.append_to_transcript(b"poly_commitment", transcript);
+
       self.perm_exec_comm_w2_list[0].append_to_transcript(b"poly_commitment", transcript);
       for p in 0..block_num_instances {
         self.perm_block_comm_w2_list[p].append_to_transcript(b"poly_commitment", transcript);
@@ -2276,7 +2123,7 @@ impl SNARK {
         self.perm_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
       }
       (
-        VerifierWitnessSecInfo::new(true, vec![num_ios], &vec![1], &self.perm_comm_w0),
+        VerifierWitnessSecInfo::new(true, vec![num_ios], &vec![1], &vec![perm_comm_w0]),
         VerifierWitnessSecInfo::new(false, vec![num_ios], &vec![consis_num_proofs], &self.perm_exec_comm_w2_list),
         VerifierWitnessSecInfo::new(false, vec![num_ios; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w2_list),
         VerifierWitnessSecInfo::new(false, vec![4; block_num_instances + 1], &perm_num_proofs.clone(), &self.perm_comm_w3_list),
@@ -2399,58 +2246,6 @@ impl SNARK {
       )?;
       timer_eval_proof.stop();
     };
-
-    // --
-    // PERM_PRELIM
-    // --
-    {
-      let timer_sat_proof = Timer::new("Perm Prelim Sat");
-      let perm_prelim_challenges = self.perm_prelim_r1cs_sat_proof.verify(
-        1,
-        1,
-        &vec![1],
-        num_ios,
-        vec![&perm_w0_verifier],
-        perm_prelim_num_cons,
-        &vars_gens,
-        &self.perm_prelim_inst_evals,
-        transcript,
-      )?;
-      // Proof that first two entries of perm_w0 are tau and r
-      let ry_len = perm_prelim_challenges[3].len();
-      self.proof_eval_perm_w0_at_zero.verify_plain(
-        &vars_gens.gens_pc,
-        transcript,
-        &vec![ZERO; ry_len],
-        &comb_tau,
-        &self.perm_comm_w0[0],
-      )?;
-      self.proof_eval_perm_w0_at_one.verify_plain(
-        &vars_gens.gens_pc,
-        transcript,
-        &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
-        &comb_r,
-        &self.perm_comm_w0[0],
-      )?;
-      timer_sat_proof.stop();
-
-      let timer_eval_proof = Timer::new("Perm Prelim Eval");
-      // Verify Evaluation on PERM_PRELIM
-      let (Ar, Br, Cr) = &self.perm_prelim_inst_evals;
-      Ar.append_to_transcript(b"Ar_claim", transcript);
-      Br.append_to_transcript(b"Br_claim", transcript);
-      Cr.append_to_transcript(b"Cr_claim", transcript);
-      let [rp, _, rx, ry] = perm_prelim_challenges;
-      self.perm_prelim_r1cs_eval_proof.verify(
-        &perm_prelim_comm.comm,
-        &[rp, rx].concat(),
-        &ry,
-        &self.perm_prelim_inst_evals,
-        &perm_prelim_gens.gens_r1cs_eval,
-        transcript,
-      )?;
-      timer_eval_proof.stop();
-    }
 
     // --
     // MEM_BLOCK and MEM_ADDR

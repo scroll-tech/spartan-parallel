@@ -294,42 +294,6 @@ impl Instance {
     (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst)
   }
 
-  /// Generates PERM_PRELIM instance based on parameters
-  /// PERM_PRELIM checks the correctness of (r, r^2, ...)
-  /// Only need to generate the first 2 * num_inputs_unpadded entries
-  pub fn gen_perm_prelim_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
-
-    let perm_prelim_num_cons = 2 * num_inputs_unpadded - 2;
-    let perm_prelim_num_non_zero_entries = 2 * num_inputs_unpadded - 2;
-    let perm_prelim_inst = {
-      let mut A_list = Vec::new();
-      let mut B_list = Vec::new();
-      let mut C_list = Vec::new();
-  
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-  
-        let V_r = 1;
-  
-        for i in 2..2 * num_inputs_unpadded {
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            i - 2, vec![(i - 1, 1)], vec![(V_r, 1)], vec![(i, 1)]);
-        }
-        (A, B, C)
-      };
-  
-      A_list.push(A);
-      B_list.push(B);
-      C_list.push(C);
-  
-      let perm_block_inst = Instance::new(1, perm_prelim_num_cons, num_vars, &A_list, &B_list, &C_list).unwrap();
-      perm_block_inst
-    };
-    (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst)
-  }
-
   /// Generates PERM_ROOT instance based on parameters
   /// Witnesses of PERM_ROOT is consisted of [w0, w1, w2, w3], each of size num_vars
   /// w0: tau, r, r^2, ...

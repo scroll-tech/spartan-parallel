@@ -395,8 +395,6 @@ fn main() {
   println!("Finished Consis");
 
   // PERM INSTANCES
-  // PERM_PRELIM
-  let (perm_prelim_num_cons, perm_prelim_num_non_zero_entries, perm_prelim_inst) = Instance::gen_perm_prelim_inst(num_inputs_unpadded, num_ios);
   // PERM_ROOT
   let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_ios);
   // PERM_POLY for PERM_BLOCK_POLY, PERM_EXEC_POLY, & MEM_ADDR_POLY
@@ -423,7 +421,6 @@ fn main() {
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, 2 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * 4, 1, consis_check_num_non_zero_entries);
-  let perm_prelim_gens = SNARKGens::new(perm_prelim_num_cons, num_ios, 1, perm_prelim_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * addr_block_w3_size, 1, mem_extract_num_non_zero_entries);
@@ -437,7 +434,6 @@ fn main() {
   println!("Finished Block");
   let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
   println!("Finished Consis");
-  let (perm_prelim_comm, perm_prelim_decomm) = SNARK::encode(&perm_prelim_inst, &perm_prelim_gens);
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
   println!("Finished Perm");
@@ -497,10 +493,6 @@ fn main() {
     &consis_check_decomm,
     &consis_check_gens,
 
-    &perm_prelim_inst,
-    &perm_prelim_comm,
-    &perm_prelim_decomm,
-    &perm_prelim_gens,
     &perm_root_inst,
     &perm_root_comm,
     &perm_root_decomm,
@@ -568,9 +560,6 @@ fn main() {
     &consis_check_comm,
     &consis_check_gens,
 
-    perm_prelim_num_cons,
-    &perm_prelim_comm,
-    &perm_prelim_gens,
     perm_root_num_cons,
     &perm_root_comm,
     &perm_root_gens,
