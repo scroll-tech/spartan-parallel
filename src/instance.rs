@@ -308,7 +308,7 @@ impl Instance {
   /// Note: Only process the first num_inputs_unpadded inputs since the rest are unused
   pub fn gen_perm_root_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
 
-    let perm_root_num_cons = 2 * num_inputs_unpadded + 4;
+    let perm_root_num_cons = 2 * num_inputs_unpadded + 2;
     let perm_root_num_non_zero_entries = 4 * num_inputs_unpadded + 1;
     let perm_root_inst = {
       let (A, B, C) = {
@@ -330,7 +330,7 @@ impl Instance {
         let V_output_dot_prod = |i: usize| 2 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
 
         let mut constraint_count = 0;
-  
+
         // correctness of w2
         // for i1..
         for i in 1..num_inputs_unpadded - 1 {
@@ -374,7 +374,7 @@ impl Instance {
         constraint_count += 1;
         // correctness of w3[1]
         (A, B, C) = Instance::gen_constr(A, B, C, constraint_count,
-            [vec![(V_tau, 1)], (0..2 * num_inputs_unpadded).map(|i| (V_input_dot_prod(i), -1)).collect()].concat(), 
+            [vec![(V_tau, 1)], (0..2 * num_inputs_unpadded - 2).map(|i| (V_input_dot_prod(i), -1)).collect()].concat(), 
             vec![(num_vars, 1)], 
             vec![(3 * num_vars + 1, 1)]);
   
