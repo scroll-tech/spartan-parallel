@@ -151,12 +151,7 @@ struct IOProofs {
   // 2. Block number of the input and output block are correct
   // 3. Input and outputs are correct
   // 4. The constant value of the input is 1
-  input_valid_proof: PolyEvalProof,
-  output_valid_proof: PolyEvalProof,
-  input_block_num_proof: PolyEvalProof,
-  output_block_num_proof: PolyEvalProof,
-  input_correctness_proof_list: Vec<PolyEvalProof>,
-  output_correctness_proof: PolyEvalProof,
+  proofs: Vec<PolyEvalProof>,
 }
 
 impl IOProofs {
@@ -182,83 +177,39 @@ impl IOProofs {
     let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
 
-    // input_valid_proof
-    let (input_valid_proof, _comm) = PolyEvalProof::prove(
-      exec_poly_inputs,
-      None,
-      &to_bin_array(0),
-      &ONE,
-      None,
-      &vars_gens.gens_pc,
-      transcript,
-      random_tape,
-    );
-    // output_valid_proof
-    let (output_valid_proof, _comm) = PolyEvalProof::prove(
-      exec_poly_inputs,
-      None,
-      &to_bin_array(output_exec_num * num_ios),
-      &ONE,
-      None,
-      &vars_gens.gens_pc,
-      transcript,
-      random_tape,
-    );
-    // input_block_num_proof
-    let (input_block_num_proof, _comm) = PolyEvalProof::prove(
-      exec_poly_inputs,
-      None,
-      &to_bin_array(2),
-      &input_block_num,
-      None,
-      &vars_gens.gens_pc,
-      transcript,
-      random_tape,
-    );
-    // output_block_num_proof
-    let (output_block_num_proof, _comm) = PolyEvalProof::prove(
-      exec_poly_inputs,
-      None,
-      &to_bin_array(output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1)),
-      &output_block_num,
-      None,
-      &vars_gens.gens_pc,
-      transcript,
-      random_tape,
-    );
-    // correctness_proofs
-    let mut input_correctness_proof_list = Vec::new();
-    for i in 0..func_input_width {
-      let (input_correctness_proof, _comm) = PolyEvalProof::prove(
-        exec_poly_inputs,
-        None,
-        // Skips: V, _, BN, RP, SP, BP, RET
-        &to_bin_array(2 + input_offset + i),
-        &input[i],
-        None,
-        &vars_gens.gens_pc,
-        transcript,
-        random_tape,
-      );
-      input_correctness_proof_list.push(input_correctness_proof);
+    // valid + block + inputs + output
+    let proof_size = 2 + 2 + func_input_width + 1;
+    let mut c = Vec::new();
+    for _ in 0..proof_size {
+      c.push(transcript.challenge_scalar(b"challenge_c"));
     }
-    let (output_correctness_proof, _comm) = PolyEvalProof::prove(
+
+    // batch prove all proofs
+    let proofs = PolyEvalProof::prove_batched(
       exec_poly_inputs,
       None,
-      &to_bin_array(output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1),
-      &output,
+      [
+        vec![
+          0, // input valid
+          output_exec_num * num_ios, // output valid
+          2, // input block num
+          output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1), // output block num
+          output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1 // output correctness
+        ], 
+        (0..func_input_width).map(|i| 2 + input_offset + i).collect() // input correctness
+      ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
+      c,
+      vec![
+        vec![ONE, ONE, input_block_num, output_block_num, output],
+        input
+      ].concat(),
       None,
       &vars_gens.gens_pc,
       transcript,
       random_tape,
     );
     IOProofs {
-      input_valid_proof,
-      output_valid_proof,
-      input_block_num_proof,
-      output_block_num_proof,
-      input_correctness_proof_list,
-      output_correctness_proof,
+      proofs,
     }
   }
 
@@ -283,58 +234,33 @@ impl IOProofs {
     let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
 
-    // input_valid_proof
-    self.input_valid_proof.verify_plain(
-      &vars_gens.gens_pc,
-      transcript,
-      &to_bin_array(0),
-      &ONE,
-      comm_poly_inputs,
-    )?;
-
-    // output_valid_proof
-    self.output_valid_proof.verify_plain(
-      &vars_gens.gens_pc,
-      transcript,
-      &to_bin_array(output_exec_num * num_ios),
-      &ONE,
-      comm_poly_inputs,
-    )?;
-
-    // input_block_num_proof
-    self.input_block_num_proof.verify_plain(
-      &vars_gens.gens_pc,
-      transcript,
-      &to_bin_array(2),
-      &input_block_num,
-      comm_poly_inputs,
-    )?;
-
-    // output_block_num_proof
-    self.output_block_num_proof.verify_plain(
-      &vars_gens.gens_pc,
-      transcript,
-      &to_bin_array(output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1)),
-      &output_block_num,
-      comm_poly_inputs,
-    )?;
-
-    // correctness_proofs
-    for i in 0..func_input_width {
-      self.input_correctness_proof_list[i].verify_plain(
-        &vars_gens.gens_pc,
-        transcript,
-        &to_bin_array(2 + input_offset + i),
-        &input[i],
-        comm_poly_inputs,
-      )?;
+    // valid + block + inputs + output
+    let proof_size = 2 + 2 + func_input_width + 1;
+    let mut c = Vec::new();
+    for _ in 0..proof_size {
+      c.push(transcript.challenge_scalar(b"challenge_c"));
     }
 
-    self.output_correctness_proof.verify_plain(
+    // batch verify all proofs
+    let _ = PolyEvalProof::verify_plain_batched(
+      &self.proofs,
       &vars_gens.gens_pc,
       transcript,
-      &to_bin_array(output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1),
-      &output,
+      [
+        vec![
+          0, // input valid
+          output_exec_num * num_ios, // output valid
+          2, // input block num
+          output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1), // output block num
+          output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1 // output correctness
+        ], 
+        (0..func_input_width).map(|i| 2 + input_offset + i).collect() // input correctness
+      ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
+      c,
+      vec![
+        vec![ONE, ONE, input_block_num, output_block_num, output],
+        input
+      ].concat(),
       comm_poly_inputs,
     )?;
 
