@@ -177,13 +177,6 @@ impl IOProofs {
     let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
 
-    // valid + block + inputs + output
-    let proof_size = 2 + 2 + func_input_width + 1;
-    let mut c = Vec::new();
-    for _ in 0..proof_size {
-      c.push(transcript.challenge_scalar(b"challenge_c"));
-    }
-
     // batch prove all proofs
     let proofs = PolyEvalProof::prove_batched_points(
       exec_poly_inputs,
@@ -198,7 +191,6 @@ impl IOProofs {
         ], 
         (0..func_input_width).map(|i| 2 + input_offset + i).collect() // input correctness
       ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
-      c,
       vec![
         vec![ONE, ONE, input_block_num, output_block_num, output],
         input
@@ -234,13 +226,6 @@ impl IOProofs {
     let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
 
-    // valid + block + inputs + output
-    let proof_size = 2 + 2 + func_input_width + 1;
-    let mut c = Vec::new();
-    for _ in 0..proof_size {
-      c.push(transcript.challenge_scalar(b"challenge_c"));
-    }
-
     // batch verify all proofs
     let _ = PolyEvalProof::verify_plain_batched_points(
       &self.proofs,
@@ -256,7 +241,6 @@ impl IOProofs {
         ], 
         (0..func_input_width).map(|i| 2 + input_offset + i).collect() // input correctness
       ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
-      c,
       vec![
         vec![ONE, ONE, input_block_num, output_block_num, output],
         input
@@ -1720,25 +1704,17 @@ impl SNARK {
 
     // Record the prod of exec, blocks, mem_block, & mem_addr
     let (perm_mem_poly_list, proof_eval_perm_mem_prod_list) = {
-      let mut perm_mem_poly_list = Vec::new();
-      let mut proof_eval_perm_mem_prod_list = Vec::new();
-      for p in 0..perm_mem_num_instances {
-        let r_len = (perm_mem_num_proofs[p] * perm_mem_num_inputs[p]).log_2();
-        // Prod is the 2nd entry
-        let perm_mem_poly = perm_mem_w3_prover.poly_w[p][2];
-        let (proof_eval_perm_mem_prod, _comm_perm_prod) = PolyEvalProof::prove(
-          &perm_mem_w3_prover.poly_w[p],
-          None,
-          &[vec![ZERO; r_len - 2], vec![ONE], vec![ZERO]].concat(),
-          &perm_mem_poly,
-          None,
-          &vars_gens.gens_pc,
-          transcript,
-          &mut random_tape,
-        );
-        perm_mem_poly_list.push(perm_mem_poly);
-        proof_eval_perm_mem_prod_list.push(proof_eval_perm_mem_prod);
-      }
+      let perm_mem_poly_list: Vec<Scalar> = perm_mem_w3_prover.poly_w.iter().map(|i| i[2]).collect();
+      let proof_eval_perm_mem_prod_list = PolyEvalProof::prove_batched_instances(
+        &perm_mem_w3_prover.poly_w,
+        None,
+        &[ONE, ZERO],
+        &perm_mem_poly_list,
+        None,
+        &vars_gens.gens_pc,
+        transcript,
+        &mut random_tape,
+      );
       (perm_mem_poly_list, proof_eval_perm_mem_prod_list)
     };
     timer_proof.stop();
@@ -2356,6 +2332,7 @@ impl SNARK {
       )?;
       timer_eval_proof.stop();
 
+      let timer_eval_opening = Timer::new("Perm Mem Poly Opening");
       // Compute poly for PERM_EXEC, PERM_BLOCK, MEM_BLOCK, MEM_ADDR base on INST_MAP
       let mut perm_block_poly_bound_tau = ONE;
       let mut perm_exec_poly_bound_tau = ONE;
@@ -2364,15 +2341,19 @@ impl SNARK {
       // INST_MAP: 0 -> perm_exec + perm_block, 1 -> mem_block, 2 -> mem_addr
       let mut next_zero_is_perm_exec = true;
 
+      // Verify prod of exec, blocks, mem_block, & mem_addr
+      let num_vars_list = (0..perm_mem_num_instances).map(|i| (perm_mem_num_proofs[i] * perm_mem_num_inputs[i]).log_2()).collect();
+      PolyEvalProof::verify_plain_batched_instances(
+        &self.proof_eval_perm_mem_prod_list,
+        &vars_gens.gens_pc,
+        transcript,
+        &[ONE, ZERO],
+        &self.perm_mem_poly_list,
+        &perm_mem_w3_verifier.comm_w,
+        &num_vars_list
+      )?;
+
       for p in 0..perm_mem_num_instances {
-        let r_len = (perm_mem_num_proofs[p] * perm_mem_num_inputs[p]).log_2();
-        self.proof_eval_perm_mem_prod_list[p].verify_plain(
-          &vars_gens.gens_pc,
-          transcript,
-          &[vec![ZERO; r_len - 2], vec![ONE], vec![ZERO]].concat(),
-          &self.perm_mem_poly_list[p],
-          &perm_mem_w3_verifier.comm_w[p],
-        )?;
         match inst_map[p] {
           0 => {
             if next_zero_is_perm_exec {
@@ -2391,6 +2372,7 @@ impl SNARK {
           _ => {}
         }
       }
+      timer_eval_opening.stop();
 
       // Correctness of Permutation
       assert_eq!(perm_block_poly_bound_tau, perm_exec_poly_bound_tau);

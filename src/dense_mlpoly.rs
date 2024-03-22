@@ -9,6 +9,7 @@ use super::scalar::Scalar;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use core::ops::Index;
 use std::collections::HashMap;
+use curve25519_dalek::ristretto::RistrettoPoint;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
@@ -520,20 +521,17 @@ impl PolyEvalProof {
     poly: &DensePolynomial,
     blinds_opt: Option<&PolyCommitmentBlinds>,
     r_list: Vec<Vec<Scalar>>,             // point at which the polynomial is evaluated
-    c_list: Vec<Scalar>,                // coefficients of RLC
-    Zr_list: Vec<Scalar>,                   // RLC of evaluation of \widetilde{Z}(r)
-    blind_Zr_opt: Option<&Scalar>, // specifies a blind for Zr
+    Zr_list: Vec<Scalar>,                 // evaluation of \widetilde{Z}(r) on each point
+    blind_Zr_opt: Option<&Scalar>,        // specifies a blind for Zr
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
   ) -> Vec<PolyEvalProof> {
     transcript.append_protocol_name(PolyEvalProof::protocol_name());
 
-    // assert RLC coefficients are of the right size
-    assert_eq!(r_list.len(), c_list.len());
+    // assert vectors are of the right size
     assert_eq!(r_list.len(), Zr_list.len());
     for r in &r_list {
-      // assert vectors are of the right size
       assert_eq!(poly.get_num_vars(), r.len());
     }
 
@@ -566,14 +564,16 @@ impl PolyEvalProof {
       assert_eq!(Ri.len(), R_size);
       if let Some(index) = index_map.get(&r_list[i][..left_num_vars]) {
         // L already exist
-        R_list[*index] = (0..R_size).map(|j| R_list[*index][j] + c_list[i] * Ri[j]).collect();
-        Zc_list[*index] += c_list[i] * Zr_list[i];
+        // generate coefficient for RLC
+        let c = transcript.challenge_scalar(b"challenge_c");
+        R_list[*index] = (0..R_size).map(|j| R_list[*index][j] + c * Ri[j]).collect();
+        Zc_list[*index] += c * Zr_list[i];
       } else {
         let next_index = L_list.len();
         index_map.insert(r_list[i][..left_num_vars].to_vec(), next_index);
         L_list.push(Li);
-        R_list.push((0..R_size).map(|j| c_list[i] * Ri[j]).collect());
-        Zc_list.push(c_list[i] * Zr_list[i]);
+        R_list.push(Ri);
+        Zc_list.push(Zr_list[i]);
       }
     }
 
@@ -608,11 +608,11 @@ impl PolyEvalProof {
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
     r_list: Vec<Vec<Scalar>>,   // point at which the polynomial is evaluated
-    c_list: Vec<Scalar>,      // coefficients of RLC
-    Zr_list: Vec<Scalar>,   // commitment to RLC of \widetilde{Z}(r)
+    Zr_list: Vec<Scalar>,   // commitment to \widetilde{Z}(r) on each point
     comm: &PolyCommitment,
   ) -> Result<(), ProofVerifyError> {
     transcript.append_protocol_name(PolyEvalProof::protocol_name());
+
     let (left_num_vars, _) = EqPolynomial::compute_factored_lens(r_list[0].len());
 
     // compute the L and R
@@ -628,16 +628,19 @@ impl PolyEvalProof {
       let (Li, Ri) = eq.compute_factored_evals();
       if let Some(index) = index_map.get(&r_list[i][..left_num_vars]) {
         // L already exist
-        R_list[*index] = (0..Ri.len()).map(|j| R_list[*index][j] + c_list[i] * Ri[j]).collect();
-        Zc_list[*index] += c_list[i] * Zr_list[i];
+        // generate coefficient for RLC
+        let c = transcript.challenge_scalar(b"challenge_c");
+        R_list[*index] = (0..Ri.len()).map(|j| R_list[*index][j] + c * Ri[j]).collect();
+        Zc_list[*index] += c * Zr_list[i];
       } else {
         let next_index = L_list.len();
         index_map.insert(r_list[i][..left_num_vars].to_vec(), next_index);
         L_list.push(Li);
-        R_list.push((0..Ri.len()).map(|j| c_list[i] * Ri[j]).collect());
-        Zc_list.push(c_list[i] * Zr_list[i]);
+        R_list.push(Ri);
+        Zc_list.push(Zr_list[i]);
       }
     }
+    assert_eq!(L_list.len(), proof_list.len());
 
     for i in 0..L_list.len() {
       let C_Zc = Zc_list[i].commit(&Scalar::zero(), &gens.gens.gens_1).compress();
@@ -656,6 +659,168 @@ impl PolyEvalProof {
 
     Ok(())
   }
+
+  // Evaluation of the same point on multiple instances
+  // Size of each instance might be different, but all are larger than the evaluation point
+  pub fn prove_batched_instances(
+    poly_list: &Vec<DensePolynomial>,        // list of instances 
+    blinds_opt: Option<&PolyCommitmentBlinds>,
+    r: &[Scalar],                       // point at which the polynomial is evaluated
+    Zr_list: &Vec<Scalar>,              // evaluation of \widetilde{Z}(r) on each instance
+    blind_Zr_opt: Option<&Scalar>,      // specifies a blind for Zr
+    gens: &PolyCommitmentGens,
+    transcript: &mut Transcript,
+    random_tape: &mut RandomTape,
+  ) -> Vec<PolyEvalProof> {
+    transcript.append_protocol_name(PolyEvalProof::protocol_name());
+
+    // assert vectors are of the right size
+    assert_eq!(poly_list.len(), Zr_list.len());
+    for poly in poly_list {
+      assert!(poly.get_num_vars() >= r.len());
+    }
+
+    // We need one proof per poly size
+    let mut index_map: HashMap<usize, usize> = HashMap::new();
+    let mut Z_list: Vec<Vec<Scalar>> = Vec::new();
+    let mut Zc_list = Vec::new();
+    for i in 0..poly_list.len() {
+      let poly = &poly_list[i];
+      let num_vars = poly.get_num_vars();
+      if let Some(index) = index_map.get(&num_vars) {
+        // generate coefficient for RLC
+        let c = transcript.challenge_scalar(b"challenge_c");
+        for j in 0..poly.Z.len() {
+          Z_list[*index][j] += c * poly.Z[j];
+        }
+        Zc_list[*index] += c * Zr_list[i];
+      } else {
+        index_map.insert(num_vars, Z_list.len());
+        Z_list.push(poly.Z.clone());
+        Zc_list.push(Zr_list[i]);
+      }
+    }
+
+    let zero = Scalar::zero();
+    let mut proof_list = Vec::new();
+    let poly_list: Vec<DensePolynomial> = Z_list.drain(..).map(|i| DensePolynomial::new(i)).collect();
+
+    for i in 0..poly_list.len() {
+      let poly = &poly_list[i];
+      let num_vars = poly.get_num_vars();
+
+      // pad or trim r to correct length
+      let r = {
+        if num_vars >= r.len() {
+          [vec![zero; num_vars - r.len()], r.to_vec()].concat()
+        } else {
+          r[r.len() - num_vars..].to_vec()
+        }
+      };
+      let (left_num_vars, right_num_vars) = EqPolynomial::compute_factored_lens(r.len());
+      let L_size = left_num_vars.pow2();
+      let R_size = right_num_vars.pow2();
+  
+      let default_blinds = PolyCommitmentBlinds {
+        blinds: vec![Scalar::zero(); L_size],
+      };
+      let blinds = blinds_opt.map_or(&default_blinds, |p| p);
+  
+      assert_eq!(blinds.blinds.len(), L_size);
+  
+      let blind_Zr = blind_Zr_opt.map_or(&zero, |p| p);
+  
+      // compute the L and R vectors
+      let eq = EqPolynomial::new(r);
+      let (L, R) = eq.compute_factored_evals();
+      assert_eq!(L.len(), L_size);
+      assert_eq!(R.len(), R_size);
+  
+      // compute the vector underneath L*Z and the L*blinds
+      // compute vector-matrix product between L and Z viewed as a matrix
+      let LZ = poly.bound(&L);
+      let LZ_blind: Scalar = (0..L.len()).map(|i| blinds.blinds[i] * L[i]).sum();
+
+      // a dot product proof of size R_size
+      let (proof, _C_LR, _C_Zr_prime) = DotProductProofLog::prove(
+        &gens.gens,
+        transcript,
+        random_tape,
+        &LZ,
+        &LZ_blind,
+        &R,
+        &Zc_list[i],
+        blind_Zr,
+      );
+      proof_list.push(PolyEvalProof { proof });
+    }
+
+    proof_list
+  }
+
+  pub fn verify_plain_batched_instances(
+    proof_list: &Vec<PolyEvalProof>,
+    gens: &PolyCommitmentGens,
+    transcript: &mut Transcript,
+    r: &[Scalar],           // point at which the polynomial is evaluated
+    Zr_list: &Vec<Scalar>,   // commitment to \widetilde{Z}(r) of each instance
+    comm_list: &Vec<PolyCommitment>, // commitment of each instance
+    num_vars_list: &Vec<usize>, // size of each polynomial
+  ) -> Result<(), ProofVerifyError> {
+    transcript.append_protocol_name(PolyEvalProof::protocol_name());
+
+    // We need one proof per poly size
+    let mut index_map: HashMap<usize, usize> = HashMap::new();
+    let mut C_list: Vec<Vec<RistrettoPoint>> = Vec::new();
+    let mut Zc_list = Vec::new();
+    let mut mapped_num_vars_list = Vec::new();
+    for i in 0..comm_list.len() {
+      let C_decompressed: Vec<RistrettoPoint> = comm_list[i].C.iter().map(|pt| pt.decompress().unwrap()).collect();
+      let num_vars = num_vars_list[i];
+      if let Some(index) = index_map.get(&num_vars) {
+        // generate coefficient for RLC
+        let c = transcript.challenge_scalar(b"challenge_c");
+        for j in 0..C_decompressed.len() {
+          C_list[*index][j] += c * C_decompressed[j];
+        }
+        Zc_list[*index] += c * Zr_list[i];
+      } else {
+        index_map.insert(num_vars, C_list.len());
+        C_list.push(C_decompressed.clone());
+        Zc_list.push(Zr_list[i]);
+        mapped_num_vars_list.push(num_vars);
+      }
+    }
+    assert_eq!(C_list.len(), proof_list.len());
+
+    let zero = Scalar::zero();
+    for i in 0..C_list.len() {
+      let num_vars = mapped_num_vars_list[i];
+      // pad or trim r to correct length
+      let r = {
+        if num_vars >= r.len() {
+          [vec![zero; num_vars - r.len()], r.to_vec()].concat()
+        } else {
+          r[r.len() - num_vars..].to_vec()
+        }
+      };
+
+      let C_Zc = Zc_list[i].commit(&Scalar::zero(), &gens.gens.gens_1).compress();
+      let eq = EqPolynomial::new(r);
+      let (L, R) = eq.compute_factored_evals();
+
+      // compute a weighted sum of commitments and L
+      let C_LZ = GroupElement::vartime_multiscalar_mul(L, &C_list[i]).compress();
+
+      proof_list[i]
+        .proof
+        .verify(R.len(), &gens.gens, transcript, &R, &C_LZ, &C_Zc)?;
+    }
+
+    Ok(())
+  }
+
+
 }
 
 #[cfg(test)]
