@@ -586,7 +586,7 @@ impl R1CSProof {
 
     num_cons: usize,
     gens: &R1CSGens,
-    evals: &(Scalar, Scalar, Scalar),
+    evals: &[Scalar; 3],
     transcript: &mut Transcript,
   ) -> Result<[Vec<Scalar>; 4], ProofVerifyError> {
     transcript.append_protocol_name(R1CSProof::protocol_name());
@@ -783,7 +783,7 @@ impl R1CSProof {
     let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();
 
     // perform the final check in the second sum-check protocol
-    let (eval_A_r, eval_B_r, eval_C_r) = evals;
+    let [eval_A_r, eval_B_r, eval_C_r] = evals;
     let expected_claim_post_phase2 =
       ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry * p_rp_poly_bound_ry).compress();
 
@@ -1158,7 +1158,7 @@ impl R1CSProof {
     input_rows: &Vec<usize>,
 
     gens: &R1CSGens,
-    evals: &(Scalar, Scalar, Scalar),
+    evals: &[Scalar; 3],
     w_input_size: &Vec<usize>,
     // Commitment for witnesses
     comm_w_list: &Vec<PolyCommitment>,
@@ -1302,7 +1302,7 @@ impl R1CSProof {
     let comm_eval_Z_at_ry = &self.comm_vars_at_ry.decompress().unwrap();
 
     // perform the final check in the second sum-check protocol
-    let (eval_A_r, eval_B_r, eval_C_r) = evals;
+    let [eval_A_r, eval_B_r, eval_C_r] = evals;
     let expected_claim_post_phase2 =
       ((r_A * eval_A_r + r_B * eval_B_r + r_C * eval_C_r) * comm_eval_Z_at_ry).compress();
 

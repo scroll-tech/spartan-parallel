@@ -185,7 +185,7 @@ impl IOProofs {
     }
 
     // batch prove all proofs
-    let proofs = PolyEvalProof::prove_batched(
+    let proofs = PolyEvalProof::prove_batched_points(
       exec_poly_inputs,
       None,
       [
@@ -242,7 +242,7 @@ impl IOProofs {
     }
 
     // batch verify all proofs
-    let _ = PolyEvalProof::verify_plain_batched(
+    let _ = PolyEvalProof::verify_plain_batched_points(
       &self.proofs,
       &vars_gens.gens_pc,
       transcript,
@@ -469,16 +469,16 @@ pub struct SNARK {
   mem_addr_comm_w3: Vec<PolyCommitment>,
 
   block_r1cs_sat_proof: R1CSProof,
-  block_inst_evals_bound_rp: (Scalar, Scalar, Scalar),
-  block_inst_evals_list: Vec<(Scalar, Scalar, Scalar)>,
-  block_r1cs_eval_proof: Vec<R1CSEvalProof>,
+  block_inst_evals_bound_rp: [Scalar; 3],
+  block_inst_evals_list: Vec<Scalar>,
+  block_r1cs_eval_proof: R1CSEvalProof,
 
   consis_check_r1cs_sat_proof: R1CSProof,
-  consis_check_inst_evals: (Scalar, Scalar, Scalar),
+  consis_check_inst_evals: [Scalar; 3],
   consis_check_r1cs_eval_proof: R1CSEvalProof,
 
   perm_root_r1cs_sat_proof: R1CSProof,
-  perm_root_inst_evals: (Scalar, Scalar, Scalar),
+  perm_root_inst_evals: [Scalar; 3],
   perm_root_r1cs_eval_proof: R1CSEvalProof,
 
   // If the circuit contains no memory accesses, then ignore everything about memory access
@@ -492,7 +492,7 @@ pub struct SNARK {
 
   // One proof for all permutations
   perm_mem_poly_r1cs_sat_proof: R1CSProof,
-  perm_mem_poly_inst_evals: (Scalar, Scalar, Scalar),
+  perm_mem_poly_inst_evals: [Scalar; 3],
   perm_mem_poly_r1cs_eval_proof: R1CSEvalProof,
   perm_mem_poly_list: Vec<Scalar>,
   proof_eval_perm_mem_prod_list: Vec<PolyEvalProof>,
@@ -504,7 +504,7 @@ pub struct SNARK {
 #[derive(Serialize, Deserialize, Debug)]
 struct MemBlockProofs {
   mem_extract_r1cs_sat_proof: R1CSProof,
-  mem_extract_inst_evals: (Scalar, Scalar, Scalar),
+  mem_extract_inst_evals: [Scalar; 3],
   mem_extract_r1cs_eval_proof: R1CSEvalProof,
 }
 
@@ -512,7 +512,7 @@ struct MemBlockProofs {
 #[derive(Serialize, Deserialize, Debug)]
 struct MemAddrProofs {
   mem_cohere_r1cs_sat_proof: R1CSProof,
-  mem_cohere_inst_evals: (Scalar, Scalar, Scalar),
+  mem_cohere_inst_evals: [Scalar; 3],
   mem_cohere_r1cs_eval_proof: R1CSEvalProof,
 }
 
@@ -603,8 +603,8 @@ impl SNARK {
     block_max_num_proofs: usize,
     block_num_proofs: &Vec<usize>,
     block_inst: &mut Instance,
-    block_comm: &Vec<ComputationCommitment>,
-    block_decomm: &Vec<ComputationDecommitment>,
+    block_comm: &ComputationCommitment,
+    block_decomm: &ComputationDecommitment,
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
@@ -719,9 +719,7 @@ impl SNARK {
     }
 
     // append a commitment to the computation to the transcript
-    for c in block_comm {
-      c.comm.append_to_transcript(b"block_comm", transcript);
-    }
+    block_comm.comm.append_to_transcript(b"block_comm", transcript);
     consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
     perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
     perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
@@ -758,8 +756,8 @@ impl SNARK {
     let mut block_num_proofs: Vec<usize> = inst_sorter.iter().map(|i| i.num_exec).collect();
     // index[i] = j => the original jth entry should now be at the ith position
     let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
+    let block_inst_unsorted = block_inst.clone();
     block_inst.sort(block_num_instances, &index);
-    let block_decomm: &Vec<&ComputationDecommitment> = &(0..block_num_instances).map(|i| &block_decomm[index[i]]).collect();
     let mem_block_mask: Vec<Vec<Vec<Scalar>>> = (0..block_num_instances).map(|i| mem_block_mask[index[i]].clone()).collect();
     let mem_block_poly_mask_list: Vec<DensePolynomial> = (0..block_num_instances).map(|i| mem_block_poly_mask_list[index[i]].clone()).collect();
 
@@ -1322,39 +1320,40 @@ impl SNARK {
     // Final evaluation on BLOCK
     let (block_inst_evals_bound_rp, block_inst_evals_list, block_r1cs_eval_proof) = {
       let [rp, _, rx, ry] = block_challenges;
-      let inst = block_inst;
       let timer_eval = Timer::new("eval_sparse_polys");
 
-      let mut r1cs_eval_proof_list = Vec::new();
-      let (inst_evals_list, inst_evals_bound_rp) = inst.inst.multi_evaluate(&rp, &rx, &ry);
+      // Per instance evaluation is unsorted
+      let (inst_evals_list, _) = block_inst_unsorted.inst.multi_evaluate(&rp, &rx, &ry);
+      // RP-bound evaluation is sorted
+      let (_, inst_evals_bound_rp) = block_inst.inst.multi_evaluate(&rp, &rx, &ry);
       timer_eval.stop();
-      for i in 0..block_num_instances {
-        let inst_evals = inst_evals_list[i];
-        let (Ar, Br, Cr) = &inst_evals;
-        Ar.append_to_transcript(b"Ar_claim", transcript);
-        Br.append_to_transcript(b"Br_claim", transcript);
-        Cr.append_to_transcript(b"Cr_claim", transcript);
 
-        let r1cs_eval_proof = {
-          let proof = R1CSEvalProof::prove(
-            &block_decomm[i].decomm,
-            &rx,
-            &ry,
-            &inst_evals,
-            &block_gens.gens_r1cs_eval,
-            transcript,
-            &mut random_tape,
-          );
-
-          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-          proof
-        };
-        r1cs_eval_proof_list.push(r1cs_eval_proof);
+      for r in &inst_evals_list {
+        r.append_to_transcript(b"ABCr_claim", transcript);
       }
+      // Sample random combinations of A, B, C for inst_evals_bound_rp check in the Verifier
+      // The random values are not used by the prover, but need to be appended to the transcript
+      let _ = transcript.challenge_scalar(b"challenge_c0");
+      let _ = transcript.challenge_scalar(b"challenge_c1");
+      let _ = transcript.challenge_scalar(b"challenge_c2");
+      
+      let r1cs_eval_proof = {
+        let proof = R1CSEvalProof::prove(
+          &block_decomm.decomm,
+          &rx,
+          &ry,
+          &inst_evals_list,
+          &block_gens.gens_r1cs_eval,
+          transcript,
+          &mut random_tape,
+        );
 
+        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+        proof
+      };
 
-      (inst_evals_bound_rp, inst_evals_list, r1cs_eval_proof_list)
+      ([inst_evals_bound_rp.0, inst_evals_bound_rp.1, inst_evals_bound_rp.2], inst_evals_list, r1cs_eval_proof)
     };
     timer_proof.stop();
 
@@ -1398,7 +1397,7 @@ impl SNARK {
         Ar.append_to_transcript(b"Ar_claim", transcript);
         Br.append_to_transcript(b"Br_claim", transcript);
         Cr.append_to_transcript(b"Cr_claim", transcript);
-        (Ar, Br, Cr)
+        [Ar, Br, Cr]
       };
       timer_eval.stop();
 
@@ -1464,7 +1463,7 @@ impl SNARK {
             Ar.append_to_transcript(b"Ar_claim", transcript);
             Br.append_to_transcript(b"Br_claim", transcript);
             Cr.append_to_transcript(b"Cr_claim", transcript);
-            (Ar, Br, Cr)
+            [Ar, Br, Cr]
           };
           timer_eval.stop();
     
@@ -1544,7 +1543,7 @@ impl SNARK {
             Ar.append_to_transcript(b"Ar_claim", transcript);
             Br.append_to_transcript(b"Br_claim", transcript);
             Cr.append_to_transcript(b"Cr_claim", transcript);
-            (Ar, Br, Cr)
+            [Ar, Br, Cr]
           };
           timer_eval.stop();
     
@@ -1622,7 +1621,7 @@ impl SNARK {
         Ar.append_to_transcript(b"Ar_claim", transcript);
         Br.append_to_transcript(b"Br_claim", transcript);
         Cr.append_to_transcript(b"Cr_claim", transcript);
-        (Ar, Br, Cr)
+        [Ar, Br, Cr]
       };
       timer_eval.stop();
 
@@ -1695,7 +1694,7 @@ impl SNARK {
         Ar.append_to_transcript(b"Ar_claim", transcript);
         Br.append_to_transcript(b"Br_claim", transcript);
         Cr.append_to_transcript(b"Cr_claim", transcript);
-        (Ar, Br, Cr)
+        [Ar, Br, Cr]
       };
       timer_eval.stop();
 
@@ -1833,7 +1832,7 @@ impl SNARK {
     block_max_num_proofs: usize,
     block_num_proofs: &Vec<usize>,
     block_num_cons: usize,
-    block_comm: &Vec<ComputationCommitment>,
+    block_comm: &ComputationCommitment,
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
@@ -1917,9 +1916,7 @@ impl SNARK {
       }
 
       // append a commitment to the computation to the transcript
-      for c in block_comm {
-        c.comm.append_to_transcript(b"block_comm", transcript);
-      }
+      block_comm.comm.append_to_transcript(b"block_comm", transcript);
       consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
       perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
       perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
@@ -1958,7 +1955,6 @@ impl SNARK {
     // index[i] = j => the original jth entry should now be at the ith position
     let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
     let num_vars_per_block: Vec<usize> = (0..block_num_instances).map(|i| num_vars_per_block[index[i]]).collect();
-    let block_comm: &Vec<&ComputationCommitment> = &(0..block_num_instances).map(|i| &block_comm[index[i]]).collect();
     let mem_block_comm_mask_list: Vec<PolyCommitment> = (0..block_num_instances).map(|i| mem_block_comm_mask_list[index[i]].clone()).collect();
 
     // --
@@ -2111,31 +2107,34 @@ impl SNARK {
 
       let timer_eval_proof = Timer::new("Block Correctness Eval");
       // Verify Evaluation on BLOCK
-      let mut A_evals = Vec::new();
-      let mut B_evals = Vec::new();
-      let mut C_evals = Vec::new();
       let [rp, _, rx, ry] = block_challenges;
-      for i in 0..block_num_instances {
-        let (Ar, Br, Cr) = &self.block_inst_evals_list[i];
-        Ar.append_to_transcript(b"Ar_claim", transcript);
-        Br.append_to_transcript(b"Br_claim", transcript);
-        Cr.append_to_transcript(b"Cr_claim", transcript);
-        self.block_r1cs_eval_proof[i].verify(
-          &block_comm[i].comm,
-          &rx,
-          &ry,
-          &self.block_inst_evals_list[i],
-          &block_gens.gens_r1cs_eval,
-          transcript,
-        )?;
-        A_evals.push(Ar.clone());
-        B_evals.push(Br.clone());
-        C_evals.push(Cr.clone());
+      
+      for r in &self.block_inst_evals_list {
+        r.append_to_transcript(b"ABCr_claim", transcript);
       }
+      // Sample random combinations of A, B, C for inst_evals_bound_rp check
+      let c0 = transcript.challenge_scalar(b"challenge_c0");
+      let c1 = transcript.challenge_scalar(b"challenge_c1");
+      let c2 = transcript.challenge_scalar(b"challenge_c2");
+
+      let ABC_evals: Vec<Scalar> = (0..block_num_instances_bound).map(|i| 
+        c0 * self.block_inst_evals_list[3 * i] + c1 * self.block_inst_evals_list[3 * i + 1] + c2 * self.block_inst_evals_list[3 * i + 2]
+      ).collect();
+
+      self.block_r1cs_eval_proof.verify(
+        &block_comm.comm,
+        &rx,
+        &ry,
+        &self.block_inst_evals_list,
+        &block_gens.gens_r1cs_eval,
+        transcript,
+      )?;
+      // Permute block_inst_evals_list to the correct order for RP evaluation
+      let ABC_evals: Vec<Scalar> = (0..block_num_instances).map(|i| ABC_evals[index[i]]).collect();
       // Verify that block_inst_evals_bound_rp is block_inst_evals_list bind rp
-      assert_eq!(DensePolynomial::new(A_evals).evaluate(&rp), self.block_inst_evals_bound_rp.0);
-      assert_eq!(DensePolynomial::new(B_evals).evaluate(&rp), self.block_inst_evals_bound_rp.1);
-      assert_eq!(DensePolynomial::new(C_evals).evaluate(&rp), self.block_inst_evals_bound_rp.2);
+      assert_eq!(DensePolynomial::new(ABC_evals).evaluate(&rp), 
+        c0 * self.block_inst_evals_bound_rp[0] + c1 * self.block_inst_evals_bound_rp[1] + c2 * self.block_inst_evals_bound_rp[2]
+      );
       timer_eval_proof.stop();
     }
 
@@ -2161,7 +2160,7 @@ impl SNARK {
 
       let timer_eval_proof = Timer::new("Consis Check Eval");
       // Verify Evaluation on CONSIS_CHECK
-      let (Ar, Br, Cr) = &self.consis_check_inst_evals;
+      let [Ar, Br, Cr] = &self.consis_check_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);
@@ -2178,7 +2177,7 @@ impl SNARK {
     };
 
     // --
-    // MEM_BLOCK and MEM_ADDR
+    // MEM_BLOCK
     // --
     if total_num_mem_accesses_bound > 0 {
       let mem_block_proofs = self.mem_block_proofs.as_ref().unwrap();
@@ -2203,7 +2202,7 @@ impl SNARK {
 
         let timer_eval_proof = Timer::new("Mem Extract Eval");
         // Verify Evaluation on PERM_BLOCK_ROOT
-        let (Ar, Br, Cr) = &mem_block_proofs.mem_extract_inst_evals;
+        let [Ar, Br, Cr] = &mem_block_proofs.mem_extract_inst_evals;
         Ar.append_to_transcript(b"Ar_claim", transcript);
         Br.append_to_transcript(b"Br_claim", transcript);
         Cr.append_to_transcript(b"Cr_claim", transcript);
@@ -2218,51 +2217,51 @@ impl SNARK {
         )?;
         timer_eval_proof.stop();
       }
+    }
+
+    // --
+    // MEM_ADDR
+    // --
+    if total_num_mem_accesses > 0 {
+      let mem_addr_proofs = self.mem_addr_proofs.as_ref().unwrap();
 
       // --
-      // MEM_ADDR
+      // MEM_COHERE
       // --
-      if total_num_mem_accesses > 0 {
-        let mem_addr_proofs = self.mem_addr_proofs.as_ref().unwrap();
+      {
+        let timer_sat_proof = Timer::new("Mem Cohere Sat");
+        let mem_cohere_challenges = mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify_single(
+          1,
+          mem_cohere_num_cons_base,
+          4,
+          total_num_mem_accesses_bound,
+          total_num_mem_accesses,
+          &vec![total_num_mem_accesses],
+          &vars_gens,
+          &mem_addr_proofs.mem_cohere_inst_evals,
+          &vec![4],
+          &self.addr_comm_mems,
+          transcript,
+        )?;
+        timer_sat_proof.stop();
 
-        // --
-        // MEM_COHERE
-        // --
-        {
-          let timer_sat_proof = Timer::new("Mem Cohere Sat");
-          let mem_cohere_challenges = mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify_single(
-            1,
-            mem_cohere_num_cons_base,
-            4,
-            total_num_mem_accesses_bound,
-            total_num_mem_accesses,
-            &vec![total_num_mem_accesses],
-            &vars_gens,
-            &mem_addr_proofs.mem_cohere_inst_evals,
-            &vec![4],
-            &self.addr_comm_mems,
-            transcript,
-          )?;
-          timer_sat_proof.stop();
-
-          let timer_eval_proof = Timer::new("Mem Cohere Eval");
-          // Verify Evaluation on MEM_COHERE
-          let (Ar, Br, Cr) = &mem_addr_proofs.mem_cohere_inst_evals;
-          Ar.append_to_transcript(b"Ar_claim", transcript);
-          Br.append_to_transcript(b"Br_claim", transcript);
-          Cr.append_to_transcript(b"Cr_claim", transcript);
-          let [_, rx, ry] = &mem_cohere_challenges;
-          mem_addr_proofs.mem_cohere_r1cs_eval_proof.verify(
-            &mem_cohere_comm.comm,
-            rx,
-            ry,
-            &mem_addr_proofs.mem_cohere_inst_evals,
-            &mem_cohere_gens.gens_r1cs_eval,
-            transcript,
-          )?;
-          timer_eval_proof.stop();
-        };
-      }
+        let timer_eval_proof = Timer::new("Mem Cohere Eval");
+        // Verify Evaluation on MEM_COHERE
+        let [Ar, Br, Cr] = &mem_addr_proofs.mem_cohere_inst_evals;
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        let [_, rx, ry] = &mem_cohere_challenges;
+        mem_addr_proofs.mem_cohere_r1cs_eval_proof.verify(
+          &mem_cohere_comm.comm,
+          rx,
+          ry,
+          &mem_addr_proofs.mem_cohere_inst_evals,
+          &mem_cohere_gens.gens_r1cs_eval,
+          transcript,
+        )?;
+        timer_eval_proof.stop();
+      };
     }
 
     // --
@@ -2292,7 +2291,7 @@ impl SNARK {
 
       let timer_eval_proof = Timer::new("Perm Root Eval");
       // Verify Evaluation on PERM_BLOCK_ROOT
-      let (Ar, Br, Cr) = &self.perm_root_inst_evals;
+      let [Ar, Br, Cr] = &self.perm_root_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);
@@ -2341,7 +2340,7 @@ impl SNARK {
 
       let timer_eval_proof = Timer::new("Perm Mem Poly Eval");
       // Verify Evaluation on PERM_BLOCK_POLY
-      let (Ar, Br, Cr) = &self.perm_mem_poly_inst_evals;
+      let [Ar, Br, Cr] = &self.perm_mem_poly_inst_evals;
       Ar.append_to_transcript(b"Ar_claim", transcript);
       Br.append_to_transcript(b"Br_claim", transcript);
       Cr.append_to_transcript(b"Cr_claim", transcript);

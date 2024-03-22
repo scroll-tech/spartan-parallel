@@ -56,6 +56,7 @@ Proof Verification Successful!
 
 --
 CIRC_BLOCKS:
+Preprocessing instances...
 Generating Circuits...
   * number_of_instances 14
   * number_of_constraints 4096
@@ -82,401 +83,241 @@ Finished Mem
 Producing Public Parameters...
 Comitting Circuits...
   * SNARK::encode
-  * SNARK::encode 153.605084ms
+  * SNARK::encode 249.839125ms
 Finished Block
   * SNARK::encode
-  * SNARK::encode 22.6865ms
+  * SNARK::encode 23.092375ms
 Finished Consis
   * SNARK::encode
-  * SNARK::encode 973.25µs
+  * SNARK::encode 4.795ms
   * SNARK::encode
-  * SNARK::encode 125.38675ms
+  * SNARK::encode 119.028417ms
 Finished Perm
   * SNARK::encode
-  * SNARK::encode 1.423708ms
+  * SNARK::encode 901.125µs
   * SNARK::encode
-  * SNARK::encode 63.362208ms
+  * SNARK::encode 62.784959ms
 Finished Mem
 Running the proof...
   * SNARK::prove
     * inst_commit
-    * inst_commit 1.027917ms
+    * inst_commit 678.041µs
     * block_sort
-    * block_sort 26.406083ms
+    * block_sort 25.760458ms
     * input_commit
-    * input_commit 2.087516417s
+    * input_commit 2.177092542s
     * witness_gen
-    * witness_gen 98.108166ms
+    * witness_gen 82.104458ms
     * Block Correctness
       * R1CSProof::prove
         * prove_sc_phase_one
-        * prove_sc_phase_one 2.362048666s
+        * prove_sc_phase_one 2.310786166s
         * prove_sc_phase_two
-        * prove_sc_phase_two 372.342375ms
+        * prove_sc_phase_two 383.759334ms
         * polyeval
-        * polyeval 425.955125ms
-      * R1CSProof::prove 3.16097475s
+        * polyeval 425.553125ms
+      * R1CSProof::prove 3.120777958s
       * len_r1cs_sat_proof 23568
       * eval_sparse_polys
-      * eval_sparse_polys 6.752292ms
+      * eval_sparse_polys 9.49125ms
       * R1CSEvalProof::prove
         * commit_nondet_witness
-        * commit_nondet_witness 43.907417ms
+        * commit_nondet_witness 460.687875ms
         * build_layered_network
-        * build_layered_network 10.352125ms
+        * build_layered_network 112.535667ms
         * evalproof_layered_network
-          * len_product_layer_proof 31552
-        * evalproof_layered_network 110.152083ms
-      * R1CSEvalProof::prove 166.552917ms
-      * len_r1cs_eval_proof 42512
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 1.061541ms
-        * build_layered_network
-        * build_layered_network 2.838833ms
-        * evalproof_layered_network
-          * len_product_layer_proof 18144
-        * evalproof_layered_network 21.324334ms
-      * R1CSEvalProof::prove 25.620375ms
-      * len_r1cs_eval_proof 20912
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 22.787916ms
-        * build_layered_network
-        * build_layered_network 6.558708ms
-        * evalproof_layered_network
-          * len_product_layer_proof 29512
-        * evalproof_layered_network 71.462ms
-      * R1CSEvalProof::prove 101.503625ms
-      * len_r1cs_eval_proof 36312
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 560.875µs
-        * build_layered_network
-        * build_layered_network 2.860208ms
-        * evalproof_layered_network
-          * len_product_layer_proof 18144
-        * evalproof_layered_network 21.409916ms
-      * R1CSEvalProof::prove 25.23525ms
-      * len_r1cs_eval_proof 20912
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 664.042µs
-        * build_layered_network
-        * build_layered_network 2.834875ms
-        * evalproof_layered_network
-          * len_product_layer_proof 18144
-        * evalproof_layered_network 21.527541ms
-      * R1CSEvalProof::prove 25.570333ms
-      * len_r1cs_eval_proof 20912
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 820.75µs
-        * build_layered_network
-        * build_layered_network 3.039459ms
-        * evalproof_layered_network
-          * len_product_layer_proof 19456
-        * evalproof_layered_network 22.626042ms
-      * R1CSEvalProof::prove 26.927125ms
-      * len_r1cs_eval_proof 22288
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 22.04075ms
-        * build_layered_network
-        * build_layered_network 6.498958ms
-        * evalproof_layered_network
-          * len_product_layer_proof 29512
-        * evalproof_layered_network 71.427125ms
-      * R1CSEvalProof::prove 101.064292ms
-      * len_r1cs_eval_proof 36312
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 524.125µs
-        * build_layered_network
-        * build_layered_network 2.945042ms
-        * evalproof_layered_network
-          * len_product_layer_proof 18144
-        * evalproof_layered_network 21.291958ms
-      * R1CSEvalProof::prove 25.174875ms
-      * len_r1cs_eval_proof 20912
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 344.084µs
-        * build_layered_network
-        * build_layered_network 3.001208ms
-        * evalproof_layered_network
-          * len_product_layer_proof 16936
-        * evalproof_layered_network 20.104208ms
-      * R1CSEvalProof::prove 24.28325ms
-      * len_r1cs_eval_proof 19384
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 669.709µs
-        * build_layered_network
-        * build_layered_network 2.842083ms
-        * evalproof_layered_network
-          * len_product_layer_proof 18144
-        * evalproof_layered_network 21.36825ms
-      * R1CSEvalProof::prove 25.794375ms
-      * len_r1cs_eval_proof 20912
-      * R1CSEvalProof::prove
-        * commit_nondet_witness
-        * commit_nondet_witness 893.084µs
-        * build_layered_network
-        * build_layered_network 2.918083ms
-        * evalproof_layered_network
-          * len_product_layer_proof 16936
-        * evalproof_layered_network 20.048459ms
-      * R1CSEvalProof::prove 24.275375ms
-      * len_r1cs_eval_proof 19384
-    * Block Correctness 3.773458708s
+          * len_product_layer_proof 176320
+        * evalproof_layered_network 1.051586583s
+      * R1CSEvalProof::prove 1.636540583s
+      * len_r1cs_eval_proof 220848
+    * Block Correctness 4.805729375s
     * Consis Check
       * R1CSProof::prove
         * prove_sc_phase_one
-        * prove_sc_phase_one 5.302375ms
+        * prove_sc_phase_one 5.354625ms
         * prove_sc_phase_two
-        * prove_sc_phase_two 5.16425ms
+        * prove_sc_phase_two 5.244333ms
         * polyeval
-        * polyeval 14.720417ms
-      * R1CSProof::prove 25.753542ms
+        * polyeval 14.816334ms
+      * R1CSProof::prove 25.981ms
       * len_r1cs_sat_proof 7944
       * eval_sparse_polys
-      * eval_sparse_polys 439.084µs
+      * eval_sparse_polys 457.625µs
       * R1CSEvalProof::prove
         * commit_nondet_witness
-        * commit_nondet_witness 18.680666ms
+        * commit_nondet_witness 19.353833ms
         * build_layered_network
-        * build_layered_network 4.930792ms
+        * build_layered_network 5.10025ms
         * evalproof_layered_network
           * len_product_layer_proof 27984
-        * evalproof_layered_network 66.333167ms
-      * R1CSEvalProof::prove 90.820084ms
+        * evalproof_layered_network 66.800667ms
+      * R1CSEvalProof::prove 91.696542ms
       * len_r1cs_eval_proof 34784
-    * Consis Check 117.147708ms
+    * Consis Check 118.330958ms
     * Mem Extract
       * R1CSProof::prove
         * prove_sc_phase_one
-        * prove_sc_phase_one 17.880833ms
+        * prove_sc_phase_one 17.870208ms
         * prove_sc_phase_two
-        * prove_sc_phase_two 7.446917ms
+        * prove_sc_phase_two 7.397333ms
         * polyeval
-        * polyeval 413.623917ms
-      * R1CSProof::prove 439.536375ms
+        * polyeval 417.038208ms
+      * R1CSProof::prove 442.890084ms
       * len_r1cs_sat_proof 21240
       * eval_sparse_polys
-      * eval_sparse_polys 8.25µs
+      * eval_sparse_polys 8.959µs
       * R1CSEvalProof::prove
         * commit_nondet_witness
-        * commit_nondet_witness 651µs
+        * commit_nondet_witness 559.583µs
         * build_layered_network
-        * build_layered_network 65.333µs
+        * build_layered_network 67.667µs
         * evalproof_layered_network
           * len_product_layer_proof 9632
-        * evalproof_layered_network 5.847375ms
-      * R1CSEvalProof::prove 6.587708ms
+        * evalproof_layered_network 5.905833ms
+      * R1CSEvalProof::prove 6.564542ms
       * len_r1cs_eval_proof 12208
-    * Mem Extract 446.504625ms
+    * Mem Extract 449.877459ms
     * Mem Cohere
       * R1CSProof::prove
         * prove_sc_phase_one
-        * prove_sc_phase_one 2.308583ms
+        * prove_sc_phase_one 2.312041ms
         * prove_sc_phase_two
-        * prove_sc_phase_two 2.180958ms
+        * prove_sc_phase_two 2.177625ms
         * polyeval
-        * polyeval 841.25µs
-      * R1CSProof::prove 5.892541ms
+        * polyeval 843.125µs
+      * R1CSProof::prove 5.9065ms
       * len_r1cs_sat_proof 4208
       * eval_sparse_polys
-      * eval_sparse_polys 1.739875ms
+      * eval_sparse_polys 1.780458ms
       * R1CSEvalProof::prove
         * commit_nondet_witness
-        * commit_nondet_witness 44.459459ms
+        * commit_nondet_witness 44.874292ms
         * build_layered_network
-        * build_layered_network 17.793667ms
+        * build_layered_network 17.487042ms
         * evalproof_layered_network
           * len_product_layer_proof 33696
-        * evalproof_layered_network 175.461459ms
-      * R1CSEvalProof::prove 239.2485ms
+        * evalproof_layered_network 180.070667ms
+      * R1CSEvalProof::prove 245.188583ms
       * len_r1cs_eval_proof 44720
-    * Mem Cohere 246.932ms
+    * Mem Cohere 252.926958ms
     * Perm Root
       * R1CSProof::prove
         * prove_sc_phase_one
-        * prove_sc_phase_one 47.08125ms
+        * prove_sc_phase_one 47.602583ms
         * prove_sc_phase_two
-        * prove_sc_phase_two 15.504458ms
+        * prove_sc_phase_two 15.475958ms
         * polyeval
-        * polyeval 96.990708ms
-      * R1CSProof::prove 160.173333ms
+        * polyeval 96.742166ms
+      * R1CSProof::prove 160.419042ms
       * len_r1cs_sat_proof 26736
       * eval_sparse_polys
-      * eval_sparse_polys 12.625µs
+      * eval_sparse_polys 12.75µs
       * R1CSEvalProof::prove
         * commit_nondet_witness
-        * commit_nondet_witness 1.716125ms
+        * commit_nondet_witness 748.541µs
         * build_layered_network
-        * build_layered_network 124.5µs
+        * build_layered_network 117.667µs
         * evalproof_layered_network
           * len_product_layer_proof 11848
-        * evalproof_layered_network 7.237708ms
-      * R1CSEvalProof::prove 9.121708ms
+        * evalproof_layered_network 7.2455ms
+      * R1CSEvalProof::prove 8.154709ms
       * len_r1cs_eval_proof 14488
-    * Perm Root 171.387208ms
+    * Perm Root 170.365833ms
     * Perm Mem Poly
       * R1CSProof::prove
         * prove_sc_phase_one
-        * prove_sc_phase_one 11.904209ms
+        * prove_sc_phase_one 11.947667ms
         * prove_sc_phase_two
-        * prove_sc_phase_two 7.381917ms
+        * prove_sc_phase_two 7.403625ms
         * polyeval
-        * polyeval 37.182292ms
-      * R1CSProof::prove 57.052292ms
+        * polyeval 37.268083ms
+      * R1CSProof::prove 57.203584ms
       * len_r1cs_sat_proof 18096
       * eval_sparse_polys
-      * eval_sparse_polys 4.589292ms
+      * eval_sparse_polys 4.303166ms
       * R1CSEvalProof::prove
         * commit_nondet_witness
-        * commit_nondet_witness 88.092708ms
+        * commit_nondet_witness 87.070625ms
         * build_layered_network
-        * build_layered_network 41.954ms
+        * build_layered_network 43.336042ms
         * evalproof_layered_network
           * len_product_layer_proof 39312
-        * evalproof_layered_network 343.467208ms
-      * R1CSEvalProof::prove 477.812416ms
+        * evalproof_layered_network 362.714416ms
+      * R1CSEvalProof::prove 497.4165ms
       * len_r1cs_eval_proof 58656
-    * Perm Mem Poly 574.077666ms
+    * Perm Mem Poly 594.354209ms
     * IO Proofs
-    * IO Proofs 23.850709ms
-  * SNARK::prove 7.566523209s
+    * IO Proofs 24.670375ms
+  * SNARK::prove 8.702003s
 Verifying the proof...
   * SNARK::verify
     * inst_commit
-    * inst_commit 1.023458ms
+    * inst_commit 672.041µs
     * block_sort
-    * block_sort 8.333µs
+    * block_sort 4.458µs
     * witness_commit
-    * witness_commit 1.146458ms
+    * witness_commit 4.3935ms
     * Block Correctness Sat
-    * Block Correctness Sat 50.767583ms
+    * Block Correctness Sat 49.288792ms
     * Block Correctness Eval
       * verify_polyeval_proof
         * verify_prod_proof
-        * verify_prod_proof 479.125µs
+        * verify_prod_proof 2.569958ms
         * verify_hash_proof
-        * verify_hash_proof 12.92875ms
-      * verify_polyeval_proof 13.415958ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 273.667µs
-        * verify_hash_proof
-        * verify_hash_proof 4.371875ms
-      * verify_polyeval_proof 4.654167ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 446.75µs
-        * verify_hash_proof
-        * verify_hash_proof 10.959209ms
-      * verify_polyeval_proof 11.412125ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 272.708µs
-        * verify_hash_proof
-        * verify_hash_proof 4.363375ms
-      * verify_polyeval_proof 4.642042ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 276.583µs
-        * verify_hash_proof
-        * verify_hash_proof 4.634416ms
-      * verify_polyeval_proof 4.918292ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 293.917µs
-        * verify_hash_proof
-        * verify_hash_proof 4.641375ms
-      * verify_polyeval_proof 4.941541ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 445.75µs
-        * verify_hash_proof
-        * verify_hash_proof 11.143959ms
-      * verify_polyeval_proof 11.59925ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 276.416µs
-        * verify_hash_proof
-        * verify_hash_proof 4.227792ms
-      * verify_polyeval_proof 4.51125ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 255.416µs
-        * verify_hash_proof
-        * verify_hash_proof 3.997667ms
-      * verify_polyeval_proof 4.259541ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 283.167µs
-        * verify_hash_proof
-        * verify_hash_proof 4.209708ms
-      * verify_polyeval_proof 4.498708ms
-      * verify_polyeval_proof
-        * verify_prod_proof
-        * verify_prod_proof 256.625µs
-        * verify_hash_proof
-        * verify_hash_proof 4.061708ms
-      * verify_polyeval_proof 4.326958ms
-    * Block Correctness Eval 73.395083ms
+        * verify_hash_proof 34.468291ms
+      * verify_polyeval_proof 37.05025ms
+    * Block Correctness Eval 37.293792ms
     * Consis Check Sat
-    * Consis Check Sat 9.060708ms
+    * Consis Check Sat 8.856917ms
     * Consis Check Eval
       * verify_polyeval_proof
         * verify_prod_proof
-        * verify_prod_proof 424.833µs
+        * verify_prod_proof 424.875µs
         * verify_hash_proof
-        * verify_hash_proof 9.981417ms
-      * verify_polyeval_proof 10.412542ms
-    * Consis Check Eval 10.446917ms
+        * verify_hash_proof 9.903333ms
+      * verify_polyeval_proof 10.3345ms
+    * Consis Check Eval 10.368667ms
     * Mem Extract Sat
-    * Mem Extract Sat 48.783083ms
+    * Mem Extract Sat 46.719417ms
     * Mem Extract Eval
       * verify_polyeval_proof
         * verify_prod_proof
-        * verify_prod_proof 151.875µs
+        * verify_prod_proof 149.75µs
         * verify_hash_proof
-        * verify_hash_proof 2.158958ms
-      * verify_polyeval_proof 2.32025ms
-    * Mem Extract Eval 2.330542ms
+        * verify_hash_proof 2.146416ms
+      * verify_polyeval_proof 2.302167ms
+    * Mem Extract Eval 2.311375ms
     * Mem Cohere Sat
-    * Mem Cohere Sat 3.526542ms
+    * Mem Cohere Sat 3.449167ms
     * Mem Cohere Eval
       * verify_polyeval_proof
         * verify_prod_proof
-        * verify_prod_proof 508.333µs
+        * verify_prod_proof 507.75µs
         * verify_hash_proof
-        * verify_hash_proof 16.198208ms
-      * verify_polyeval_proof 16.7175ms
-    * Mem Cohere Eval 16.782584ms
+        * verify_hash_proof 16.17175ms
+      * verify_polyeval_proof 16.685541ms
+    * Mem Cohere Eval 16.749209ms
     * Perm Root Sat
-    * Perm Root Sat 48.014791ms
+    * Perm Root Sat 47.956042ms
     * Perm Root Eval
       * verify_polyeval_proof
         * verify_prod_proof
-        * verify_prod_proof 182.583µs
+        * verify_prod_proof 182.959µs
         * verify_hash_proof
-        * verify_hash_proof 2.508042ms
-      * verify_polyeval_proof 2.697291ms
-    * Perm Root Eval 2.706584ms
+        * verify_hash_proof 2.514084ms
+      * verify_polyeval_proof 2.703458ms
+    * Perm Root Eval 2.712833ms
     * Perm Mem Poly Sat
-    * Perm Mem Poly Sat 28.403417ms
+    * Perm Mem Poly Sat 28.352291ms
     * Perm Mem Poly Eval
       * verify_polyeval_proof
         * verify_prod_proof
-        * verify_prod_proof 590.75µs
+        * verify_prod_proof 590.125µs
         * verify_hash_proof
-        * verify_hash_proof 22.448917ms
-      * verify_polyeval_proof 23.048917ms
-    * Perm Mem Poly Eval 23.169875ms
+        * verify_hash_proof 22.478708ms
+      * verify_polyeval_proof 23.079166ms
+    * Perm Mem Poly Eval 23.202333ms
     * IO Proofs
-    * IO Proofs 5.600042ms
-  * SNARK::verify 339.977417ms
+    * IO Proofs 5.597708ms
+  * SNARK::verify 302.753958ms
 proof verification successful!

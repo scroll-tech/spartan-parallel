@@ -430,7 +430,7 @@ fn main() {
   
   // create a commitment to the R1CS instance
   println!("Comitting Circuits...");
-  let (block_comm, block_decomm) = SNARK::multi_encode(&block_inst, &block_gens);
+  let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
   println!("Finished Block");
   let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
   println!("Finished Consis");

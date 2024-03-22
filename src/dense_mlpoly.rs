@@ -515,8 +515,8 @@ impl PolyEvalProof {
     self.verify(gens, transcript, r, &C_Zr, comm)
   }
 
-  // Evaluation on multiple points
-  pub fn prove_batched(
+  // Evaluation of multiple points on the same instance
+  pub fn prove_batched_points(
     poly: &DensePolynomial,
     blinds_opt: Option<&PolyCommitmentBlinds>,
     r_list: Vec<Vec<Scalar>>,             // point at which the polynomial is evaluated
@@ -603,7 +603,7 @@ impl PolyEvalProof {
     proof_list.iter().map(|proof| PolyEvalProof { proof: proof.clone() }).collect()
   }
 
-  pub fn verify_plain_batched(
+  pub fn verify_plain_batched_points(
     proof_list: &Vec<PolyEvalProof>,
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,

@@ -7,6 +7,7 @@ use crate::errors::R1CSError;
 use crate::scalar::Scalar;
 
 /// `Instance` holds the description of R1CS matrices and a hash of the matrices
+#[derive(Clone)]
 pub struct Instance {
   /// Matrix of Instance
   pub inst: crate::R1CSInstance,

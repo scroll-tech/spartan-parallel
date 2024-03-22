@@ -15,7 +15,7 @@ use flate2::{write::ZlibEncoder, Compression};
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct R1CSInstance {
   // num_instances DOES NOT need to be a power of 2!
   num_instances: usize,
@@ -516,7 +516,7 @@ impl R1CSInstance {
 
   pub fn multi_evaluate(&self, rp: &[Scalar], rx: &[Scalar], ry: &[Scalar]) -> 
   (
-    Vec<(Scalar, Scalar, Scalar)>, // Each individual block
+    Vec<Scalar>,                // Concatenation of each individual block
     (Scalar, Scalar, Scalar)    // Combined, bound to rp
   ) {
     let mut a_evals = Vec::new();
@@ -526,7 +526,7 @@ impl R1CSInstance {
     // Evaluate each individual poly on [rx, ry]
     for i in 0..self.num_instances {
       let evals = SparseMatPolynomial::multi_evaluate(&[&self.A_list[i], &self.B_list[i], &self.C_list[i]], rx, ry);
-      eval_list.push((evals[0].clone(), evals[1].clone(), evals[2].clone()));
+      eval_list.extend(evals.clone());
       a_evals.push(evals[0]);
       b_evals.push(evals[1]);
       c_evals.push(evals[2]);
@@ -555,7 +555,7 @@ impl R1CSInstance {
     for i in 0..self.num_instances {
       let (comm, dense) = SparseMatPolynomial::multi_commit(&[&self.A_list[i], &self.B_list[i], &self.C_list[i]], &gens.gens);
       let r1cs_comm = R1CSCommitment {
-        num_cons: self.num_instances * self.num_cons,
+        num_cons: self.num_cons,
         num_vars: self.num_vars,
         comm,
       };
@@ -571,9 +571,13 @@ impl R1CSInstance {
 
   // Used if there is only one instance
   pub fn commit(&self, gens: &R1CSCommitmentGens) -> (R1CSCommitment, R1CSDecommitment) {
-    assert_eq!(self.num_instances, 1);
-
-    let (comm, dense) = SparseMatPolynomial::multi_commit(&[&self.A_list[0], &self.B_list[0], &self.C_list[0]], &gens.gens);
+    let mut sparse_polys = Vec::new();
+    for i in 0..self.A_list.len() {
+      sparse_polys.push(&self.A_list[i]);
+      sparse_polys.push(&self.B_list[i]);
+      sparse_polys.push(&self.C_list[i]);
+    }
+    let (comm, dense) = SparseMatPolynomial::multi_commit(&sparse_polys, &gens.gens);
     let r1cs_comm = R1CSCommitment {
       num_cons: self.num_instances * self.num_cons,
       num_vars: self.num_vars,
@@ -596,7 +600,7 @@ impl R1CSEvalProof {
     decomm: &R1CSDecommitment,
     rx: &[Scalar], // point at which the polynomial is evaluated
     ry: &[Scalar],
-    evals: &(Scalar, Scalar, Scalar),
+    evals: &[Scalar],
     gens: &R1CSCommitmentGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -606,7 +610,7 @@ impl R1CSEvalProof {
       &decomm.dense,
       rx,
       ry,
-      &[evals.0, evals.1, evals.2],
+      evals,
       &gens.gens,
       transcript,
       random_tape,
@@ -621,7 +625,7 @@ impl R1CSEvalProof {
     comm: &R1CSCommitment,
     rx: &[Scalar], // point at which the R1CS matrix polynomials are evaluated
     ry: &[Scalar],
-    evals: &(Scalar, Scalar, Scalar),
+    evals: &[Scalar],
     gens: &R1CSCommitmentGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
@@ -629,7 +633,7 @@ impl R1CSEvalProof {
       &comm.comm,
       rx,
       ry,
-      &[evals.0, evals.1, evals.2],
+      evals,
       &gens.gens,
       transcript,
     )

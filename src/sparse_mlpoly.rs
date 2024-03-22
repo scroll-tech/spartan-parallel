@@ -1173,66 +1173,33 @@ impl ProductLayerProof {
     // So we can produce a batched product proof for all of them at the same time.
     // prove the correctness of claim_row_eval_read, claim_row_eval_write, claim_col_eval_read, and claim_col_eval_write
     // TODO: we currently only produce proofs for 3 batched sparse polynomial evaluations
-    assert_eq!(row_prod_layer.read_vec.len(), 3);
-    let (row_read_A, row_read_B, row_read_C) = {
-      let (vec_A, vec_BC) = row_prod_layer.read_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (row_write_A, row_write_B, row_write_C) = {
-      let (vec_A, vec_BC) = row_prod_layer.write_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (col_read_A, col_read_B, col_read_C) = {
-      let (vec_A, vec_BC) = col_prod_layer.read_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (col_write_A, col_write_B, col_write_C) = {
-      let (vec_A, vec_BC) = col_prod_layer.write_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (dotp_left_A, dotp_left_B, dotp_left_C) = {
-      let (vec_A, vec_BC) = dotp_circuit_left_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (dotp_right_A, dotp_right_B, dotp_right_C) = {
-      let (vec_A, vec_BC) = dotp_circuit_right_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
+    let num_instances = row_prod_layer.read_vec.len();
+    let mut prod_circuit_list = Vec::new();
+    let mut dotp_circuit_list = Vec::new();
+    let (_, dotp_left_vec) = dotp_circuit_left_vec.split_at_mut(0);
+    let (_, dotp_right_vec) = dotp_circuit_right_vec.split_at_mut(0);
+    // row_read
+    for i in 0..num_instances {
+      prod_circuit_list.push(row_prod_layer.read_vec[i].clone());
+      dotp_circuit_list.push(dotp_left_vec[i].clone());
+      dotp_circuit_list.push(dotp_right_vec[i].clone());
+    }
+    // row_write
+    for i in 0..num_instances {
+      prod_circuit_list.push(row_prod_layer.write_vec[i].clone());
+    }
+    // col_read
+    for i in 0..num_instances {
+      prod_circuit_list.push(col_prod_layer.read_vec[i].clone());
+    }
+    // col_write
+    for i in 0..num_instances {
+      prod_circuit_list.push(col_prod_layer.write_vec[i].clone());
+    }
 
     let (proof_ops, rand_ops) = ProductCircuitEvalProofBatched::prove(
-      &mut vec![
-        &mut row_read_A[0],
-        &mut row_read_B[0],
-        &mut row_read_C[0],
-        &mut row_write_A[0],
-        &mut row_write_B[0],
-        &mut row_write_C[0],
-        &mut col_read_A[0],
-        &mut col_read_B[0],
-        &mut col_read_C[0],
-        &mut col_write_A[0],
-        &mut col_write_B[0],
-        &mut col_write_C[0],
-      ],
-      &mut vec![
-        &mut dotp_left_A[0],
-        &mut dotp_right_A[0],
-        &mut dotp_left_B[0],
-        &mut dotp_right_B[0],
-        &mut dotp_left_C[0],
-        &mut dotp_right_C[0],
-      ],
+      &mut prod_circuit_list.iter_mut().map(|i| &mut *i).collect(),
+      &mut dotp_circuit_list.iter_mut().map(|i| &mut *i).collect(),
       transcript,
     );
 
