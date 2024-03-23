@@ -467,10 +467,8 @@ impl DotProductProofLog {
 
     let Cx = x_vec.commit(blind_x, &gens.gens_n).compress();
     Cx.append_to_transcript(b"Cx", transcript);
-
     let Cy = y.commit(blind_y, &gens.gens_1).compress();
     Cy.append_to_transcript(b"Cy", transcript);
-
     a_vec.append_to_transcript(b"a", transcript);
 
     // sample a random base and scale the generator used for
@@ -490,6 +488,7 @@ impl DotProductProofLog {
         &blind_Gamma,
         &blinds_vec,
       );
+
     let y_hat = x_hat * a_hat;
 
     let delta = {
