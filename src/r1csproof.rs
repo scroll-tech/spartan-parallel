@@ -774,6 +774,7 @@ impl R1CSProof {
       ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
     }
 
+    let timer_commit_opening = Timer::new("verify_sc_commitment_opening");
     // If w.num_inputs[p] == num_inputs, evaluate ry_baseline on the witness sec
     let ry_baseline = &ry[num_rounds_y - num_inputs.log_2()..].to_vec();
     let mut comm_list = Vec::new();
@@ -834,6 +835,8 @@ impl R1CSProof {
       }
     }
     */
+
+    timer_commit_opening.stop();
 
     // Then on rp
     let mut expected_comm_vars_list = Vec::new();
