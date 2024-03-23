@@ -507,51 +507,6 @@ impl R1CSProof {
       random_tape,
     );
 
-    /*
-    for i in 0..num_witness_secs {
-      let w = witness_secs[i];
-      let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
-      for p in 0..wit_sec_num_instance {
-        
-        // Depending on w.num_inputs[p], ry_short can be two different values
-        let ry_short = {
-          // if w.num_inputs[p] >= num_inputs, need to pad 0's to the front of ry
-          if w.num_inputs[p] >= num_inputs {
-            let ry_pad = vec![ZERO; w.num_inputs[p].log_2() - num_inputs.log_2()];
-            [ry_pad, ry_baseline.clone()].concat()
-          }
-          // Else ry_short is the last w.num_inputs[p].log_2() entries of ry
-          // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
-          else {
-            ry[num_rounds_y - w.num_inputs[p].log_2()..].to_vec()
-          }
-        };
-        let num_proofs_p = if w.is_short { 1 } else { num_proofs[p] };
-        let rq_short = rq[num_rounds_q - num_proofs_p.log_2()..].to_vec();
-        let poly = &w.poly_w[p];
-        let r = &[rq_short, ry_short.clone()].concat();
-        let eval_vars_at_ry = poly.evaluate(r);
-        let (proof_eval_vars_at_ry, comm_vars_at_ry) = PolyEvalProof::prove(
-          &poly,
-          None,
-          r,
-          &eval_vars_at_ry,
-          None,
-          &gens.gens_pc,
-          transcript,
-          random_tape,
-        );
-        if w.num_inputs[p] >= num_inputs {
-          eval_vars_at_ry_list[i].push(eval_vars_at_ry);
-        } else {
-          eval_vars_at_ry_list[i].push(eval_vars_at_ry * ry_factors[num_rounds_y - w.num_inputs[p].log_2()]);
-        }
-        proof_eval_vars_at_ry_list[i].push(proof_eval_vars_at_ry);
-        comm_vars_at_ry_list[i].push(comm_vars_at_ry);
-      }
-    }
-    */
-
     // Bind the resulting witness list to rp
     // poly_vars stores the result of each witness matrix bounded to (rq_short ++ ry)
     // but we want to bound them to (rq ++ ry)
@@ -802,40 +757,6 @@ impl R1CSProof {
       &comm_Zr_list,
       &comm_list,
     )?;
-
-    /*
-    for i in 0..num_witness_secs {
-      let w = witness_secs[i];
-      let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
-      for p in 0..wit_sec_num_instance {
-        // Depending on w.num_inputs[p], ry_short can be two different values
-        let ry_short = {
-          // if w.num_inputs[p] >= num_inputs, need to pad 0's to the front of ry
-          if w.num_inputs[p] >= num_inputs {
-            let ry_pad = &vec![ZERO; w.num_inputs[p].log_2() - num_inputs.log_2()];
-            [ry_pad, ry_baseline].concat()
-          }
-          // Else ry_short is the last w.num_inputs[p].log_2() entries of ry
-          // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
-          else {
-            ry[num_rounds_y - w.num_inputs[p].log_2()..].to_vec()
-          }
-        };
-        let num_proofs_p = if w.is_short { 1 } else { num_proofs[p] };
-        let rq_short = rq[num_rounds_q - num_proofs_p.log_2()..].to_vec();
-        let comm = &w.comm_w[p];
-        let r = &[rq_short, ry_short.clone()].concat();
-        self.proof_eval_vars_at_ry_list[i][p].verify(
-          &gens.gens_pc,
-          transcript,
-          &r,
-          &self.comm_vars_at_ry_list[i][p],
-          comm,
-        )?;
-      }
-    }
-    */
-
     timer_commit_opening.stop();
 
     // Then on rp
