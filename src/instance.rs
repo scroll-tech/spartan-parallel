@@ -250,18 +250,18 @@ impl Instance {
   }
 
   /// Generates CONSIS_CHECK instance based on parameters
-  /// CONSIS_CHECK takes in consis_w2 = <i, o>
+  /// CONSIS_CHECK takes in consis_w2 = <_, _, _, _, i, o, _, _>
   /// where i = v * (v + i0 * r + i1 * r^2 + i2 * r^3 + ...) and o = v * (v + o0 * r + o1 * r^2 + o2 * r^3 + ...)
   /// See perm_root
   /// and verifies (o[k] - i[k + 1]) * i[k + 1] = 0 for all k
   pub fn gen_consis_check_inst(total_num_proofs_bound: usize) -> (usize, usize, Instance) {
-    let num_vars = 2;
+    let num_vars = 8;
     let consis_check_num_cons_base = 1;
     let consis_check_num_non_zero_entries = 2 * total_num_proofs_bound;
     let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
   
-    let V_i = 0;
-    let V_o = 1;
+    let V_i = 4;
+    let V_o = 5;
     let consis_check_inst = {
       let mut A_list = Vec::new();
       let mut B_list = Vec::new();
@@ -299,13 +299,15 @@ impl Instance {
   /// Witnesses of PERM_ROOT is consisted of [w0, w1, w2, w3], each of size num_vars
   /// w0: tau, r, r^2, ...
   /// w1: one block_inputs entry: v, _, i0, i1, ..., o0, o1, ...
-  /// w2: one block_inputs entry dot product <r>: I, O, ZO, r * i1, r^2 * i2, r^3 * i3, ...
+  /// w2: one block_inputs entry dot product <r>: _, _, ZO, r * i1, r^2 * i2, r^3 * i3, ...
+  /// w3: one root of the polynomial: v, x, pi, D, I, O, _, _
   /// where I = v * (v + i0 + r * i1 + r^2 * i2 + ...),
-  ///       ZO * r^n = r^n * o0 + r^(n + 1) * o1, ...,
   ///       O = v * (v + ZO)
-  /// are used by the consistency check
+  ///       ZO * r^n = r^n * o0 + r^(n + 1) * o1, ...,
+  /// are used by the consistency check, AND
   /// w3[0]: valid bit, should match block_inputs[0]
   /// w3[1]: one root of the polynomial: v * (tau - i0 - r * i1 - r^2 * i2 - ...)
+  /// are used by permutation
   /// Note: Only process the first num_inputs_unpadded inputs since the rest are unused
   pub fn gen_perm_root_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
 
@@ -324,11 +326,11 @@ impl Instance {
         let V_cnst = V_valid;
         let V_input = |i: usize| num_vars + 2 + i;
         let V_output = |i: usize| num_vars + 2 + (num_inputs_unpadded - 1) + i;
-        let V_I = 2 * num_vars;
-        let V_O = 2 * num_vars + 1;
         let V_ZO = 2 * num_vars + 2;
         let V_input_dot_prod = |i: usize| if i == 0 { V_input(0) } else { 2 * num_vars + 2 + i };
         let V_output_dot_prod = |i: usize| 2 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
+        let V_I = 3 * num_vars + 4;
+        let V_O = 3 * num_vars + 5;
 
         let mut constraint_count = 0;
 
@@ -345,20 +347,20 @@ impl Instance {
             constraint_count, vec![(V_output(i), 1)], vec![(V_r(i + num_inputs_unpadded - 1), 1)], vec![(V_output_dot_prod(i), 1)]);
           constraint_count += 1;
         }
-        // I = v * (v + i0 + r * i1 + r^2 * i2 + ...)
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          constraint_count, 
-          vec![(V_valid, 1)], 
-          [vec![(V_cnst, 1)], (0..num_inputs_unpadded - 1).map(|i| (V_input_dot_prod(i), 1)).collect()].concat(),
-          vec![(V_I, 1)]
-        );
-        constraint_count += 1;
         // ZO * r^n = r^n * o0 + r^(n + 1) * o1, ...
         (A, B, C) = Instance::gen_constr(A, B, C,
           constraint_count, 
           vec![(V_ZO, 1)], 
           vec![(V_r(num_inputs_unpadded - 1), 1)],
           (0..num_inputs_unpadded - 1).map(|i| (V_output_dot_prod(i), 1)).collect()
+        );
+        constraint_count += 1;
+        // I = v * (v + i0 + r * i1 + r^2 * i2 + ...)
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          constraint_count, 
+          vec![(V_valid, 1)], 
+          [vec![(V_cnst, 1)], (0..num_inputs_unpadded - 1).map(|i| (V_input_dot_prod(i), 1)).collect()].concat(),
+          vec![(V_I, 1)]
         );
         constraint_count += 1;
         // O = v * (v + ZO)
