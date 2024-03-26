@@ -53,8 +53,6 @@ Verifying with Spartan
   * SNARK::verify 571.13175ms
 Proof Verification Successful!
 
-
-
 --
 CIRC_BLOCKS:
 Preprocessing instances...

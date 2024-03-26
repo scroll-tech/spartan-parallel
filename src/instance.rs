@@ -396,7 +396,7 @@ impl Instance {
   /// Generates PERM_POLY instance based on parameters
   /// The strategy is to compute the local polynomials (evaluated on tau) for each block instance
   /// Each w3[p][2] (i.e. w3[p][0][2]) stores the product pi for instance P. The verifier obtains all P of them and multiply them together.
-  /// The correct formular is pi = v[k] * x[k] * (pi[k+1] + (1 - v[k+1])))
+  /// The correct formular is pi[k] = v[k] * x[k] * (pi[k+1] + (1 - v[k+1])))
   /// To do this, think of each entry of w3[k] (w3[p][k]) as a tuple (v, x, pi, D)
   /// v[k]  <- whether the entry is valid
   /// x[k]  <- \tau - (\sum_i a_i * r^{i-1})
@@ -599,10 +599,14 @@ impl Instance {
   /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
   /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (val[k + 1] - val[k]) = 0: either address difference is 1, or value are the same, unless the next entry is invalid
   /// So we set D = v[k + 1] * (1 - addr[k + 1] + addr[k])
-  pub fn gen_mem_cohere_inst(total_num_mem_accesses_bound: usize) -> (usize, usize, Instance) {
-    let mem_cohere_num_cons_base = 4;
-    let mem_cohere_num_non_zero_entries = 8 * total_num_mem_accesses_bound;
-    let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound;
+  /// 
+  /// Input composition:
+  ///     Op[k]           Op[k + 1]
+  /// 0   1   2   3  |  4   5   6   7
+  /// v   D addr val |  v   D addr val
+  pub fn gen_mem_cohere_inst() -> (usize, usize, Instance) {
+    let mem_cohere_num_cons = 4;
+    let mem_cohere_num_non_zero_entries = 8;
   
     let mem_cohere_inst = {
       let V_valid = 0;
@@ -622,47 +626,33 @@ impl Instance {
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
   
         let mut num_cons = 0;
-        for i in 0..total_num_mem_accesses_bound - 1 {
-          // (v[k] - 1) * v[k + 1] = 0
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            num_cons, vec![(i * width + V_valid, 1), (i * width + V_cnst, -1)], vec![((i + 1) * width + V_valid, 1)], vec![]);
-          num_cons += 1;
-          // v[k + 1] * (1 - addr[k + 1] + addr[k]) = D[k]
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            num_cons, vec![((i + 1) * width + V_valid, 1)], vec![(i * width + V_cnst, 1), ((i + 1) * width + V_addr, -1), (i * width + V_addr, 1)], vec![(i * width + V_D, 1)]);
-          num_cons += 1;
-          // D[k] * (addr[k + 1] - addr[k]) = 0
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            num_cons, vec![(i * width + V_D, 1)], vec![((i + 1) * width + V_addr, 1), (i * width + V_addr, -1)], vec![]);
-          num_cons += 1;
-          // D[k] * (val[k + 1] - val[k]) = 0
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            num_cons, vec![(i * width + V_D, 1)], vec![((i + 1) * width + V_val, 1), (i * width + V_val, -1)], vec![]);
-          num_cons += 1;
-        }
-        // Pad A, B, C with dummy entries so their size is multiple of total_num_mem_accesses_bound
+        // (v[k] - 1) * v[k + 1] = 0
         (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_cnst, 0); 2], vec![(V_cnst, 0)], vec![]);
+          num_cons, vec![(V_valid, 1), (V_cnst, -1)], vec![(width + V_valid, 1)], vec![]);
         num_cons += 1;
+        // v[k + 1] * (1 - addr[k + 1] + addr[k]) = D[k]
         (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 3], vec![(V_cnst, 0)]);
+          num_cons, vec![(width + V_valid, 1)], vec![(V_cnst, 1), (width + V_addr, -1), (V_addr, 1)], vec![(V_D, 1)]);
         num_cons += 1;
+        // D[k] * (addr[k + 1] - addr[k]) = 0
         (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 2], vec![(V_cnst, 0)]);
+          num_cons, vec![(V_D, 1)], vec![(width + V_addr, 1), (V_addr, -1)], vec![]);
         num_cons += 1;
+        // D[k] * (val[k + 1] - val[k]) = 0
         (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_cnst, 0)], vec![(V_cnst, 0); 2], vec![(V_cnst, 0)]);
+          num_cons, vec![(V_D, 1)], vec![(width + V_val, 1), (V_val, -1)], vec![]);
+        
         (A, B, C)
       };
       A_list.push(A);
       B_list.push(B);
       C_list.push(C);
   
-      let mem_cohere_inst = Instance::new(1, mem_cohere_num_cons, total_num_mem_accesses_bound * width, &A_list, &B_list, &C_list).unwrap();
+      let mem_cohere_inst = Instance::new(1, mem_cohere_num_cons, 2 * width, &A_list, &B_list, &C_list).unwrap();
       
       mem_cohere_inst
     };
-    (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst)
+    (mem_cohere_num_cons, mem_cohere_num_non_zero_entries, mem_cohere_inst)
   }
 
   /*

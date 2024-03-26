@@ -40,6 +40,8 @@ mod unipoly;
 
 use std::cmp::{max, Ordering};
 
+use curve25519_dalek::ristretto::CompressedRistretto;
+use flate2::Compress;
 use instance::Instance;
 use dense_mlpoly::{DensePolynomial, PolyCommitment, PolyEvalProof};
 use errors::{ProofVerifyError, R1CSError};
@@ -56,6 +58,8 @@ use serde::{Deserialize, Serialize};
 use timer::Timer;
 use transcript::{AppendToTranscript, ProofTranscript};
 use std::thread;
+
+use crate::commitments::Commitments;
 
 const ZERO: Scalar = Scalar::zero();
 const ONE: Scalar = Scalar::one();
@@ -444,6 +448,7 @@ pub struct SNARK {
   block_comm_inputs_list: Vec<PolyCommitment>,
   exec_comm_inputs: Vec<PolyCommitment>,
   addr_comm_mems: Vec<PolyCommitment>,
+  addr_comm_mems_shifted: Vec<PolyCommitment>,
 
   perm_exec_comm_w2_list: Vec<PolyCommitment>,
   perm_block_comm_w2_list: Vec<PolyCommitment>,
@@ -498,6 +503,10 @@ struct MemAddrProofs {
   mem_cohere_r1cs_sat_proof: R1CSProof,
   mem_cohere_inst_evals: [Scalar; 3],
   mem_cohere_r1cs_eval_proof: R1CSEvalProof,
+  addr_mems_shift_proof: PolyEvalProof,
+  addr_mems_shift_evals: (CompressedRistretto, CompressedRistretto),
+  D0: CompressedRistretto,
+  V0: CompressedRistretto
 }
 
 // Sort block_num_proofs and record where each entry is
@@ -617,7 +626,6 @@ impl SNARK {
 
     total_num_mem_accesses_bound: usize,
     total_num_mem_accesses: usize,
-    mem_cohere_num_cons_base: usize,
     mem_cohere_inst: &Instance,
     mem_cohere_comm: &ComputationCommitment,
     mem_cohere_decomm: &ComputationDecommitment,
@@ -673,50 +681,52 @@ impl SNARK {
     let output_block_num = Scalar::from(output_block_num as u64);
     let input: Vec<Scalar> = input.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
     let output: Scalar = Scalar::from_bytes(output).unwrap();
-    let timer_commit = Timer::new("inst_commit");
-    // Commit public parameters
-    Scalar::from(func_input_width as u64).append_to_transcript(b"func_input_width", transcript);
-    Scalar::from(input_offset as u64).append_to_transcript(b"input_offset", transcript);
-    Scalar::from(output_offset as u64).append_to_transcript(b"output_offset", transcript);
-    Scalar::from(output_exec_num as u64).append_to_transcript(b"output_exec_num", transcript);
-    Scalar::from(num_ios as u64).append_to_transcript(b"num_ios", transcript);
-    for n in num_vars_per_block {
-      Scalar::from(*n as u64).append_to_transcript(b"num_vars_per_block", transcript);
-    }
-    Scalar::from(addr_block_w3_size as u64).append_to_transcript(b"addr_block_w3_size", transcript);
-    Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
-    Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
-    Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
-    Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
-    Scalar::from(max_block_num_mem_accesses as u64).append_to_transcript(b"max_block_num_mem_accesses", transcript);
-    Scalar::from(total_num_mem_accesses_bound as u64).append_to_transcript(b"total_num_mem_accesses_bound", transcript);
-    Scalar::from(total_num_mem_accesses as u64).append_to_transcript(b"total_num_mem_accesses", transcript);
-    
-    // commit mem_block_mask
-    for c in mem_block_comm_mask_list {
-      c.append_to_transcript(b"mem_block_masks", transcript);
-    }
-    // commit num_proofs
-    Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
-    for n in block_num_proofs {
-      Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
-    }
+    {
+      let timer_commit = Timer::new("inst_commit");
+      // Commit public parameters
+      Scalar::from(func_input_width as u64).append_to_transcript(b"func_input_width", transcript);
+      Scalar::from(input_offset as u64).append_to_transcript(b"input_offset", transcript);
+      Scalar::from(output_offset as u64).append_to_transcript(b"output_offset", transcript);
+      Scalar::from(output_exec_num as u64).append_to_transcript(b"output_exec_num", transcript);
+      Scalar::from(num_ios as u64).append_to_transcript(b"num_ios", transcript);
+      for n in num_vars_per_block {
+        Scalar::from(*n as u64).append_to_transcript(b"num_vars_per_block", transcript);
+      }
+      Scalar::from(addr_block_w3_size as u64).append_to_transcript(b"addr_block_w3_size", transcript);
+      Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
+      Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
+      Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
+      Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
+      Scalar::from(max_block_num_mem_accesses as u64).append_to_transcript(b"max_block_num_mem_accesses", transcript);
+      Scalar::from(total_num_mem_accesses_bound as u64).append_to_transcript(b"total_num_mem_accesses_bound", transcript);
+      Scalar::from(total_num_mem_accesses as u64).append_to_transcript(b"total_num_mem_accesses", transcript);
+      
+      // commit mem_block_mask
+      for c in mem_block_comm_mask_list {
+        c.append_to_transcript(b"mem_block_masks", transcript);
+      }
+      // commit num_proofs
+      Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
+      for n in block_num_proofs {
+        Scalar::from(*n as u64).append_to_transcript(b"block_num_proofs", transcript);
+      }
 
-    // append a commitment to the computation to the transcript
-    block_comm.comm.append_to_transcript(b"block_comm", transcript);
-    consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
-    perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
-    perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
-    mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
-    mem_cohere_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      // append a commitment to the computation to the transcript
+      block_comm.comm.append_to_transcript(b"block_comm", transcript);
+      consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      perm_root_comm.comm.append_to_transcript(b"block_comm", transcript);
+      perm_poly_comm.comm.append_to_transcript(b"block_comm", transcript);
+      mem_extract_comm.comm.append_to_transcript(b"block_comm", transcript);
+      mem_cohere_comm.comm.append_to_transcript(b"consis_comm", transcript);
 
-    // Commit io
-    input_block_num.append_to_transcript(b"input_block_num", transcript);
-    output_block_num.append_to_transcript(b"output_block_num", transcript);
-    input.append_to_transcript(b"input_list", transcript);
-    output.append_to_transcript(b"output_list", transcript);
+      // Commit io
+      input_block_num.append_to_transcript(b"input_block_num", transcript);
+      output_block_num.append_to_transcript(b"output_block_num", transcript);
+      input.append_to_transcript(b"input_list", transcript);
+      output.append_to_transcript(b"output_list", transcript);
 
-    timer_commit.stop();
+      timer_commit.stop();
+    }
 
     // --
     // BLOCK SORT
@@ -856,7 +866,9 @@ impl SNARK {
     };
     let (
       addr_poly_mems,
-      addr_comm_mems
+      addr_comm_mems,
+      addr_mems_shifted_prover,
+      addr_comm_mems_shifted,
     ) = {
       if total_num_mem_accesses > 0 {
         let (addr_poly_mems, addr_comm_mems) = {
@@ -871,13 +883,34 @@ impl SNARK {
           addr_comm_mems.append_to_transcript(b"poly_commitment", transcript);
           (addr_poly_mems, addr_comm_mems)
         };
+        // Remove the first entry and shift the remaining entries up by one
+        // Used later by coherence check
+        let (addr_mems_shifted_prover, addr_comm_mems_shifted) = {
+          let addr_mems_shifted = addr_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let addr_poly_mems_shifted = DensePolynomial::new(addr_mems_shifted);
+
+          // produce a commitment to the satisfying assignment
+          let (addr_comm_mems_shifted, _blinds_inputs) = addr_poly_mems_shifted.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          addr_comm_mems_shifted.append_to_transcript(b"poly_commitment", transcript);
+
+          let addr_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_mems_list[1..].to_vec(), vec![vec![ZERO; 4]]].concat()], vec![addr_poly_mems_shifted]);
+
+          (addr_mems_shifted_prover, addr_comm_mems_shifted)
+        };
         (
           vec![addr_poly_mems], 
           vec![addr_comm_mems],
+          addr_mems_shifted_prover, 
+          vec![addr_comm_mems_shifted],
         )
       } else {
         (
           Vec::new(),
+          Vec::new(),
+          ProverWitnessSecInfo::dummy(),
           Vec::new()
         )
       }
@@ -1269,7 +1302,7 @@ impl SNARK {
     let block_inputs_prover = ProverWitnessSecInfo::new(block_inputs_mat, block_poly_inputs_list);
     let exec_inputs_prover = ProverWitnessSecInfo::new(vec![exec_inputs_list], exec_poly_inputs);
     let addr_mems_prover = if total_num_mem_accesses_bound > 0 {
-      ProverWitnessSecInfo::new(vec![addr_mems_list], addr_poly_mems)
+      ProverWitnessSecInfo::new(vec![addr_mems_list.clone()], addr_poly_mems)
     } else {
       ProverWitnessSecInfo::dummy()
     };
@@ -1494,18 +1527,14 @@ impl SNARK {
         let timer_proof = Timer::new("Mem Cohere");
         let (mem_cohere_r1cs_sat_proof, mem_cohere_challenges) = {
           let (proof, mem_cohere_challenges) = {
-            R1CSProof::prove_single(
+            R1CSProof::prove(
               1,
-              mem_cohere_num_cons_base,
-              4,
               total_num_mem_accesses_bound,
-              total_num_mem_accesses,
               &vec![total_num_mem_accesses],
+              4,
+              vec![&addr_mems_prover, &addr_mems_shifted_prover],
               &mem_cohere_inst.inst,
               &vars_gens,
-              &vec![4],
-              &addr_mems_prover.w_mat,
-              &addr_mems_prover.poly_w,
               transcript,
               &mut random_tape,
             )
@@ -1519,7 +1548,7 @@ impl SNARK {
     
         // Final evaluation on MEM_COHERE
         let (mem_cohere_inst_evals, mem_cohere_r1cs_eval_proof) = {
-          let [_, rx, ry] = &mem_cohere_challenges;
+          let [_, _, rx, ry] = &mem_cohere_challenges;
           let inst = mem_cohere_inst;
           let timer_eval = Timer::new("eval_sparse_polys");
           let inst_evals = {
@@ -1550,12 +1579,49 @@ impl SNARK {
           
           (inst_evals, r1cs_eval_proof)
         };
+
+        // Prove that addr_mems_shifted is addr_mems shifted by 4
+        // We do so by treating both as univariate polynomials and evaluate on a single point C
+        // So addr_mems(C) = addr_mems_shifted(C) * C^4 + (1, C, C^2, C^3) * (v0, D0, A0, V0)
+        // The verifier knows that v0 = 1 and A0 = 0, but needs the prover to send committed D0 and V0
+        let poly_size = addr_mems_prover.poly_w[0].len();
+        let orig_poly = &addr_mems_prover.poly_w[0];
+        let shifted_poly = &addr_mems_shifted_prover.poly_w[0];
+        let D0 = addr_mems_prover.poly_w[0][1].commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1).compress();
+        let V0 = addr_mems_prover.poly_w[0][3].commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1).compress();
+        D0.append_to_transcript(b"addr_D0", transcript);
+        V0.append_to_transcript(b"addr_V0", transcript);
+        let c = transcript.challenge_scalar(b"challenge_c");
+        let mut rc = Vec::new();
+        let mut next_c = ONE;
+        for _ in 0..poly_size {
+          rc.push(next_c);
+          next_c *= c;
+        }
+        let addr_mems_eval = (0..poly_size).fold(ZERO, |a, b| a + orig_poly[b] * rc[b]);
+        let addr_mems_shifted_eval = (0..poly_size).fold(ZERO, |a, b| a + shifted_poly[b] * rc[b]);
+        let c_addr_mems_eval = addr_mems_eval.commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1).compress();
+        let c_addr_mems_shifted_eval = addr_mems_shifted_eval.commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1).compress();
+        let (addr_mems_shift_proof, _eval) = PolyEvalProof::prove_uni_batched_instances(
+          &vec![orig_poly, shifted_poly],
+          None,
+          &c,
+          &vec![addr_mems_eval, addr_mems_shifted_eval],
+          None,
+          &vars_gens.gens_pc,
+          transcript,
+          &mut random_tape,
+        );
         timer_proof.stop();
 
         Some(MemAddrProofs {
           mem_cohere_r1cs_sat_proof,
           mem_cohere_inst_evals,
           mem_cohere_r1cs_eval_proof,
+          addr_mems_shift_proof,
+          addr_mems_shift_evals: (c_addr_mems_eval, c_addr_mems_shifted_eval),
+          D0,
+          V0
         })
       } else {
         None
@@ -1744,11 +1810,13 @@ impl SNARK {
     timer_proof.stop();
 
     timer_prove.stop();
+
     SNARK {
       block_comm_vars_list,
       block_comm_inputs_list,
       exec_comm_inputs,
       addr_comm_mems,
+      addr_comm_mems_shifted,
 
       perm_exec_comm_w2_list,
       perm_block_comm_w2_list,
@@ -1831,7 +1899,7 @@ impl SNARK {
 
     total_num_mem_accesses_bound: usize,
     total_num_mem_accesses: usize,
-    mem_cohere_num_cons_base: usize,
+    mem_cohere_num_cons: usize,
     mem_cohere_comm: &ComputationCommitment,
     mem_cohere_gens: &SNARKGens,
 
@@ -1977,12 +2045,22 @@ impl SNARK {
       )
     };
 
-    let addr_mems_verifier = {
+    let (
+      addr_mems_verifier,
+      addr_mems_shifted_verifier
+     ) = {
       if total_num_mem_accesses > 0 {
         self.addr_comm_mems[0].append_to_transcript(b"poly_commitment", transcript);
-        VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_mem_accesses], &self.addr_comm_mems)
+        self.addr_comm_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
+        (
+          VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_mem_accesses], &self.addr_comm_mems),
+          VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_mem_accesses], &self.addr_comm_mems_shifted)
+        )
       } else {
-        VerifierWitnessSecInfo::dummy()
+        (
+          VerifierWitnessSecInfo::dummy(),
+          VerifierWitnessSecInfo::dummy()
+        )
       }
     };
 
@@ -2206,17 +2284,15 @@ impl SNARK {
       // --
       {
         let timer_sat_proof = Timer::new("Mem Cohere Sat");
-        let mem_cohere_challenges = mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify_single(
+        let mem_cohere_challenges = mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify(
           1,
-          mem_cohere_num_cons_base,
-          4,
           total_num_mem_accesses_bound,
-          total_num_mem_accesses,
           &vec![total_num_mem_accesses],
+          4,
+          vec![&addr_mems_verifier, &addr_mems_shifted_verifier],
+          mem_cohere_num_cons,
           &vars_gens,
           &mem_addr_proofs.mem_cohere_inst_evals,
-          &vec![4],
-          &self.addr_comm_mems,
           transcript,
         )?;
         timer_sat_proof.stop();
@@ -2227,7 +2303,7 @@ impl SNARK {
         Ar.append_to_transcript(b"Ar_claim", transcript);
         Br.append_to_transcript(b"Br_claim", transcript);
         Cr.append_to_transcript(b"Cr_claim", transcript);
-        let [_, rx, ry] = &mem_cohere_challenges;
+        let [_, _, rx, ry] = &mem_cohere_challenges;
         mem_addr_proofs.mem_cohere_r1cs_eval_proof.verify(
           &mem_cohere_comm.comm,
           rx,
@@ -2237,6 +2313,31 @@ impl SNARK {
           transcript,
         )?;
         timer_eval_proof.stop();
+
+        let timer_shift_proof = Timer::new("Mem Cohere Shift");
+        mem_addr_proofs.D0.append_to_transcript(b"addr_D0", transcript);
+        mem_addr_proofs.V0.append_to_transcript(b"addr_V0", transcript);
+        let c = transcript.challenge_scalar(b"challenge_c");
+        let c_eval_orig = mem_addr_proofs.addr_mems_shift_evals.0.decompress().unwrap();
+        let c_eval_shifted = mem_addr_proofs.addr_mems_shift_evals.1.decompress().unwrap();
+        mem_addr_proofs.addr_mems_shift_proof.verify_uni_batched_instances(
+          &vars_gens.gens_pc,
+          transcript,
+          &c,
+          &vec![c_eval_orig, c_eval_shifted],
+          &vec![&addr_mems_verifier.comm_w[0], &addr_mems_shifted_verifier.comm_w[0]],
+          4 * total_num_mem_accesses,
+        )?;
+        // addr_mems(C) = addr_mems_shifted(C) * C^4 + (1, C, C^2, C^3) * (v0, D0, A0, V0)
+        // v0 = 1, A0 = 0, D0 & V0 obtained from prover
+        let C_ONE = ONE.commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1);
+        let D0 = mem_addr_proofs.D0.decompress().unwrap();
+        let V0 = mem_addr_proofs.V0.decompress().unwrap();
+        let c2 = c * c;
+        let c3 = c * c2;
+        let c4 = c * c3;
+        assert_eq!(c_eval_orig, c_eval_shifted * c4 + C_ONE + D0 * c + V0 * c3);
+        timer_shift_proof.stop();
       };
     }
 

@@ -746,7 +746,7 @@ impl R1CSProof {
         comm_Zr_list.push(self.comm_vars_at_ry_list[i][p].decompress().unwrap());
       }
     }
-    PolyEvalProof::verify_plain_batched_instances_disjoint_rounds(
+    PolyEvalProof::verify_batched_instances_disjoint_rounds(
       &self.proof_eval_vars_at_ry_list,
       &num_proofs_list,
       &num_inputs_list,
@@ -1279,7 +1279,7 @@ impl R1CSProof {
 
     // verify Z(rp, rq, ry) proof against the initial commitment
     // First instance-by-instance on ry
-    PolyEvalProof::verify_plain_batched_instances_disjoint_rounds(
+    PolyEvalProof::verify_batched_instances_disjoint_rounds(
       &self.proof_eval_vars_at_ry_list,
       &input_rows,
       &w_input_size,

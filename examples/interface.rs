@@ -407,7 +407,7 @@ fn main() {
   // MEM_EXTRACT
   let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(addr_block_w3_size, max_block_num_mem_accesses);
   // MEM_COHERE
-  let (mem_cohere_num_cons_base, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst(total_num_mem_accesses_bound_padded);
+  let (mem_cohere_num_cons, mem_cohere_num_non_zero_entries, mem_cohere_inst) = Instance::gen_mem_cohere_inst();
   println!("Finished Mem");
 
   // --
@@ -416,7 +416,6 @@ fn main() {
   println!("Producing Public Parameters...");
   let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
   let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
-  let mem_cohere_num_cons = mem_cohere_num_cons_base * total_num_mem_accesses_bound_padded;
 
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, 2 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
@@ -424,7 +423,7 @@ fn main() {
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * addr_block_w3_size, 1, mem_extract_num_non_zero_entries);
-  let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, total_num_mem_accesses_bound_padded * 4, 1, mem_cohere_num_non_zero_entries);
+  let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, 2 * 4, 1, mem_cohere_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   let vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   
@@ -511,7 +510,6 @@ fn main() {
 
     total_num_mem_accesses_bound,
     rtk.total_num_mem_accesses,
-    mem_cohere_num_cons_base,
     &mem_cohere_inst,
     &mem_cohere_comm,
     &mem_cohere_decomm,
@@ -573,7 +571,7 @@ fn main() {
     &mem_extract_gens,
     total_num_mem_accesses_bound,
     rtk.total_num_mem_accesses,
-    mem_cohere_num_cons_base,
+    mem_cohere_num_cons,
     &mem_cohere_comm,
     &mem_cohere_gens,
 

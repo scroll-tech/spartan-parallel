@@ -557,6 +557,8 @@ impl PolyEvalProof {
     let mut R_list: Vec<Vec<Scalar>> = Vec::new();
     let mut Zc_list: Vec<Scalar> = Vec::new();
 
+    let c_base = transcript.challenge_scalar(b"challenge_c");
+    let mut c = Scalar::one();
     for i in 0..r_list.len() {
       let eq = EqPolynomial::new(r_list[i].to_vec());
       let (Li, Ri) = eq.compute_factored_evals();
@@ -565,7 +567,7 @@ impl PolyEvalProof {
       if let Some(index) = index_map.get(&r_list[i][..left_num_vars]) {
         // L already exist
         // generate coefficient for RLC
-        let c = transcript.challenge_scalar(b"challenge_c");
+        c *= c_base;
         R_list[*index] = (0..R_size).map(|j| R_list[*index][j] + c * Ri[j]).collect();
         Zc_list[*index] += c * Zr_list[i];
       } else {
@@ -623,13 +625,15 @@ impl PolyEvalProof {
     let mut R_list: Vec<Vec<Scalar>> = Vec::new();
     let mut Zc_list: Vec<Scalar> = Vec::new();
 
+    let c_base = transcript.challenge_scalar(b"challenge_c");
+    let mut c = Scalar::one();
     for i in 0..r_list.len() {
       let eq = EqPolynomial::new(r_list[i].to_vec());
       let (Li, Ri) = eq.compute_factored_evals();
       if let Some(index) = index_map.get(&r_list[i][..left_num_vars]) {
         // L already exist
         // generate coefficient for RLC
-        let c = transcript.challenge_scalar(b"challenge_c");
+        c *= c_base;
         R_list[*index] = (0..Ri.len()).map(|j| R_list[*index][j] + c * Ri[j]).collect();
         Zc_list[*index] += c * Zr_list[i];
       } else {
@@ -920,8 +924,7 @@ impl PolyEvalProof {
     proof_list
   }
 
-
-  pub fn verify_plain_batched_instances_disjoint_rounds(
+  pub fn verify_batched_instances_disjoint_rounds(
     proof_list: &Vec<PolyEvalProof>,
     num_proofs_list: &Vec<usize>,
     num_inputs_list: &Vec<usize>,
@@ -998,6 +1001,143 @@ impl PolyEvalProof {
     }
 
     Ok(())
+  }
+
+  // Treat the polynomial(s) as univariate and open on a single point
+  // Assume all polynomials are of the same size
+  pub fn prove_uni_batched_instances(
+    poly_list: &Vec<&DensePolynomial>,
+    blinds_opt: Option<&PolyCommitmentBlinds>,
+    r: &Scalar,                    // point at which the polynomial is evaluated
+    Zr: &Vec<Scalar>,              // evaluation of \widetilde{Z}(r)
+    blind_Zr_opt: Option<&Scalar>, // specifies a blind for Zr
+    gens: &PolyCommitmentGens,
+    transcript: &mut Transcript,
+    random_tape: &mut RandomTape,
+  ) -> (PolyEvalProof, CompressedGroup) {
+    transcript.append_protocol_name(PolyEvalProof::protocol_name());
+
+    let num_vars = poly_list[0].get_num_vars();
+    for poly in poly_list {
+      assert_eq!(poly.get_num_vars(), num_vars);
+    }
+
+    let (left_num_vars, right_num_vars) = EqPolynomial::compute_factored_lens(num_vars);
+    let L_size = left_num_vars.pow2();
+    let R_size = right_num_vars.pow2();
+
+    let default_blinds = PolyCommitmentBlinds {
+      blinds: vec![Scalar::zero(); L_size],
+    };
+    let blinds = blinds_opt.map_or(&default_blinds, |p| p);
+
+    assert_eq!(blinds.blinds.len(), L_size);
+
+    let zero = Scalar::zero();
+    let blind_Zr = blind_Zr_opt.map_or(&zero, |p| p);
+
+    // compute the L and R vectors
+    // R is 1, r, r^2, ...
+    let (L, R) = {
+      let mut r_base = Scalar::one();
+      let mut R = Vec::new();
+      for _ in 0..R_size {
+        R.push(r_base);
+        r_base *= r;
+      }
+      // L is 1, r^k, r^2k, ...
+      let mut l_base = Scalar::one();
+      let mut L = Vec::new();
+      for _ in 0..L_size {
+        L.push(l_base);
+        l_base *= r_base;
+      }
+      (L, R)
+    };
+
+    // compute the vector underneath L*Z and the L*blinds
+    // compute vector-matrix product between L and Z viewed as a matrix
+    let LZ_blind: Scalar = (0..L.len()).map(|i| blinds.blinds[i] * L[i]).sum();
+    let c_base = transcript.challenge_scalar(b"challenge_c");
+    let mut c = Scalar::one();
+    let mut LZ_comb = poly_list[0].bound(&L);
+    let mut Zr_comb = Zr[0];
+
+    for i in 1..poly_list.len() {
+      let poly = &poly_list[i];
+      c *= c_base;
+      let LZ = poly.bound(&L);
+      LZ_comb = (0..LZ.len()).map(|i| LZ_comb[i] + c * LZ[i]).collect();
+      Zr_comb += c * Zr[i];
+    }
+
+    // a dot product proof of size R_size
+    let (proof, _C_LR, C_Zr_prime) = DotProductProofLog::prove(
+      &gens.gens,
+      transcript,
+      random_tape,
+      &LZ_comb,
+      &LZ_blind,
+      &R,
+      &Zr_comb,
+      blind_Zr,
+    );
+
+    (PolyEvalProof { proof }, C_Zr_prime)
+  }
+
+  pub fn verify_uni_batched_instances(
+    &self,
+    gens: &PolyCommitmentGens,
+    transcript: &mut Transcript,
+    r: &Scalar,              // point at which the polynomial is evaluated
+    C_Zr: &Vec<RistrettoPoint>, // commitment to \widetilde{Z}(r)
+    comm_list: &Vec<&PolyCommitment>,
+    poly_size: usize,
+  ) -> Result<(), ProofVerifyError> {
+    transcript.append_protocol_name(PolyEvalProof::protocol_name());
+
+    // compute L and R
+    let (left_num_vars, right_num_vars) = EqPolynomial::compute_factored_lens(poly_size.next_power_of_two().log_2());
+    let L_size = left_num_vars.pow2();
+    let R_size = right_num_vars.pow2();
+
+    let (L, R) = {
+      let mut r_base = Scalar::one();
+      let mut R = Vec::new();
+      for _ in 0..R_size {
+        R.push(r_base);
+        r_base *= r;
+      }
+      // L is 1, r^k, r^2k, ...
+      let mut l_base = Scalar::one();
+      let mut L = Vec::new();
+      for _ in 0..L_size {
+        L.push(l_base);
+        l_base *= r_base;
+      }
+      (L, R)
+    };
+
+    // compute a weighted sum of commitments and L
+    let c_base = transcript.challenge_scalar(b"challenge_c");
+    let mut c = Scalar::one();
+    let C_decompressed = comm_list[0].C.iter().map(|pt| pt.decompress().unwrap());
+    let mut C_LZ_comb = GroupElement::vartime_multiscalar_mul(&L, C_decompressed);
+    let mut C_Zr_comb = C_Zr[0];
+
+    for i in 1..comm_list.len() {
+      let comm = comm_list[i];
+      c *= c_base;
+      let C_decompressed = comm.C.iter().map(|pt| pt.decompress().unwrap());
+      let C_LZ = GroupElement::vartime_multiscalar_mul(&L, C_decompressed);
+      C_LZ_comb += c * C_LZ;
+      C_Zr_comb += c * C_Zr[i];
+    }
+
+    self
+      .proof
+      .verify(R.len(), &gens.gens, transcript, &R, &C_LZ_comb.compress(), &C_Zr_comb.compress())
   }
 
 
