@@ -1140,7 +1140,6 @@ impl PolyEvalProof {
       .verify(R.len(), &gens.gens, transcript, &R, &C_LZ_comb.compress(), &C_Zr_comb.compress())
   }
 
-
 }
 
 #[cfg(test)]

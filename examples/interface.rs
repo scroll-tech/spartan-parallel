@@ -391,7 +391,7 @@ fn main() {
 
   // CONSIS INSTANCES
   // CONSIS_CHECK
-  let (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst(total_num_proofs_bound);
+  let (consis_check_num_cons, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst();
   println!("Finished Consis");
 
   // PERM INSTANCES
@@ -414,12 +414,11 @@ fn main() {
   // COMMITMENT PREPROCESSING
   // --
   println!("Producing Public Parameters...");
-  let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
   let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
 
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, 2 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
-  let consis_check_gens = SNARKGens::new(consis_check_num_cons, total_num_proofs_bound * 8, 1, consis_check_num_non_zero_entries);
+  let consis_check_gens = SNARKGens::new(consis_check_num_cons, 2 * 8, 1, consis_check_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * addr_block_w3_size, 1, mem_extract_num_non_zero_entries);
@@ -486,7 +485,6 @@ fn main() {
     &block_gens,
     
     rtk.consis_num_proofs,
-    consis_check_num_cons_base,
     &consis_check_inst,
     &consis_check_comm,
     &consis_check_decomm,
@@ -554,7 +552,7 @@ fn main() {
     &block_gens,
 
     rtk.consis_num_proofs, 
-    consis_check_num_cons_base, 
+    consis_check_num_cons, 
     &consis_check_comm,
     &consis_check_gens,
 

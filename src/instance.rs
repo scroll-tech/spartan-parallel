@@ -254,14 +254,13 @@ impl Instance {
   /// where i = v * (v + i0 * r + i1 * r^2 + i2 * r^3 + ...) and o = v * (v + o0 * r + o1 * r^2 + o2 * r^3 + ...)
   /// See perm_root
   /// and verifies (o[k] - i[k + 1]) * i[k + 1] = 0 for all k
-  pub fn gen_consis_check_inst(total_num_proofs_bound: usize) -> (usize, usize, Instance) {
-    let num_vars = 8;
-    let consis_check_num_cons_base = 1;
-    let consis_check_num_non_zero_entries = 2 * total_num_proofs_bound;
-    let consis_check_num_cons = consis_check_num_cons_base * total_num_proofs_bound;
+  pub fn gen_consis_check_inst() -> (usize, usize, Instance) {
+    let consis_check_num_cons = 2;
+    let consis_check_num_non_zero_entries = 2;
   
     let V_i = 4;
     let V_o = 5;
+    let width = 8;
     let consis_check_inst = {
       let mut A_list = Vec::new();
       let mut B_list = Vec::new();
@@ -274,25 +273,20 @@ impl Instance {
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
   
         // R1CS:
-        for i in 0..total_num_proofs_bound - 1 {
-          // Output matches input
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            i, vec![(i * num_vars + V_o, 1), ((i + 1) * num_vars + V_i, -1)], vec![((i + 1) * num_vars + V_i, 1)], vec![]);
-        }
-        // Pad A, B, C with dummy entries so their size is multiple of total_num_proofs_bound
+        // Output matches input
         (A, B, C) = Instance::gen_constr(A, B, C,
-          total_num_proofs_bound - 1, vec![(V_i, 0); 2], vec![(V_i, 0)], vec![]);
+          0, vec![(V_o, 1), (width + V_i, -1)], vec![(width + V_i, 1)], vec![]);
         (A, B, C)
       };
       A_list.push(A);
       B_list.push(B);
       C_list.push(C);
   
-      let consis_check_inst = Instance::new(1, consis_check_num_cons, total_num_proofs_bound * num_vars, &A_list, &B_list, &C_list).unwrap();
+      let consis_check_inst = Instance::new(1, consis_check_num_cons, 2 * width, &A_list, &B_list, &C_list).unwrap();
       
       consis_check_inst
     };
-    (consis_check_num_cons_base, consis_check_num_non_zero_entries, consis_check_inst)
+    (consis_check_num_cons, consis_check_num_non_zero_entries, consis_check_inst)
   }
 
   /// Generates PERM_ROOT instance based on parameters
