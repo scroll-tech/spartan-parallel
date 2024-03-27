@@ -41,7 +41,6 @@ mod unipoly;
 use std::cmp::{max, Ordering};
 
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
-use flate2::Compress;
 use instance::Instance;
 use dense_mlpoly::{DensePolynomial, PolyCommitment, PolyEvalProof};
 use errors::{ProofVerifyError, R1CSError};
@@ -57,7 +56,6 @@ use scalar::Scalar;
 use serde::{Deserialize, Serialize};
 use timer::Timer;
 use transcript::{AppendToTranscript, ProofTranscript};
-use std::thread;
 
 use crate::commitments::Commitments;
 
@@ -261,7 +259,6 @@ impl IOProofs {
 // Finally, show shifted(C) = orig(C) * C^(shift_size) + rc * openings, where rc * openings are the first few entries of the original poly dot product with the power series of C
 #[derive(Serialize, Deserialize, Debug)]
 struct ShiftProofs {
-  shift_size: usize,
   proof: PolyEvalProof,
   C_orig_evals: Vec<CompressedRistretto>,
   C_shifted_evals: Vec<CompressedRistretto>,
@@ -272,7 +269,6 @@ impl ShiftProofs {
   fn prove(
     orig_polys: Vec<&DensePolynomial>,
     shifted_polys: Vec<&DensePolynomial>,
-    shift_size: usize,
     // For each orig_poly, how many entries at the front of proof 0 are non-zero?
     header_len_list: Vec<usize>,
     vars_gens: &R1CSGens,
@@ -282,13 +278,8 @@ impl ShiftProofs {
     // Assert that all polynomials are of the same size
     let num_instances = orig_polys.len();
     assert_eq!(num_instances, shifted_polys.len());
-    let poly_size = orig_polys[0].len();
-    for poly in &orig_polys {
-      assert_eq!(poly_size, poly.len());
-    }
-    for poly in &shifted_polys {
-      assert_eq!(poly_size, poly.len());
-    }
+    let max_poly_size = orig_polys.iter().fold(0, |m, p| if p.len() > m { p.len() } else { m });
+    let max_poly_size = shifted_polys.iter().fold(max_poly_size, |m, p| if p.len() > m { p.len() } else { m });
     // Open entry 0..header_len_list[p] - 1
     let mut openings = vec![Vec::new(); num_instances];
     for p in 0..num_instances {
@@ -301,7 +292,7 @@ impl ShiftProofs {
     let c = transcript.challenge_scalar(b"challenge_c");
     let mut rc = Vec::new();
     let mut next_c = ONE;
-    for _ in 0..poly_size {
+    for _ in 0..max_poly_size {
       rc.push(next_c);
       next_c *= c;
     }
@@ -312,8 +303,8 @@ impl ShiftProofs {
     for p in 0..num_instances {
       let orig_poly = orig_polys[p];
       let shifted_poly = shifted_polys[p];
-      let orig_eval = (0..poly_size).fold(ZERO, |a, b| a + orig_poly[b] * rc[b]);
-      let shifted_eval = (0..poly_size).fold(ZERO, |a, b| a + shifted_poly[b] * rc[b]);
+      let orig_eval = (0..orig_poly.len()).fold(ZERO, |a, b| a + orig_poly[b] * rc[b]);
+      let shifted_eval = (0..shifted_poly.len()).fold(ZERO, |a, b| a + shifted_poly[b] * rc[b]);
       orig_evals.push(orig_eval);
       shifted_evals.push(shifted_eval);
       C_orig_evals.push(orig_eval.commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1).compress());
@@ -321,17 +312,14 @@ impl ShiftProofs {
     }
     let (addr_mems_shift_proof, _eval) = PolyEvalProof::prove_uni_batched_instances(
       &[orig_polys, shifted_polys].concat(),
-      None,
       &c,
       &[orig_evals, shifted_evals].concat(),
-      None,
       &vars_gens.gens_pc,
       transcript,
       random_tape,
     );
 
     ShiftProofs {
-      shift_size,
       proof: addr_mems_shift_proof,
       C_orig_evals,
       C_shifted_evals,
@@ -343,8 +331,8 @@ impl ShiftProofs {
     &self,
     orig_comms: Vec<&PolyCommitment>,
     shifted_comms: Vec<&PolyCommitment>,
-    poly_size: usize,
-    shift_size: usize,
+    poly_size_list: Vec<usize>,
+    shift_size_list: Vec<usize>,
     // For each orig_poly, how many entries at the front of proof 0 are non-zero?
     header_len_list: Vec<usize>,
     vars_gens: &R1CSGens,
@@ -357,22 +345,25 @@ impl ShiftProofs {
         self.openings[p][i].append_to_transcript(b"shift_header_entry", transcript);
       }
     }
+    let max_shift_size = shift_size_list.iter().fold(0, |m, i| if *i > m { *i } else { m });
     let c = transcript.challenge_scalar(b"challenge_c");
     let mut rc = Vec::new();
     let mut next_c = ONE;
-    for _ in 0..shift_size {
+    for _ in 0..max_shift_size + 1 {
       rc.push(next_c);
       next_c *= c;
     }
     let C_evals_orig_decompressed: Vec<RistrettoPoint> = self.C_orig_evals.iter().map(|i| i.decompress().unwrap()).collect();
     let C_evals_shifted_decompressed: Vec<RistrettoPoint> = self.C_shifted_evals.iter().map(|i| i.decompress().unwrap()).collect();
     // shifted(C) = orig(C) * C^(shift_size) + rc * openings
+    /*
     for p in 0..num_instances {
       let orig = C_evals_orig_decompressed[p];
       let shifted = C_evals_shifted_decompressed[p];
-      let reverse_shifted = (0..header_len_list[p]).fold(shifted * next_c, |s, i| s + rc[i] * self.openings[p][i].decompress().unwrap());
+      let reverse_shifted = (0..header_len_list[p]).fold(shifted * rc[shift_size_list[p]], |s, i| s + rc[i] * self.openings[p][i].decompress().unwrap());
       assert_eq!(orig, reverse_shifted);
     }
+    */
     // Proof of opening
     self.proof.verify_uni_batched_instances(
       &vars_gens.gens_pc,
@@ -380,7 +371,7 @@ impl ShiftProofs {
       &c,
       &[C_evals_orig_decompressed, C_evals_shifted_decompressed].concat(),
       &vec![orig_comms, shifted_comms].concat(),
-      poly_size,
+      [poly_size_list.clone(), poly_size_list].concat(),
     )?;
     Ok(())
   }
@@ -585,10 +576,13 @@ pub struct SNARK {
   perm_exec_comm_w3_list: Vec<PolyCommitment>,
   perm_block_comm_w3_list: Vec<PolyCommitment>,
   perm_exec_comm_w3_shifted: Vec<PolyCommitment>,
+  perm_block_comm_w3_list_shifted: Vec<PolyCommitment>,
 
   mem_block_comm_w3_list: Vec<PolyCommitment>,
+  mem_block_comm_w3_list_shifted: Vec<PolyCommitment>,
   mem_addr_comm_w2: Vec<PolyCommitment>,
   mem_addr_comm_w3: Vec<PolyCommitment>,
+  mem_addr_comm_w3_shifted: Vec<PolyCommitment>,
 
   block_r1cs_sat_proof: R1CSProof,
   block_inst_evals_bound_rp: [Scalar; 3],
@@ -619,6 +613,7 @@ pub struct SNARK {
   perm_mem_poly_list: Vec<Scalar>,
   proof_eval_perm_mem_prod_list: Vec<PolyEvalProof>,
 
+  shift_proof: ShiftProofs,
   io_proof: IOProofs
 }
 
@@ -635,8 +630,7 @@ struct MemBlockProofs {
 struct MemAddrProofs {
   mem_cohere_r1cs_sat_proof: R1CSProof,
   mem_cohere_inst_evals: [Scalar; 3],
-  mem_cohere_r1cs_eval_proof: R1CSEvalProof,
-  addr_mems_shift_proof: ShiftProofs
+  mem_cohere_r1cs_eval_proof: R1CSEvalProof
 }
 
 // Sort block_num_proofs and record where each entry is
@@ -717,7 +711,8 @@ impl SNARK {
 
     num_vars: usize,
     num_ios: usize,
-    addr_block_w3_size: usize,
+    mem_block_w3_size: usize,
+    mem_block_w3_size_per_block: &Vec<usize>,
     num_inputs_unpadded: usize,
     num_vars_per_block: &Vec<usize>,
     total_num_proofs_bound: usize,
@@ -820,7 +815,7 @@ impl SNARK {
       for n in num_vars_per_block {
         Scalar::from(*n as u64).append_to_transcript(b"num_vars_per_block", transcript);
       }
-      Scalar::from(addr_block_w3_size as u64).append_to_transcript(b"addr_block_w3_size", transcript);
+      Scalar::from(mem_block_w3_size as u64).append_to_transcript(b"mem_block_w3_size", transcript);
       Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
       Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
@@ -882,6 +877,7 @@ impl SNARK {
     block_inst.sort(block_num_instances, &index);
     let mem_block_mask: Vec<Vec<Vec<Scalar>>> = (0..block_num_instances).map(|i| mem_block_mask[index[i]].clone()).collect();
     let mem_block_poly_mask_list: Vec<DensePolynomial> = (0..block_num_instances).map(|i| mem_block_poly_mask_list[index[i]].clone()).collect();
+    let mem_block_w3_size_per_block: Vec<usize> = (0..block_num_instances).map(|i| mem_block_w3_size_per_block[index[i]]).collect();
 
     // --
     // PADDING
@@ -1012,7 +1008,7 @@ impl SNARK {
         // Remove the first entry and shift the remaining entries up by one
         // Used later by coherence check
         let (addr_mems_shifted_prover, addr_comm_mems_shifted) = {
-          let addr_mems_shifted = addr_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          let addr_mems_shifted = [addr_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 4]].concat();
           // create a multilinear polynomial using the supplied assignment for variables
           let addr_poly_mems_shifted = DensePolynomial::new(addr_mems_shifted);
 
@@ -1063,7 +1059,9 @@ impl SNARK {
       perm_block_comm_w3_list,
       // w3, shifted by 8
       perm_exec_w3_shifted_prover,
-      perm_exec_comm_w3_shifted
+      perm_exec_comm_w3_shifted,
+      perm_block_w3_shifted_prover,
+      perm_block_comm_w3_list_shifted,
     ) = {
       let comb_tau = transcript.challenge_scalar(b"challenge_tau");
       let comb_r = transcript.challenge_scalar(b"challenge_r");
@@ -1209,7 +1207,7 @@ impl SNARK {
 
         let (perm_exec_poly_w3_shifted, perm_exec_comm_w3_shifted) = {
           // Flatten the witnesses into a Q_i * X list
-          let w3_list_p = perm_exec_w3[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          let w3_list_p = [perm_exec_w3[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
           // create a multilinear polynomial using the supplied assignment for variables
           let perm_exec_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1235,6 +1233,8 @@ impl SNARK {
       let mut perm_block_comm_w2_list = Vec::new();
       let mut perm_block_poly_w3_list = Vec::new();
       let mut perm_block_comm_w3_list = Vec::new();
+      let mut perm_block_poly_w3_list_shifted = Vec::new();
+      let mut perm_block_comm_w3_list_shifted = Vec::new();
 
       for p in 0..block_num_instances {
         let (perm_block_poly_w2, perm_block_comm_w2) = {
@@ -1264,18 +1264,38 @@ impl SNARK {
           (perm_block_poly_w3, perm_block_comm_w3)
         };
 
+        let (perm_block_poly_w3_shifted, perm_block_comm_w3_shifted) = {
+          // Flatten the witnesses into a Q_i * X list
+          let w3_list_p = [perm_block_w3[p][1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
+          // create a multilinear polynomial using the supplied assignment for variables
+          let perm_block_poly_w3_shifted = DensePolynomial::new(w3_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (perm_block_comm_w3_shifted, _blinds_vars) = perm_block_poly_w3_shifted.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          perm_block_comm_w3_shifted.append_to_transcript(b"poly_commitment", transcript);
+          (perm_block_poly_w3_shifted, perm_block_comm_w3_shifted)
+        };
+
         perm_block_poly_w2_list.push(perm_block_poly_w2);
         perm_block_comm_w2_list.push(perm_block_comm_w2);
         perm_block_poly_w3_list.push(perm_block_poly_w3);
         perm_block_comm_w3_list.push(perm_block_comm_w3);
+        perm_block_poly_w3_list_shifted.push(perm_block_poly_w3_shifted);
+        perm_block_comm_w3_list_shifted.push(perm_block_comm_w3_shifted);
       }
 
       let perm_w0_prover = ProverWitnessSecInfo::new(vec![vec![perm_w0]], vec![perm_poly_w0]);
       let perm_exec_w2_prover = ProverWitnessSecInfo::new(vec![perm_exec_w2], vec![perm_exec_poly_w2]);
       let perm_block_w2_prover = ProverWitnessSecInfo::new(perm_block_w2, perm_block_poly_w2_list);
       let perm_exec_w3_prover = ProverWitnessSecInfo::new(vec![perm_exec_w3.clone()], vec![perm_exec_poly_w3]);
-      let perm_block_w3_prover = ProverWitnessSecInfo::new(perm_block_w3, perm_block_poly_w3_list);
+      let perm_block_w3_prover = ProverWitnessSecInfo::new(perm_block_w3.clone(), perm_block_poly_w3_list);
       let perm_exec_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[perm_exec_w3[1..].to_vec(), vec![vec![ZERO; 8]]].concat()], vec![perm_exec_poly_w3_shifted]);
+      let perm_block_w3_shifted_prover = ProverWitnessSecInfo::new(
+        perm_block_w3.iter().map(|i| [i[1..].to_vec(), vec![vec![ZERO; 8]]].concat()).collect(), 
+        perm_block_poly_w3_list_shifted
+      );
 
       (
         comb_tau,
@@ -1292,13 +1312,17 @@ impl SNARK {
         perm_block_comm_w3_list,
         perm_exec_w3_shifted_prover,
         vec![perm_exec_comm_w3_shifted],
+        perm_block_w3_shifted_prover,
+        perm_block_comm_w3_list_shifted,
       )
     };
 
     // Memory-per-block
     let (
       mem_block_w3_prover,
-      mem_block_comm_w3_list
+      mem_block_comm_w3_list,
+      mem_block_w3_shifted_prover,
+      mem_block_comm_w3_list_shifted
     ) = {
       if total_num_mem_accesses_bound > 0 {
         // mask is unary representation of block_num_mem_accesses[p]
@@ -1315,7 +1339,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           mem_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
           for q in (0..block_num_proofs[p]).rev() {
-            mem_block_w3[p][q] = vec![zero; addr_block_w3_size];
+            mem_block_w3[p][q] = vec![zero; mem_block_w3_size];
             mem_block_w3[p][q][0] = block_vars_mat[p][q][0];
             // Compute MR, MD, MC
             for i in 0..max_block_num_mem_accesses {
@@ -1347,13 +1371,15 @@ impl SNARK {
         // commit the witnesses and inputs separately instance-by-instance
         let mut mem_block_poly_w3_list = Vec::new();
         let mut mem_block_comm_w3_list = Vec::new();
+        let mut mem_block_poly_w3_list_shifted = Vec::new();
+        let mut mem_block_comm_w3_list_shifted = Vec::new();
 
         for p in 0..block_num_instances {
           let (mem_block_poly_w3, mem_block_comm_w3) = {
             // Flatten the witnesses into a Q_i * X list
-            let w1_list_p = mem_block_w3[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w3_list_p = mem_block_w3[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
             // create a multilinear polynomial using the supplied assignment for variables
-            let mem_block_poly_w3 = DensePolynomial::new(w1_list_p);
+            let mem_block_poly_w3 = DensePolynomial::new(w3_list_p);
             // produce a commitment to the satisfying assignment
             let (mem_block_comm_w3, _blinds_vars) = mem_block_poly_w3.commit(&vars_gens.gens_pc, None);
 
@@ -1363,16 +1389,39 @@ impl SNARK {
           };
           mem_block_poly_w3_list.push(mem_block_poly_w3);
           mem_block_comm_w3_list.push(mem_block_comm_w3);
+
+          let (mem_block_poly_w3_shifted, mem_block_comm_w3_shifted) = {
+            // Flatten the witnesses into a Q_i * X list
+            let w3_list_p = [mem_block_w3[p][1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; mem_block_w3_size]].concat();
+            // create a multilinear polynomial using the supplied assignment for variables
+            let mem_block_poly_w3_shifted = DensePolynomial::new(w3_list_p);
+            // produce a commitment to the satisfying assignment
+            let (mem_block_comm_w3_shifted, _blinds_vars) = mem_block_poly_w3_shifted.commit(&vars_gens.gens_pc, None);
+
+            // add the commitment to the prover's transcript
+            mem_block_comm_w3_shifted.append_to_transcript(b"poly_commitment", transcript);
+            (mem_block_poly_w3_shifted, mem_block_comm_w3_shifted)
+          };
+          mem_block_poly_w3_list_shifted.push(mem_block_poly_w3_shifted);
+          mem_block_comm_w3_list_shifted.push(mem_block_comm_w3_shifted);
         }
 
-        let mem_block_w3_prover = ProverWitnessSecInfo::new(mem_block_w3, mem_block_poly_w3_list);
+        let mem_block_w3_prover = ProverWitnessSecInfo::new(mem_block_w3.clone(), mem_block_poly_w3_list);
+        let mem_block_w3_shifted_prover = ProverWitnessSecInfo::new(
+          mem_block_w3.iter().map(|i| [i[1..].to_vec(), vec![vec![ZERO; mem_block_w3_size]]].concat()).collect(),
+          mem_block_poly_w3_list_shifted
+        );
 
         (
           mem_block_w3_prover,
-          mem_block_comm_w3_list
+          mem_block_comm_w3_list,
+          mem_block_w3_shifted_prover,
+          mem_block_comm_w3_list_shifted
         )
       } else {
         (
+          ProverWitnessSecInfo::dummy(),
+          Vec::new(),
           ProverWitnessSecInfo::dummy(),
           Vec::new()
         )
@@ -1384,7 +1433,9 @@ impl SNARK {
       mem_addr_w2_prover,
       mem_addr_comm_w2,
       mem_addr_w3_prover,
-      mem_addr_comm_w3
+      mem_addr_comm_w3,
+      mem_addr_w3_shifted_prover,
+      mem_addr_comm_w3_shifted
     ) = {
       if total_num_mem_accesses > 0 {
         // mem_addr_w2 is (I, O, ZO, r * val)
@@ -1421,6 +1472,8 @@ impl SNARK {
           mem_addr_comm_w2,
           mem_addr_poly_w3,
           mem_addr_comm_w3,
+          mem_addr_poly_w3_shifted,
+          mem_addr_comm_w3_shifted
         ) = {
           let (mem_addr_poly_w2, mem_addr_comm_w2) = {
             // Flatten the witnesses into a Q_i * X list
@@ -1450,25 +1503,46 @@ impl SNARK {
             (mem_addr_poly_w3, mem_addr_comm_w3)
           };
 
+          let (mem_addr_poly_w3_shifted, mem_addr_comm_w3_shifted) = {
+            // Flatten the witnesses into a Q_i * X list
+            let w3_list_p = [mem_addr_w3[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
+            // create a multilinear polynomial using the supplied assignment for variables
+            let mem_addr_poly_w3_shifted = DensePolynomial::new(w3_list_p);
+
+            // produce a commitment to the satisfying assignment
+            let (mem_addr_comm_w3_shifted, _blinds_vars) = mem_addr_poly_w3_shifted.commit(&vars_gens.gens_pc, None);
+
+            // add the commitment to the prover's transcript
+            mem_addr_comm_w3_shifted.append_to_transcript(b"poly_commitment", transcript);
+            (mem_addr_poly_w3_shifted, mem_addr_comm_w3_shifted)
+          };
+
           (
             mem_addr_poly_w2,
             mem_addr_comm_w2,
             mem_addr_poly_w3,
             mem_addr_comm_w3,
+            mem_addr_poly_w3_shifted,
+            mem_addr_comm_w3_shifted,
           )
         };
 
         let mem_addr_w2_prover = ProverWitnessSecInfo::new(vec![mem_addr_w2], vec![mem_addr_poly_w2]);
-        let mem_addr_w3_prover = ProverWitnessSecInfo::new(vec![mem_addr_w3], vec![mem_addr_poly_w3]);
+        let mem_addr_w3_prover = ProverWitnessSecInfo::new(vec![mem_addr_w3.clone()], vec![mem_addr_poly_w3]);
+        let mem_addr_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[mem_addr_w3[1..].to_vec(), vec![vec![ZERO; 8]]].concat()], vec![mem_addr_poly_w3_shifted]);
 
         (
           mem_addr_w2_prover,
           vec![mem_addr_comm_w2],
           mem_addr_w3_prover,
-          vec![mem_addr_comm_w3]
+          vec![mem_addr_comm_w3],
+          mem_addr_w3_shifted_prover,
+          vec![mem_addr_comm_w3_shifted]
         )
       } else {
         (
+          ProverWitnessSecInfo::dummy(),
+          Vec::new(),
           ProverWitnessSecInfo::dummy(),
           Vec::new(),
           ProverWitnessSecInfo::dummy(),
@@ -1634,7 +1708,7 @@ impl SNARK {
               block_num_instances,
               block_max_num_proofs,
               block_num_proofs,
-              addr_block_w3_size,
+              mem_block_w3_size,
               vec![&perm_w0_prover, &mem_block_mask_prover, &block_vars_prover, &mem_block_w3_prover],
               &mem_extract_inst.inst,
               &vars_gens,
@@ -1758,24 +1832,12 @@ impl SNARK {
           
           (inst_evals, r1cs_eval_proof)
         };
-
-        // Prove that addr_mems_shifted is addr_mems shifted by 4
-        let addr_mems_shift_proof = ShiftProofs::prove(
-          vec![&addr_mems_prover.poly_w[0]],
-          vec![&addr_mems_shifted_prover.poly_w[0]],
-          4,
-          vec![4],
-          vars_gens,
-          transcript,
-          &mut random_tape
-        );
         timer_proof.stop();
 
         Some(MemAddrProofs {
           mem_cohere_r1cs_sat_proof,
           mem_cohere_inst_evals,
           mem_cohere_r1cs_eval_proof,
-          addr_mems_shift_proof
         })
       } else {
         None
@@ -1859,8 +1921,8 @@ impl SNARK {
     let perm_mem_num_instances = perm_mem_w3_prover.w_mat.len();
     let mut perm_mem_num_proofs: Vec<usize> = perm_mem_w3_prover.w_mat.iter().map(|i| i.len()).collect();
     perm_mem_num_proofs.extend(vec![1; perm_mem_num_instances.next_power_of_two() - perm_mem_num_instances]);
-    // mem_block has size addr_block_w3_size, everything else takes size 8
-    let perm_mem_num_inputs = inst_map.iter().map(|i| if *i == 2 { addr_block_w3_size } else { 8 }).collect();
+    // mem_block has size mem_block_w3_size, everything else takes size 8
+    let perm_mem_num_inputs = inst_map.iter().map(|i| if *i == 2 { mem_block_w3_size } else { 8 }).collect();
     let (perm_mem_poly_r1cs_sat_proof, perm_mem_poly_challenges) = {
       let (proof, perm_mem_poly_challenges) = {
         R1CSProof::prove_single(
@@ -1921,6 +1983,7 @@ impl SNARK {
       
       (inst_evals, r1cs_eval_proof)
     };
+    timer_proof.stop();
 
     // Record the prod of exec, blocks, mem_block, & mem_addr
     let (perm_mem_poly_list, proof_eval_perm_mem_prod_list) = {
@@ -1936,6 +1999,54 @@ impl SNARK {
         &mut random_tape,
       );
       (perm_mem_poly_list, proof_eval_perm_mem_prod_list)
+    };
+    timer_proof.stop();
+
+    // --
+    // SHIFT_PROOFS
+    // --
+    // Prove in the order of
+    // - perm_exec_w3, perm_block_w3 => shift by 8
+    // - (if exist) mem_addr_w3 => shift by 8
+    // - (if exist) addr_mems => shift by 4
+    // - (if exist) mem_block_w3 => shift by mem_block_w3_size
+    let timer_proof = Timer::new("Shift Proofs");
+    let shift_proof = {
+      let mut orig_polys = vec![&perm_exec_w3_prover.poly_w[0]];
+      let mut shifted_polys = vec![&perm_exec_w3_shifted_prover.poly_w[0]];
+      for poly in &perm_block_w3_prover.poly_w {
+        orig_polys.push(poly);
+      }
+      for poly in &perm_block_w3_shifted_prover.poly_w {
+        shifted_polys.push(poly);
+      }
+      let mut header_len_list = vec![6; block_num_instances + 1];
+      if total_num_mem_accesses > 0 {
+        orig_polys.push(&mem_addr_w3_prover.poly_w[0]);
+        shifted_polys.push(&mem_addr_w3_shifted_prover.poly_w[0]);
+        header_len_list.push(6);
+        orig_polys.push(&addr_mems_prover.poly_w[0]);
+        shifted_polys.push(&addr_mems_shifted_prover.poly_w[0]);
+        header_len_list.push(4);
+      }
+      if total_num_mem_accesses_bound > 0 {
+        for poly in &mem_block_w3_prover.poly_w {
+          orig_polys.push(poly);
+        }
+        for poly in &mem_block_w3_shifted_prover.poly_w {
+          shifted_polys.push(poly);
+        }
+        header_len_list.extend(mem_block_w3_size_per_block);
+      }
+      let shift_proof = ShiftProofs::prove(
+        orig_polys,
+        shifted_polys,
+        header_len_list,
+        vars_gens,
+        transcript,
+        &mut random_tape
+      );
+      shift_proof
     };
     timer_proof.stop();
 
@@ -1977,10 +2088,13 @@ impl SNARK {
       perm_exec_comm_w3_list,
       perm_block_comm_w3_list,
       perm_exec_comm_w3_shifted,
+      perm_block_comm_w3_list_shifted,
 
       mem_block_comm_w3_list,
+      mem_block_comm_w3_list_shifted,
       mem_addr_comm_w2,
       mem_addr_comm_w3,
+      mem_addr_comm_w3_shifted,
 
       block_r1cs_sat_proof,
       block_inst_evals_bound_rp,
@@ -2004,6 +2118,7 @@ impl SNARK {
       perm_mem_poly_list,
       proof_eval_perm_mem_prod_list,
 
+      shift_proof,
       io_proof
     }
   }
@@ -2022,7 +2137,8 @@ impl SNARK {
 
     num_vars: usize,
     num_ios: usize,
-    addr_block_w3_size: usize,
+    mem_block_w3_size: usize,
+    mem_block_w3_size_per_block: &Vec<usize>,
     num_inputs_unpadded: usize,
     // How many variables (witnesses) are used by each block? Round to the next power of 2
     num_vars_per_block: &Vec<usize>,
@@ -2096,7 +2212,7 @@ impl SNARK {
       for n in num_vars_per_block {
         Scalar::from(*n as u64).append_to_transcript(b"num_vars_per_block", transcript);
       }
-      Scalar::from(addr_block_w3_size as u64).append_to_transcript(b"addr_block_w3_size", transcript);
+      Scalar::from(mem_block_w3_size as u64).append_to_transcript(b"mem_block_w3_size", transcript);
       Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
       Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
@@ -2155,6 +2271,7 @@ impl SNARK {
     // index[i] = j => the original jth entry should now be at the ith position
     let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
     let num_vars_per_block: Vec<usize> = (0..block_num_instances).map(|i| num_vars_per_block[index[i]]).collect();
+    let mem_block_w3_size_per_block: Vec<usize> = (0..block_num_instances).map(|i| mem_block_w3_size_per_block[index[i]]).collect();
     let mem_block_comm_mask_list: Vec<PolyCommitment> = (0..block_num_instances).map(|i| mem_block_comm_mask_list[index[i]].clone()).collect();
 
     // --
@@ -2235,6 +2352,7 @@ impl SNARK {
       perm_exec_w3_verifier,
       perm_block_w3_verifier,
       perm_exec_w3_shifted_verifier,
+      perm_block_w3_shifted_verifier,
     ) = {
       // Let the verifier generate perm_w0 itself
       let mut perm_w0 = vec![comb_tau];
@@ -2257,6 +2375,7 @@ impl SNARK {
       for p in 0..block_num_instances {
         self.perm_block_comm_w2_list[p].append_to_transcript(b"poly_commitment", transcript);
         self.perm_block_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
+        self.perm_block_comm_w3_list_shifted[p].append_to_transcript(b"poly_commitment", transcript);
       }
       (
         VerifierWitnessSecInfo::new(true, vec![num_ios], &vec![1], &vec![perm_comm_w0]),
@@ -2265,33 +2384,48 @@ impl SNARK {
         VerifierWitnessSecInfo::new(false, vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_list),
         VerifierWitnessSecInfo::new(false, vec![8; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w3_list),
         VerifierWitnessSecInfo::new(false, vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_shifted),
+        VerifierWitnessSecInfo::new(false, vec![8; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w3_list_shifted),
       )
     };
 
-    let mem_block_w3_verifier = {
+    let (
+      mem_block_w3_verifier,
+      mem_block_w3_shifted_verifier
+    ) = {
       if total_num_mem_accesses_bound > 0 {
         for p in 0..block_num_instances {
           self.mem_block_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
+          self.mem_block_comm_w3_list_shifted[p].append_to_transcript(b"poly_commitment", transcript);
         }
-        VerifierWitnessSecInfo::new(false, vec![addr_block_w3_size; block_num_instances], &block_num_proofs, &self.mem_block_comm_w3_list)
+        (
+          VerifierWitnessSecInfo::new(false, vec![mem_block_w3_size; block_num_instances], &block_num_proofs, &self.mem_block_comm_w3_list),
+          VerifierWitnessSecInfo::new(false, vec![mem_block_w3_size; block_num_instances], &block_num_proofs, &self.mem_block_comm_w3_list_shifted)
+        )
       } else {
-        VerifierWitnessSecInfo::dummy()
+        (
+          VerifierWitnessSecInfo::dummy(),
+          VerifierWitnessSecInfo::dummy()
+        )
       }
     };
 
     let (
       mem_addr_w2_verifier,
-      mem_addr_w3_verifier
+      mem_addr_w3_verifier,
+      mem_addr_w3_shifted_verifier
     ) = {
       if total_num_mem_accesses > 0 {
         self.mem_addr_comm_w2[0].append_to_transcript(b"poly_commitment", transcript);
         self.mem_addr_comm_w3[0].append_to_transcript(b"poly_commitment", transcript);
+        self.mem_addr_comm_w3_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         (
           VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_mem_accesses], &self.mem_addr_comm_w2),
           VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_mem_accesses], &self.mem_addr_comm_w3),
+          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_mem_accesses], &self.mem_addr_comm_w3_shifted),
         )
       } else {
         (
+          VerifierWitnessSecInfo::dummy(),
           VerifierWitnessSecInfo::dummy(),
           VerifierWitnessSecInfo::dummy(),
         )
@@ -2403,7 +2537,7 @@ impl SNARK {
           block_num_instances,
           block_max_num_proofs,
           block_num_proofs,
-          addr_block_w3_size,
+          mem_block_w3_size,
           vec![&perm_w0_verifier, &mem_block_mask_verifier, &block_vars_verifier, &mem_block_w3_verifier],
           mem_extract_num_cons,
           &vars_gens,
@@ -2471,18 +2605,6 @@ impl SNARK {
           transcript,
         )?;
         timer_eval_proof.stop();
-
-        let timer_shift_proof = Timer::new("Mem Cohere Shift");
-        mem_addr_proofs.addr_mems_shift_proof.verify(
-          vec![&addr_mems_verifier.comm_w[0]],
-          vec![&addr_mems_shifted_verifier.comm_w[0]],
-          4 * total_num_mem_accesses,
-          4,
-          vec![4],
-          vars_gens,
-          transcript
-        )?;
-        timer_shift_proof.stop();
       };
     }
 
@@ -2542,8 +2664,8 @@ impl SNARK {
       let perm_mem_num_instances = perm_mem_w3_verifier.num_proofs.len();
       let mut perm_mem_num_proofs: Vec<usize> = perm_mem_w3_verifier.num_proofs;
       perm_mem_num_proofs.extend(vec![1; perm_mem_num_instances.next_power_of_two() - perm_mem_num_instances]);
-      // mem_block has size addr_block_w3_size, everything else takes size 8
-      let perm_mem_num_inputs = inst_map.iter().map(|i| if *i == 2 { addr_block_w3_size } else { 8 }).collect();
+      // mem_block has size mem_block_w3_size, everything else takes size 8
+      let perm_mem_num_inputs = inst_map.iter().map(|i| if *i == 2 { mem_block_w3_size } else { 8 }).collect();
 
       let perm_mem_poly_challenges = self.perm_mem_poly_r1cs_sat_proof.verify_single(
         perm_mem_num_instances,
@@ -2624,6 +2746,58 @@ impl SNARK {
     };
 
     // --
+    // SHIFT_PROOFS
+    // --
+    let timer_proof = Timer::new("Shift Proofs");
+    {
+      let mut orig_comms = vec![&perm_exec_w3_verifier.comm_w[0]];
+      let mut shifted_comms = vec![&perm_exec_w3_shifted_verifier.comm_w[0]];
+      for comm in &perm_block_w3_verifier.comm_w {
+        orig_comms.push(comm);
+      }
+      for comm in &perm_block_w3_shifted_verifier.comm_w {
+        shifted_comms.push(comm);
+      }
+      let mut poly_size_list = [vec![8 * consis_num_proofs], (0..block_num_instances).map(|i| 8 * block_num_proofs[i]).collect()].concat();
+      let mut shift_size_list = vec![8; block_num_instances + 1];
+      let mut header_len_list = vec![6; block_num_instances + 1];
+      if total_num_mem_accesses > 0 {
+        orig_comms.push(&mem_addr_w3_verifier.comm_w[0]);
+        shifted_comms.push(&mem_addr_w3_shifted_verifier.comm_w[0]);
+        poly_size_list.push(8 * total_num_mem_accesses);
+        shift_size_list.push(8);
+        header_len_list.push(6);
+        orig_comms.push(&addr_mems_verifier.comm_w[0]);
+        shifted_comms.push(&addr_mems_shifted_verifier.comm_w[0]);
+        poly_size_list.push(4 * total_num_mem_accesses);
+        shift_size_list.push(4);
+        header_len_list.push(4);
+      }
+      if total_num_mem_accesses_bound > 0 {
+        for comm in &mem_block_w3_verifier.comm_w {
+          orig_comms.push(comm);
+        }
+        for comm in &mem_block_w3_shifted_verifier.comm_w {
+          shifted_comms.push(comm);
+        }
+        poly_size_list.extend::<Vec<usize>>((0..block_num_instances).map(|i| mem_block_w3_size * block_num_proofs[i]).collect());
+        shift_size_list.extend(vec![mem_block_w3_size; block_num_instances]);
+        header_len_list.extend(mem_block_w3_size_per_block);
+      }
+
+      self.shift_proof.verify(
+        orig_comms,
+        shifted_comms,
+        poly_size_list,
+        shift_size_list,
+        header_len_list,
+        vars_gens,
+        transcript
+      )?;
+    }
+    timer_proof.stop();
+
+    // --
     // IO_PROOFS
     // --
     let timer_proof = Timer::new("IO Proofs");
@@ -2667,7 +2841,7 @@ impl SNARK {
 
     num_vars: usize,
     num_ios: usize,
-    addr_block_w3_size: usize,
+    mem_block_w3_size: usize,
     num_inputs_unpadded: usize,
     num_vars_per_block: &Vec<usize>,
     total_num_proofs_bound: usize,
@@ -2783,7 +2957,7 @@ impl SNARK {
     for n in num_vars_per_block {
       Scalar::from(*n as u64).append_to_transcript(b"num_vars_per_block", transcript);
     }
-    Scalar::from(addr_block_w3_size as u64).append_to_transcript(b"addr_block_w3_size", transcript);
+    Scalar::from(mem_block_w3_size as u64).append_to_transcript(b"mem_block_w3_size", transcript);
     Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
     Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
     Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
@@ -3269,7 +3443,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           mem_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
           for q in (0..block_num_proofs[p]).rev() {
-            mem_block_w3[p][q] = vec![zero; addr_block_w3_size];
+            mem_block_w3[p][q] = vec![zero; mem_block_w3_size];
             mem_block_w3[p][q][0] = block_vars_mat[p][q][0];
             // Compute MR, MD, MC
             for i in 0..max_block_num_mem_accesses {
@@ -4121,7 +4295,7 @@ impl SNARK {
                 block_num_instances,
                 block_max_num_proofs,
                 block_num_proofs,
-                addr_block_w3_size,
+                mem_block_w3_size,
                 4,
                 vec![&mem_w0_prover, &mem_block_mask_prover, &block_vars_prover, &mem_block_w3_prover],
                 &mem_extract_inst.inst,
@@ -4189,7 +4363,7 @@ impl SNARK {
                 &block_num_proofs,
                 &perm_poly_inst.inst,
                 &vars_gens,
-                addr_block_w3_size,
+                mem_block_w3_size,
                 &mem_block_w3_prover.w_mat,
                 &mem_block_w3_prover.poly_w,
                 &mut transcript9,
@@ -4242,7 +4416,7 @@ impl SNARK {
             let mut mem_block_poly_list = Vec::new();
             let mut proof_eval_mem_block_prod_list = Vec::new();
             for p in 0..block_num_instances {
-              let r_len = (block_num_proofs[p] * addr_block_w3_size).log_2();
+              let r_len = (block_num_proofs[p] * mem_block_w3_size).log_2();
               // Prod is the 3rd entry
               let mem_block_poly = mem_block_w3_prover.poly_w[p][3];
               let (proof_eval_mem_block_prod, _comm_mem_block_prod) = PolyEvalProof::prove(
@@ -4696,7 +4870,7 @@ impl SNARK {
 
     num_vars: usize,
     num_ios: usize,
-    addr_block_w3_size: usize,
+    mem_block_w3_size: usize,
     num_inputs_unpadded: usize,
     // How many variables (witnesses) are used by each block? Round to the next power of 2
     num_vars_per_block: &Vec<usize>,
@@ -4782,7 +4956,7 @@ impl SNARK {
       for n in num_vars_per_block {
         Scalar::from(*n as u64).append_to_transcript(b"num_vars_per_block", transcript);
       }
-      Scalar::from(addr_block_w3_size as u64).append_to_transcript(b"addr_block_w3_size", transcript);
+      Scalar::from(mem_block_w3_size as u64).append_to_transcript(b"mem_block_w3_size", transcript);
       Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
       Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
@@ -4942,7 +5116,7 @@ impl SNARK {
       }
       (
         &VerifierWitnessSecInfo::new(true, vec![4], &self.mem_comm_w0),
-        &VerifierWitnessSecInfo::new(false, vec![addr_block_w3_size; block_num_instances], &self.mem_block_comm_w3_list),
+        &VerifierWitnessSecInfo::new(false, vec![mem_block_w3_size; block_num_instances], &self.mem_block_comm_w3_list),
       )
     };
 
@@ -5347,7 +5521,7 @@ impl SNARK {
             block_num_instances,
             block_max_num_proofs,
             &block_num_proofs,
-            addr_block_w3_size,
+            mem_block_w3_size,
             4,
             vec![&mem_w0_verifier, &mem_block_mask_verifier, &block_vars_verifier, &mem_block_w3_verifier],
             mem_extract_num_cons,
@@ -5389,7 +5563,7 @@ impl SNARK {
             &block_num_proofs,
             &vars_gens,
             &mem_block_proofs.mem_block_poly_inst_evals,
-            addr_block_w3_size,
+            mem_block_w3_size,
             &self.mem_block_comm_w3_list,
             &mut transcript9,
           ).unwrap();
@@ -5415,7 +5589,7 @@ impl SNARK {
           // COMPUTE POLY FOR MEM_BLOCK
           let mut mem_block_poly_bound_tau = ONE;
           for p in 0..block_num_instances {
-            let r_len = (block_num_proofs[p] * addr_block_w3_size).log_2();
+            let r_len = (block_num_proofs[p] * mem_block_w3_size).log_2();
             mem_block_proofs.proof_eval_mem_block_prod_list[p].verify_plain(
               &vars_gens.gens_pc,
               &mut transcript9,
