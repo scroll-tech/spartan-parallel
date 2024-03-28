@@ -74,13 +74,7 @@ impl CompileTimeKnowledge {
       let num_vars_per_block: Vec<usize> = string_to_vec(buffer.clone());
       buffer.clear();
       reader.read_line(&mut buffer)?;
-      let _ = buffer.trim().parse::<usize>().unwrap();
-      buffer.clear();
-      reader.read_line(&mut buffer)?;
       let block_num_mem_accesses: Vec<usize> = string_to_vec(buffer.clone());
-      buffer.clear();
-      reader.read_line(&mut buffer)?;
-      let _ = buffer.trim().parse::<usize>().unwrap();
       (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, block_num_mem_accesses)
     };
 
