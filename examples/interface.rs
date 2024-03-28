@@ -401,7 +401,7 @@ fn main() {
   let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_ios);
   // PERM_POLY for PERM_BLOCK_POLY, PERM_EXEC_POLY, & MEM_ADDR_POLY
   let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound) * 4;
-  let (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst(perm_size_bound, 4);
+  let (perm_poly_num_cons, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst();
   println!("Finished Perm");
 
   // MEM INSTANCES
@@ -416,13 +416,11 @@ fn main() {
   // COMMITMENT PREPROCESSING
   // --
   println!("Producing Public Parameters...");
-  let perm_poly_num_cons = perm_poly_num_cons_base * perm_size_bound;
-
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, 2 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, 2 * 8, 1, consis_check_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
-  let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, perm_size_bound * 4, 1, perm_poly_num_non_zero_entries);
+  let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, 2 * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * mem_block_w3_size, 1, mem_extract_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, 2 * 4, 1, mem_cohere_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
@@ -497,7 +495,6 @@ fn main() {
     &perm_root_comm,
     &perm_root_decomm,
     &perm_root_gens,
-    perm_poly_num_cons_base,
     &perm_poly_inst,
     &perm_poly_comm,
     &perm_poly_decomm,
@@ -563,7 +560,7 @@ fn main() {
     perm_root_num_cons,
     &perm_root_comm,
     &perm_root_gens,
-    perm_poly_num_cons_base,
+    perm_poly_num_cons,
     &perm_poly_comm,
     &perm_poly_gens,
 

@@ -398,11 +398,9 @@ impl Instance {
   /// x[k]  <- \tau - (\sum_i a_i * r^{i-1})
   /// pi[k] <- v[k] * D[k]
   /// D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
-  /// number of variables is perm_size_bound * num_vars
-  pub fn gen_perm_poly_inst(perm_size_bound: usize, num_vars: usize) -> (usize, usize, Instance) {
-    let perm_poly_num_cons_base = 2;
-    let perm_poly_num_cons = perm_size_bound * perm_poly_num_cons_base;
-    let perm_poly_num_non_zero_entries = perm_size_bound * 4;
+  pub fn gen_perm_poly_inst() -> (usize, usize, Instance) {
+    let perm_poly_num_cons = 2;
+    let perm_poly_num_non_zero_entries = 4;
     
     let perm_poly_inst = {
       let (A, B, C) = {
@@ -415,36 +413,19 @@ impl Instance {
         let V_x = 1;
         let V_pi = 2;
         let V_d = 3;
+        let width = 4;
 
         let mut constraint_count = 0;
-
-        // Need to order the constraints so that they solve the inputs in the front first
-        // This way Az, Bz, Cz will have all non-zero entries concentrated in the front
-        for i in 0..perm_size_bound - 1 {
-          // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, 
-            vec![(i * num_vars + V_x, 1)], 
-            vec![((i + 1) * num_vars + V_pi, 1), (i * num_vars + V_cnst, 1), ((i + 1) * num_vars + V_valid, -1)], 
-            vec![(i * num_vars + V_d, 1)]);
-          constraint_count += 1;
-          // pi[k] = v[k] * D[k]
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
-          // Pad base constraint size to 2
-          constraint_count += 1;
-        }
-        // Last Entry
-        // Pad A, B, C with dummy entries so their size is multiple of perm_size_bound
-        let i = perm_size_bound - 1;
-        // last D is x[k] * 1
+        // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))
         (A, B, C) = Instance::gen_constr(A, B, C,
-          constraint_count, vec![(i * num_vars + V_x, 1)], vec![(V_cnst, 1), (V_cnst, 0), (V_cnst, 0)], vec![(i * num_vars + V_d, 1)]);
+          constraint_count, 
+          vec![(V_x, 1)], 
+          vec![(width + V_pi, 1), (V_cnst, 1), (width + V_valid, -1)], 
+          vec![(V_d, 1)]);
         constraint_count += 1;
-        // last pi is just usual
+        // pi[k] = v[k] * D[k]
         (A, B, C) = Instance::gen_constr(A, B, C,
-          constraint_count, vec![(i * num_vars + V_valid, 1)], vec![(i * num_vars + V_d, 1)], vec![(i * num_vars + V_pi, 1)]);
-
+          constraint_count, vec![(V_valid, 1)], vec![(V_d, 1)], vec![(V_pi, 1)]);
         (A, B, C)   
       };
 
@@ -452,11 +433,11 @@ impl Instance {
       let B_list = vec![B.clone()];
       let C_list = vec![C.clone()];
 
-      let perm_poly_inst = Instance::new(1, perm_poly_num_cons, perm_size_bound * num_vars, &A_list, &B_list, &C_list).unwrap();
+      let perm_poly_inst = Instance::new(1, perm_poly_num_cons, 2 * 4, &A_list, &B_list, &C_list).unwrap();
       
       perm_poly_inst
     };
-    (perm_poly_num_cons_base, perm_poly_num_non_zero_entries, perm_poly_inst)
+    (perm_poly_num_cons, perm_poly_num_non_zero_entries, perm_poly_inst)
   }
 
   /// Generates a num_instances x num_vars INPUT MATRIX
