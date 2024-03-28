@@ -1,12 +1,14 @@
 //! Reads in constraints and inputs from zok_tests/constraints and zok_tests/inputs
 //! Used as a temporary interface to / from CirC
 #![allow(clippy::assertions_on_result_states)]
-use std::{cmp::max, fs::File, io::BufReader};
+use std::{fs::File, io::BufReader};
 use std::io::BufRead;
 use std::env;
 
 use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
+
+const TOTAL_NUM_PROOFS_BOUND: usize = 10000;
 
 // Convert a string of numbers separated by spaces into a vector
 fn string_to_vec(buffer: String) -> Vec<usize> {
@@ -40,9 +42,7 @@ struct CompileTimeKnowledge {
   num_vars: usize,
   num_inputs_unpadded: usize,
   num_vars_per_block: Vec<usize>,
-  total_num_proofs_bound: usize,
   block_num_mem_accesses: Vec<usize>,
-  total_num_mem_accesses_bound: usize,
 
   args: Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
 
@@ -60,7 +60,7 @@ impl CompileTimeKnowledge {
     let mut reader = BufReader::new(f);
     let mut buffer = String::new();
 
-    let (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound) = {
+    let (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, block_num_mem_accesses) = {
       reader.read_line(&mut buffer)?;
       let block_num_instances = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
@@ -74,14 +74,14 @@ impl CompileTimeKnowledge {
       let num_vars_per_block: Vec<usize> = string_to_vec(buffer.clone());
       buffer.clear();
       reader.read_line(&mut buffer)?;
-      let total_num_proofs_bound = buffer.trim().parse::<usize>().unwrap();
+      let _ = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
       reader.read_line(&mut buffer)?;
       let block_num_mem_accesses: Vec<usize> = string_to_vec(buffer.clone());
       buffer.clear();
       reader.read_line(&mut buffer)?;
-      let total_num_mem_accesses_bound = buffer.trim().parse::<usize>().unwrap();
-      (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, total_num_proofs_bound, block_num_mem_accesses, total_num_mem_accesses_bound)
+      let _ = buffer.trim().parse::<usize>().unwrap();
+      (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, block_num_mem_accesses)
     };
 
     let mut args = vec![Vec::new(); block_num_instances];
@@ -153,9 +153,7 @@ impl CompileTimeKnowledge {
       num_vars,
       num_inputs_unpadded,
       num_vars_per_block,
-      total_num_mem_accesses_bound,
       block_num_mem_accesses,
-      total_num_proofs_bound,
       args,
       func_input_width,
       input_offset,
@@ -370,9 +368,7 @@ fn main() {
   let num_inputs_unpadded = ctk.num_inputs_unpadded;
   // num_ios is the width used by all input related computations
   let num_ios = (num_inputs_unpadded * 2).next_power_of_two();
-  let total_num_proofs_bound = ctk.total_num_proofs_bound.next_power_of_two();
   let block_num_mem_accesses = ctk.block_num_mem_accesses;
-  let total_num_mem_accesses_bound = if ctk.total_num_mem_accesses_bound == 0 {0} else {ctk.total_num_mem_accesses_bound.next_power_of_two()};
   let max_block_num_mem_accesses = *block_num_mem_accesses.iter().max().unwrap();
   // mem_block_w3_size is used specifically by mem_block_w3_size and MEM_BLOCK_POLY
   let mem_block_w3_size = (4 + 3 * max_block_num_mem_accesses).next_power_of_two();
@@ -399,13 +395,9 @@ fn main() {
   // PERM INSTANCES
   // PERM_ROOT
   let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_ios);
-  // PERM_POLY for PERM_BLOCK_POLY, PERM_EXEC_POLY, & MEM_ADDR_POLY
-  let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound) * 4;
   let (perm_poly_num_cons, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst();
   println!("Finished Perm");
 
-  // MEM INSTANCES
-  let total_num_mem_accesses_bound_padded = if total_num_mem_accesses_bound == 0 {1} else {total_num_mem_accesses_bound};
   // MEM_EXTRACT
   let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(mem_block_w3_size, max_block_num_mem_accesses);
   // MEM_COHERE
@@ -424,7 +416,7 @@ fn main() {
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * mem_block_w3_size, 1, mem_extract_num_non_zero_entries);
   let mem_cohere_gens = SNARKGens::new(mem_cohere_num_cons, 2 * 4, 1, mem_cohere_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
-  let vars_gens = SNARKGens::new(block_num_cons, max(total_num_proofs_bound, total_num_mem_accesses_bound_padded) * num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
+  let vars_gens = SNARKGens::new(block_num_cons, TOTAL_NUM_PROOFS_BOUND * num_vars, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   
   // create a commitment to the R1CS instance
   println!("Comitting Circuits...");
@@ -476,7 +468,6 @@ fn main() {
     &mem_block_w3_size_per_block,
     num_inputs_unpadded,
     &ctk.num_vars_per_block,
-    total_num_proofs_bound,
     block_num_instances_bound,
     rtk.block_max_num_proofs,
     &block_num_proofs,
@@ -506,7 +497,6 @@ fn main() {
     &mem_extract_decomm,
     &mem_extract_gens,
 
-    total_num_mem_accesses_bound,
     rtk.total_num_mem_accesses,
     &mem_cohere_inst,
     &mem_cohere_comm,
@@ -544,7 +534,6 @@ fn main() {
     &mem_block_w3_size_per_block,
     num_inputs_unpadded,
     &ctk.num_vars_per_block,
-    total_num_proofs_bound,
     block_num_instances_bound, 
     rtk.block_max_num_proofs, 
     &block_num_proofs, 
@@ -568,7 +557,6 @@ fn main() {
     mem_extract_num_cons,
     &mem_extract_comm,
     &mem_extract_gens,
-    total_num_mem_accesses_bound,
     rtk.total_num_mem_accesses,
     mem_cohere_num_cons,
     &mem_cohere_comm,

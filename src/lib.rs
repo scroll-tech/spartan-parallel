@@ -715,7 +715,6 @@ impl SNARK {
     mem_block_w3_size_per_block: &Vec<usize>,
     num_inputs_unpadded: usize,
     num_vars_per_block: &Vec<usize>,
-    total_num_proofs_bound: usize,
 
     block_num_instances_bound: usize,
     block_max_num_proofs: usize,
@@ -747,7 +746,6 @@ impl SNARK {
     mem_extract_decomm: &ComputationDecommitment,
     mem_extract_gens: &SNARKGens,
 
-    total_num_mem_accesses_bound: usize,
     total_num_mem_accesses: usize,
     mem_cohere_inst: &Instance,
     mem_cohere_comm: &ComputationCommitment,
@@ -781,8 +779,6 @@ impl SNARK {
     for p in 0..block_num_instances_bound {
       assert!(block_num_proofs[p] <= block_max_num_proofs);
     }
-    assert!(consis_num_proofs <= total_num_proofs_bound);
-    assert!(total_num_mem_accesses <= total_num_mem_accesses_bound);
     assert_eq!(block_num_instances_bound, mem_block_mask.len());
     assert_eq!(block_num_instances_bound, mem_block_poly_mask_list.len());
     assert_eq!(block_num_instances_bound, mem_block_comm_mask_list.len());
@@ -816,11 +812,9 @@ impl SNARK {
       }
       Scalar::from(mem_block_w3_size as u64).append_to_transcript(b"mem_block_w3_size", transcript);
       Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
-      Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
       Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
       Scalar::from(max_block_num_mem_accesses as u64).append_to_transcript(b"max_block_num_mem_accesses", transcript);
-      Scalar::from(total_num_mem_accesses_bound as u64).append_to_transcript(b"total_num_mem_accesses_bound", transcript);
       Scalar::from(total_num_mem_accesses as u64).append_to_transcript(b"total_num_mem_accesses", transcript);
       
       // commit mem_block_mask
@@ -903,8 +897,6 @@ impl SNARK {
     }
     let total_num_mem_accesses = if total_num_mem_accesses == 0 { 0 } else { total_num_mem_accesses.next_power_of_two() };
 
-    // Compute perm_size_bound & perm_num_proofs
-    let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound) * 4;
     // Pad num_proofs with 1 until the next power of 2
     block_num_proofs.extend(vec![1; block_num_instances.next_power_of_two() - block_num_instances]);
     let block_num_proofs = &block_num_proofs;
@@ -1323,7 +1315,7 @@ impl SNARK {
       mem_block_w3_shifted_prover,
       mem_block_comm_w3_list_shifted
     ) = {
-      if total_num_mem_accesses_bound > 0 {
+      if max_block_num_mem_accesses > 0 {
         // mask is unary representation of block_num_mem_accesses[p]
         let zero = ZERO;
         let one = ONE;
@@ -1555,7 +1547,7 @@ impl SNARK {
     let block_vars_prover = ProverWitnessSecInfo::new(block_vars_mat, block_poly_vars_list);
     let block_inputs_prover = ProverWitnessSecInfo::new(block_inputs_mat, block_poly_inputs_list);
     let exec_inputs_prover = ProverWitnessSecInfo::new(vec![exec_inputs_list], exec_poly_inputs);
-    let addr_mems_prover = if total_num_mem_accesses_bound > 0 {
+    let addr_mems_prover = if max_block_num_mem_accesses > 0 {
       ProverWitnessSecInfo::new(vec![addr_mems_list.clone()], addr_poly_mems)
     } else {
       ProverWitnessSecInfo::dummy()
@@ -1696,7 +1688,7 @@ impl SNARK {
     // --
 
     let mem_block_proofs = {
-      if total_num_mem_accesses_bound > 0 {
+      if max_block_num_mem_accesses > 0 {
         // --
         // MEM_EXTRACT
         // --
@@ -1781,7 +1773,7 @@ impl SNARK {
           let (proof, mem_cohere_challenges) = {
             R1CSProof::prove(
               1,
-              total_num_mem_accesses_bound,
+              total_num_mem_accesses,
               &vec![total_num_mem_accesses],
               4,
               vec![&addr_mems_prover, &addr_mems_shifted_prover],
@@ -1916,7 +1908,7 @@ impl SNARK {
     // --
 
     let timer_proof = Timer::new("Perm Mem Poly");
-    let (perm_poly_w3_prover, inst_map) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &perm_block_w3_prover, &mem_block_w3_prover, &mem_addr_w3_prover]);
+    let (perm_poly_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &perm_block_w3_prover, &mem_block_w3_prover, &mem_addr_w3_prover]);
     let (perm_poly_w3_shifted_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_prover, &perm_block_w3_shifted_prover, &mem_block_w3_shifted_prover, &mem_addr_w3_shifted_prover]);
     let perm_poly_num_instances = perm_poly_w3_prover.w_mat.len();
     let mut perm_poly_num_proofs: Vec<usize> = perm_poly_w3_prover.w_mat.iter().map(|i| i.len()).collect();
@@ -2019,7 +2011,7 @@ impl SNARK {
         shifted_polys.push(&addr_mems_shifted_prover.poly_w[0]);
         header_len_list.push(4);
       }
-      if total_num_mem_accesses_bound > 0 {
+      if max_block_num_mem_accesses > 0 {
         for poly in &mem_block_w3_prover.poly_w {
           orig_polys.push(poly);
         }
@@ -2132,7 +2124,6 @@ impl SNARK {
     num_inputs_unpadded: usize,
     // How many variables (witnesses) are used by each block? Round to the next power of 2
     num_vars_per_block: &Vec<usize>,
-    total_num_proofs_bound: usize,
     block_num_instances_bound: usize,
 
     block_max_num_proofs: usize,
@@ -2159,7 +2150,6 @@ impl SNARK {
     mem_extract_comm: &ComputationCommitment,
     mem_extract_gens: &SNARKGens,
 
-    total_num_mem_accesses_bound: usize,
     total_num_mem_accesses: usize,
     mem_cohere_num_cons: usize,
     mem_cohere_comm: &ComputationCommitment,
@@ -2180,8 +2170,6 @@ impl SNARK {
     for p in 0..block_num_instances_bound {
       assert!(block_num_proofs[p] <= block_max_num_proofs);
     }
-    assert!(consis_num_proofs <= total_num_proofs_bound);
-    assert!(total_num_mem_accesses <= total_num_mem_accesses_bound);
 
     // --
     // COMMITMENTS
@@ -2204,11 +2192,9 @@ impl SNARK {
       }
       Scalar::from(mem_block_w3_size as u64).append_to_transcript(b"mem_block_w3_size", transcript);
       Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
-      Scalar::from(total_num_proofs_bound as u64).append_to_transcript(b"total_num_proofs_bound", transcript);
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
       Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
       Scalar::from(max_block_num_mem_accesses as u64).append_to_transcript(b"max_block_num_mem_accesses", transcript);
-      Scalar::from(total_num_mem_accesses_bound as u64).append_to_transcript(b"total_num_mem_accesses_bound", transcript);
       Scalar::from(total_num_mem_accesses as u64).append_to_transcript(b"total_num_mem_accesses", transcript);
       
       // commit mem_block_mask
@@ -2277,8 +2263,6 @@ impl SNARK {
     // Pad addr_mems with dummys so the length is a power of 2
     let total_num_mem_accesses = if total_num_mem_accesses == 0 { 0 } else { total_num_mem_accesses.next_power_of_two() };
     
-    // Compute perm_size_bound & perm_num_proofs
-    let perm_size_bound = max(total_num_proofs_bound, total_num_mem_accesses_bound) * 4;
     // Pad num_proofs with 1 until the next power of 2
     block_num_proofs.extend(vec![1; block_num_instances.next_power_of_two() - block_num_instances]);
     let block_num_proofs = &block_num_proofs;
@@ -2382,7 +2366,7 @@ impl SNARK {
       mem_block_w3_verifier,
       mem_block_w3_shifted_verifier
     ) = {
-      if total_num_mem_accesses_bound > 0 {
+      if max_block_num_mem_accesses > 0 {
         for p in 0..block_num_instances {
           self.mem_block_comm_w3_list[p].append_to_transcript(b"poly_commitment", transcript);
           self.mem_block_comm_w3_list_shifted[p].append_to_transcript(b"poly_commitment", transcript);
@@ -2515,7 +2499,7 @@ impl SNARK {
     // --
     // MEM_BLOCK
     // --
-    if total_num_mem_accesses_bound > 0 {
+    if max_block_num_mem_accesses > 0 {
       let mem_block_proofs = self.mem_block_proofs.as_ref().unwrap();
 
       // --
@@ -2568,7 +2552,7 @@ impl SNARK {
         let timer_sat_proof = Timer::new("Mem Cohere Sat");
         let mem_cohere_challenges = mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify(
           1,
-          total_num_mem_accesses_bound,
+          total_num_mem_accesses,
           &vec![total_num_mem_accesses],
           4,
           vec![&addr_mems_verifier, &addr_mems_shifted_verifier],
@@ -2764,7 +2748,7 @@ impl SNARK {
         shift_size_list.push(4);
         header_len_list.push(4);
       }
-      if total_num_mem_accesses_bound > 0 {
+      if max_block_num_mem_accesses > 0 {
         for comm in &mem_block_w3_verifier.comm_w {
           orig_comms.push(comm);
         }
