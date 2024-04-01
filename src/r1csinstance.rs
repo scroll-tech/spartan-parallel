@@ -514,7 +514,17 @@ impl R1CSInstance {
     (evals_A_list, evals_B_list, evals_C_list)
   }
 
-  pub fn multi_evaluate(&self, rp: &[Scalar], rx: &[Scalar], ry: &[Scalar]) -> 
+  pub fn multi_evaluate(&self, rx: &[Scalar], ry: &[Scalar]) -> Vec<Scalar> {
+    let mut eval_list = Vec::new();
+    // Evaluate each individual poly on [rx, ry]
+    for i in 0..self.num_instances {
+      let evals = SparseMatPolynomial::multi_evaluate(&[&self.A_list[i], &self.B_list[i], &self.C_list[i]], rx, ry);
+      eval_list.extend(evals.clone());
+    }
+    eval_list
+  }
+
+  pub fn multi_evaluate_bound_rp(&self, rp: &[Scalar], rx: &[Scalar], ry: &[Scalar]) -> 
   (
     Vec<Scalar>,                // Concatenation of each individual block
     (Scalar, Scalar, Scalar)    // Combined, bound to rp

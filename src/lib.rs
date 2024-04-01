@@ -420,13 +420,13 @@ impl ProverWitnessSecInfo {
   // Returns: 1. the merged ProverWitnessSec, 
   //          2. for each instance in the merged ProverWitnessSec, the component it orignally belong to
   fn merge(components: Vec<&ProverWitnessSecInfo>) -> (ProverWitnessSecInfo, Vec<usize>) {
-    // No component should be single && either all components are short or none of them are short
+    // No component should be single
     let is_single = false;
-    let is_short = components[0].is_short;
     for i in 0..components.len() {
       assert_eq!(components[i].is_single, is_single);
-      assert_eq!(components[i].is_short, is_short);
     }
+    // Unless all components are short, the merged section is not short
+    let is_short = components.iter().fold(true, |s, i| s && i.is_short);
     // Merge algorithm with pointer on each component
     let mut pointers = vec![0; components.len()];
     let merged_size = components.iter().fold(0, |a, b| a + b.num_inputs.len());
@@ -513,13 +513,13 @@ impl VerifierWitnessSecInfo {
   // Returns: 1. the merged VerifierWitnessSec, 
   //          2. for each instance in the merged VerifierWitnessSec, the component it orignally belong to
   fn merge(components: Vec<&VerifierWitnessSecInfo>) -> (VerifierWitnessSecInfo, Vec<usize>) {
-    // No component should be single && either all components are short or none of them are short
+    // No component should be single
     let is_single = false;
-    let is_short = components[0].is_short;
     for i in 0..components.len() {
       assert_eq!(components[i].is_single, is_single);
-      assert_eq!(components[i].is_short, is_short);
     }
+    // Unless all components are short, the merged section is not short
+    let is_short = components.iter().fold(true, |s, i| s && i.is_short);
     // Merge algorithm with pointer on each component
     let mut pointers = vec![0; components.len()];
     let merged_size = components.iter().fold(0, |a, b| a + b.num_inputs.len());
@@ -1586,9 +1586,9 @@ impl SNARK {
       let timer_eval = Timer::new("eval_sparse_polys");
 
       // Per instance evaluation is unsorted
-      let (inst_evals_list, _) = block_inst_unsorted.inst.multi_evaluate(&rp, &rx, &ry);
+      let inst_evals_list = block_inst_unsorted.inst.multi_evaluate(&rx, &ry);
       // RP-bound evaluation is sorted
-      let (_, inst_evals_bound_rp) = block_inst.inst.multi_evaluate(&rp, &rx, &ry);
+      let (_, inst_evals_bound_rp) = block_inst.inst.multi_evaluate_bound_rp(&rp, &rx, &ry);
       timer_eval.stop();
 
       for r in &inst_evals_list {
