@@ -181,6 +181,7 @@ struct RunTimeKnowledge {
   exec_inputs: Vec<InputsAssignment>,
   addr_phy_mems_list: Vec<MemsAssignment>,
   addr_vir_mems_list: Vec<MemsAssignment>,
+  addr_ts_bits_list: Vec<MemsAssignment>,
 
   input: Vec<[u8; 32]>,
   output: [u8; 32],
@@ -322,7 +323,7 @@ impl RunTimeKnowledge {
       reader.read_line(&mut buffer)?;
       
       let mut access_counter = 0;
-      while buffer != "INPUTS\n".to_string() {
+      while buffer != "ADDR_VM_BITS\n".to_string() {
         if buffer == format!("ACCESS {}\n", access_counter + 1) {
           access_counter += 1;
           addr_vir_mems_list.push(Vec::new());
@@ -334,6 +335,26 @@ impl RunTimeKnowledge {
         reader.read_line(&mut buffer)?;
       }
       addr_vir_mems_list.iter().map(|i| InputsAssignment::new(i).unwrap()).collect()
+    };
+
+    let addr_ts_bits_list: Vec<MemsAssignment> = {
+      let mut addr_ts_bits_list = vec![Vec::new()];
+      buffer.clear();
+      reader.read_line(&mut buffer)?;
+      
+      let mut access_counter = 0;
+      while buffer != "INPUTS\n".to_string() {
+        if buffer == format!("ACCESS {}\n", access_counter + 1) {
+          access_counter += 1;
+          addr_ts_bits_list.push(Vec::new());
+        } else if buffer == format!("ACCESS 0\n") {
+        } else {
+          addr_ts_bits_list[access_counter].push(string_to_bytes(buffer.clone()));
+        }
+        buffer.clear();
+        reader.read_line(&mut buffer)?;
+      }
+      addr_ts_bits_list.iter().map(|i| InputsAssignment::new(i).unwrap()).collect()
     };
 
     let func_inputs = {
@@ -376,6 +397,7 @@ impl RunTimeKnowledge {
       exec_inputs,
       addr_phy_mems_list,
       addr_vir_mems_list,
+      addr_ts_bits_list,
     
       input: func_inputs,
       output: func_outputs[0],
@@ -400,7 +422,9 @@ fn main() {
   // num_ios is the width used by all input related computations
   let num_ios = (num_inputs_unpadded * 2).next_power_of_two();
   let block_num_phy_mem_accesses = ctk.block_num_phy_mem_accesses;
+  let block_num_vir_mem_accesses = ctk.block_num_vir_mem_accesses;
   let max_block_num_phy_mem_accesses = *block_num_phy_mem_accesses.iter().max().unwrap();
+  let max_block_num_vir_mem_accesses = *block_num_vir_mem_accesses.iter().max().unwrap();
   // mem_block_w3_size is used specifically by mem_block_w3_size and MEM_BLOCK_POLY
   let mem_block_w3_size = (4 + 3 * max_block_num_phy_mem_accesses).next_power_of_two();
   // Number of non-zero entries for each block
@@ -448,7 +472,7 @@ fn main() {
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, 2 * 4, 1, perm_poly_num_non_zero_entries);
   let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * mem_block_w3_size, 1, mem_extract_num_non_zero_entries);
   let phy_mem_cohere_gens = SNARKGens::new(phy_mem_cohere_num_cons, 2 * 4, 1, phy_mem_cohere_num_non_zero_entries);
-  let vir_mem_cohere_gens = SNARKGens::new(vir_mem_cohere_num_cons, vir_mem_cohere_num_vars, 1, vir_mem_cohere_num_non_zero_entries);
+  let vir_mem_cohere_gens = SNARKGens::new(vir_mem_cohere_num_cons, 4 * vir_mem_cohere_num_vars, 1, vir_mem_cohere_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   let vars_gens = SNARKGens::new(block_num_cons, TOTAL_NUM_VARS_BOUND, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   
@@ -538,6 +562,8 @@ fn main() {
     &phy_mem_cohere_decomm,
     &phy_mem_cohere_gens,
 
+    max_block_num_vir_mem_accesses,
+
     rtk.total_num_vir_mem_accesses,
     vir_mem_cohere_num_vars,
     &vir_mem_cohere_inst,
@@ -550,6 +576,7 @@ fn main() {
     rtk.exec_inputs,
     rtk.addr_phy_mems_list,
     rtk.addr_vir_mems_list,
+    rtk.addr_ts_bits_list,
     &mem_block_mask_list,
     &mem_block_mask_poly_list,
     &mem_block_mask_comm_list,
@@ -604,6 +631,8 @@ fn main() {
     phy_mem_cohere_num_cons,
     &phy_mem_cohere_comm,
     &phy_mem_cohere_gens,
+
+    max_block_num_vir_mem_accesses,
     rtk.total_num_vir_mem_accesses,
     vir_mem_cohere_num_vars,
     vir_mem_cohere_num_cons,

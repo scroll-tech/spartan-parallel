@@ -1,6 +1,7 @@
 use std::cmp::max;
 
 use crate::dense_mlpoly::{PolyCommitment, DensePolynomial};
+use crate::math::Math;
 use crate::r1csproof::R1CSGens;
 use crate::R1CSInstance;
 use crate::errors::R1CSError;
@@ -650,8 +651,8 @@ impl Instance {
   /// 0   1   2   3   4   5   6   7  |  0   1   2   3   4   5   6   7  |  0   1   2   3   4   5
   /// v  D1  pa  va data ls  ts   _  |  v  D1  pa  va data ls  ts   _  | D2  D3  D4  EQ  B0  B1  ...
   pub fn gen_vir_mem_cohere_inst(max_ts_width: usize) -> (usize, usize, usize, Instance) {
-    let width = 8;
-    let vir_mem_cohere_num_vars = 2 * max(2 * width, (max_ts_width + 4).next_power_of_two());
+    let vir_mem_cohere_num_vars = max(2 * 8, (max_ts_width + 4).next_power_of_two()) / 2;
+    let width = vir_mem_cohere_num_vars;
     let vir_mem_cohere_num_cons = max_ts_width + 11;
     let vir_mem_cohere_num_non_zero_entries = max(16 + max_ts_width, 6 + 2 * max_ts_width);
   
@@ -690,15 +691,15 @@ impl Instance {
         num_cons += 1;
         // D2[k] = v[k + 1] * (pa[k + 1] - pa[k])
         (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(width + V_valid, 1)], vec![(width + V_pa, -1), (V_pa, 1)], vec![(V_D2, 1)]);
+          num_cons, vec![(width + V_valid, 1)], vec![(width + V_pa, 1), (V_pa, -1)], vec![(V_D2, 1)]);
         num_cons += 1;
         // D3[k] = D1[k] * (vir_addr[k + 1] - vir_addr[k])
         (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_D1, 1)], vec![(width + V_va, -1), (V_va, 1)], vec![(V_D3, 1)]);
+          num_cons, vec![(V_D1, 1)], vec![(width + V_va, 1), (V_va, -1)], vec![(V_D3, 1)]);
         num_cons += 1;
         // D4[k] = D1[k] * (ts[k + 1] - ts[k])
         (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_D1, 1)], vec![(width + V_ts, -1), (V_ts, 1)], vec![(V_D4, 1)]);
+          num_cons, vec![(V_D1, 1)], vec![(width + V_ts, 1), (V_ts, -1)], vec![(V_D4, 1)]);
         num_cons += 1;
         // D1[k] * (pa[k + 1] - pa[k]) = 0
         (A, B, C) = Instance::gen_constr(A, B, C,
@@ -727,9 +728,9 @@ impl Instance {
             num_cons, vec![(V_B(i), 1)], vec![(V_B(i), 1)], vec![(V_B(i), 1)]);
           num_cons += 1;
         }
-        // D4 = \Sum_i B_i + EQ
+        // 0 = D4 - EQ - \Sum_i B_i
         (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![], vec![], [vec![(V_D4, 1), (V_EQ, -1)], (0..max_ts_width).map(|i| (V_B(i), -1)).collect()].concat()
+          num_cons, vec![], vec![], [vec![(V_D4, 1), (V_EQ, -1)], (0..max_ts_width).map(|i| (V_B(i), -1 * (i.pow2() as isize))).collect()].concat()
         );
         
         (A, B, C)
@@ -738,7 +739,7 @@ impl Instance {
       B_list.push(B);
       C_list.push(C);
   
-      let vir_mem_cohere_inst = Instance::new(1, vir_mem_cohere_num_cons, vir_mem_cohere_num_vars, &A_list, &B_list, &C_list).unwrap();
+      let vir_mem_cohere_inst = Instance::new(1, vir_mem_cohere_num_cons, 4 * vir_mem_cohere_num_vars, &A_list, &B_list, &C_list).unwrap();
       
       vir_mem_cohere_inst
     };

@@ -572,6 +572,7 @@ pub struct SNARK {
   addr_comm_phy_mems_shifted: Vec<PolyCommitment>,
   addr_comm_vir_mems: Vec<PolyCommitment>,
   addr_comm_vir_mems_shifted: Vec<PolyCommitment>,
+  addr_comm_ts_bits: Vec<PolyCommitment>,
 
   perm_exec_comm_w2_list: Vec<PolyCommitment>,
   perm_block_comm_w2_list: Vec<PolyCommitment>,
@@ -606,7 +607,8 @@ pub struct SNARK {
   // no need to construct mem addr proofs
   // However, we still need to construct mem proofs per block to ensure
   // that all executed blocks contain no memory accesses
-  mem_addr_proofs: Option<MemAddrProofs>,
+  phy_mem_addr_proofs: Option<MemAddrProofs>,
+  vir_mem_addr_proofs: Option<MemAddrProofs>,
 
   // One proof for all permutations
   perm_poly_poly_r1cs_sat_proof: R1CSProof,
@@ -630,9 +632,9 @@ struct MemBlockProofs {
 // Proofs regarding memory accesses as a whole
 #[derive(Serialize, Deserialize, Debug)]
 struct MemAddrProofs {
-  phy_mem_cohere_r1cs_sat_proof: R1CSProof,
-  phy_mem_cohere_inst_evals: [Scalar; 3],
-  phy_mem_cohere_r1cs_eval_proof: R1CSEvalProof
+  mem_cohere_r1cs_sat_proof: R1CSProof,
+  mem_cohere_inst_evals: [Scalar; 3],
+  mem_cohere_r1cs_eval_proof: R1CSEvalProof
 }
 
 // Sort block_num_proofs and record where each entry is
@@ -754,6 +756,8 @@ impl SNARK {
     phy_mem_cohere_decomm: &ComputationDecommitment,
     phy_mem_cohere_gens: &SNARKGens,
 
+    max_block_num_vir_mem_accesses: usize,
+
     total_num_vir_mem_accesses: usize,
     vir_mem_cohere_num_vars: usize,
     vir_mem_cohere_inst: &Instance,
@@ -766,6 +770,7 @@ impl SNARK {
     exec_inputs_list: Vec<InputsAssignment>,
     addr_phy_mems_list: Vec<MemsAssignment>,
     addr_vir_mems_list: Vec<MemsAssignment>,
+    addr_ts_bits_list: Vec<MemsAssignment>,
 
     mem_block_mask: &Vec<Vec<Vec<Scalar>>>,
     mem_block_poly_mask_list: &Vec<DensePolynomial>,
@@ -802,6 +807,7 @@ impl SNARK {
     let mut exec_inputs_list = exec_inputs_list.into_iter().map(|v| v.assignment).collect_vec();
     let mut addr_phy_mems_list = addr_phy_mems_list.into_iter().map(|v| v.assignment).collect_vec();
     let mut addr_vir_mems_list = addr_vir_mems_list.into_iter().map(|v| v.assignment).collect_vec();
+    let mut addr_ts_bits_list = addr_ts_bits_list.into_iter().map(|v| v.assignment).collect_vec();
 
     // --
     // INSTANCE COMMITMENTS
@@ -826,6 +832,7 @@ impl SNARK {
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
       Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
       Scalar::from(max_block_num_phy_mem_accesses as u64).append_to_transcript(b"max_block_num_phy_mem_accesses", transcript);
+      Scalar::from(max_block_num_vir_mem_accesses as u64).append_to_transcript(b"max_block_num_vir_mem_accesses", transcript);
       Scalar::from(total_num_phy_mem_accesses as u64).append_to_transcript(b"total_num_phy_mem_accesses", transcript);
       Scalar::from(total_num_vir_mem_accesses as u64).append_to_transcript(b"total_num_vir_mem_accesses", transcript);
       Scalar::from(vir_mem_cohere_num_vars as u64).append_to_transcript(b"vir_mem_cohere_num_vars", transcript);
@@ -912,8 +919,10 @@ impl SNARK {
     let total_num_phy_mem_accesses = if total_num_phy_mem_accesses == 0 { 0 } else { total_num_phy_mem_accesses.next_power_of_two() };
     // Pad addr_vir_mems with dummys so the length is a power of 2
     if total_num_vir_mem_accesses > 0 {
-      let dummy_addr = vec![zero; 8];
+      let dummy_addr = vec![zero; vir_mem_cohere_num_vars];
       addr_vir_mems_list.extend(vec![dummy_addr; total_num_vir_mem_accesses.next_power_of_two() - total_num_vir_mem_accesses]);
+      let dummy_ts = vec![zero; 2 * vir_mem_cohere_num_vars];
+      addr_ts_bits_list.extend(vec![dummy_ts; total_num_vir_mem_accesses.next_power_of_two() - total_num_vir_mem_accesses]);
     }
     let total_num_vir_mem_accesses = if total_num_vir_mem_accesses == 0 { 0 } else { total_num_vir_mem_accesses.next_power_of_two() };
 
@@ -1053,6 +1062,8 @@ impl SNARK {
       addr_comm_vir_mems,
       addr_vir_mems_shifted_prover,
       addr_comm_vir_mems_shifted,
+      addr_ts_bits_prover,
+      addr_comm_ts_bits,
     ) = {
       if total_num_vir_mem_accesses > 0 {
         let (addr_poly_vir_mems, addr_comm_vir_mems) = {
@@ -1070,29 +1081,44 @@ impl SNARK {
         // Remove the first entry and shift the remaining entries up by one
         // Used later by coherence check
         let (addr_vir_mems_shifted_prover, addr_comm_vir_mems_shifted) = {
-          let addr_vir_mems_shifted = [addr_vir_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
+          let addr_vir_mems_shifted = [addr_vir_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; vir_mem_cohere_num_vars]].concat();
           // create a multilinear polynomial using the supplied assignment for variables
           let addr_poly_vir_mems_shifted = DensePolynomial::new(addr_vir_mems_shifted);
 
           // produce a commitment to the satisfying assignment
           let (addr_comm_vir_mems_shifted, _blinds_inputs) = addr_poly_vir_mems_shifted.commit(&vars_gens.gens_pc, None);
-
           // add the commitment to the prover's transcript
           addr_comm_vir_mems_shifted.append_to_transcript(b"poly_commitment", transcript);
 
-          let addr_vir_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_vir_mems_list[1..].to_vec(), vec![vec![ZERO; 4]]].concat()], vec![addr_poly_vir_mems_shifted]);
-
+          let addr_vir_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_vir_mems_list[1..].to_vec(), vec![vec![ZERO; vir_mem_cohere_num_vars]]].concat()], vec![addr_poly_vir_mems_shifted]);
           (addr_vir_mems_shifted_prover, addr_comm_vir_mems_shifted)
+        };
+        let (addr_ts_bits_prover, addr_comm_ts_bits) = {
+          let addr_ts_bits = addr_ts_bits_list.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          // create a multilinear polynomial using the supplied assignment for variables
+          let addr_poly_ts_bits = DensePolynomial::new(addr_ts_bits);
+
+          // produce a commitment to the satisfying assignment
+          let (addr_comm_ts_bits, _blinds_inputs) = addr_poly_ts_bits.commit(&vars_gens.gens_pc, None);
+          // add the commitment to the prover's transcript
+          addr_comm_ts_bits.append_to_transcript(b"poly_commitment", transcript);
+
+          let addr_ts_bits_prover = ProverWitnessSecInfo::new(vec![addr_ts_bits_list], vec![addr_poly_ts_bits]);
+          (addr_ts_bits_prover, addr_comm_ts_bits)
         };
         (
           vec![addr_poly_vir_mems], 
           vec![addr_comm_vir_mems],
           addr_vir_mems_shifted_prover, 
           vec![addr_comm_vir_mems_shifted],
+          addr_ts_bits_prover,
+          vec![addr_comm_ts_bits]
         )
       } else {
         (
           Vec::new(),
+          Vec::new(),
+          ProverWitnessSecInfo::dummy(),
           Vec::new(),
           ProverWitnessSecInfo::dummy(),
           Vec::new()
@@ -1618,8 +1644,13 @@ impl SNARK {
     let block_vars_prover = ProverWitnessSecInfo::new(block_vars_mat, block_poly_vars_list);
     let block_inputs_prover = ProverWitnessSecInfo::new(block_inputs_mat, block_poly_inputs_list);
     let exec_inputs_prover = ProverWitnessSecInfo::new(vec![exec_inputs_list], exec_poly_inputs);
-    let addr_phy_mems_prover = if max_block_num_phy_mem_accesses > 0 {
+    let addr_phy_mems_prover = if total_num_phy_mem_accesses > 0 {
       ProverWitnessSecInfo::new(vec![addr_phy_mems_list.clone()], addr_poly_phy_mems)
+    } else {
+      ProverWitnessSecInfo::dummy()
+    };
+    let addr_vir_mems_prover = if total_num_vir_mem_accesses > 0 {
+      ProverWitnessSecInfo::new(vec![addr_vir_mems_list.clone()], addr_poly_vir_mems)
     } else {
       ProverWitnessSecInfo::dummy()
     };
@@ -1831,15 +1862,15 @@ impl SNARK {
     };
 
     // --
-    // MEM_ADDR
+    // PHY_MEM_ADDR
     // --
 
-    let mem_addr_proofs = {
+    let phy_mem_addr_proofs = {
       if total_num_phy_mem_accesses > 0 {
         // --
         // PHY_MEM_COHERE
         // --
-        let timer_proof = Timer::new("Physical Mem Cohere");
+        let timer_proof = Timer::new("Phy Mem Cohere");
         let (phy_mem_cohere_r1cs_sat_proof, phy_mem_cohere_challenges) = {
           let (proof, phy_mem_cohere_challenges) = {
             R1CSProof::prove(
@@ -1897,9 +1928,85 @@ impl SNARK {
         timer_proof.stop();
 
         Some(MemAddrProofs {
-          phy_mem_cohere_r1cs_sat_proof,
-          phy_mem_cohere_inst_evals,
-          phy_mem_cohere_r1cs_eval_proof,
+          mem_cohere_r1cs_sat_proof: phy_mem_cohere_r1cs_sat_proof,
+          mem_cohere_inst_evals: phy_mem_cohere_inst_evals,
+          mem_cohere_r1cs_eval_proof: phy_mem_cohere_r1cs_eval_proof,
+        })
+      } else {
+        None
+      }
+    };
+
+    // --
+    // VIR_MEM_ADDR
+    // --
+
+    let vir_mem_addr_proofs = {
+      if total_num_vir_mem_accesses > 0 {
+        // --
+        // VIR_MEM_COHERE
+        // --
+        let timer_proof = Timer::new("Vir Mem Cohere");
+        let (vir_mem_cohere_r1cs_sat_proof, vir_mem_cohere_challenges) = {
+          let (proof, vir_mem_cohere_challenges) = {
+            R1CSProof::prove(
+              1,
+              total_num_vir_mem_accesses,
+              &vec![total_num_vir_mem_accesses],
+              vir_mem_cohere_num_vars,
+              vec![&addr_vir_mems_prover, &addr_vir_mems_shifted_prover, &addr_ts_bits_prover],
+              &vir_mem_cohere_inst.inst,
+              &vars_gens,
+              transcript,
+              &mut random_tape,
+            )
+          };
+    
+          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
+    
+          (proof, vir_mem_cohere_challenges)
+        };
+    
+        // Final evaluation on VIR_MEM_COHERE
+        let (vir_mem_cohere_inst_evals, vir_mem_cohere_r1cs_eval_proof) = {
+          let [_, _, rx, ry] = &vir_mem_cohere_challenges;
+          let inst = vir_mem_cohere_inst;
+          let timer_eval = Timer::new("eval_sparse_polys");
+          let inst_evals = {
+            let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
+            Ar.append_to_transcript(b"Ar_claim", transcript);
+            Br.append_to_transcript(b"Br_claim", transcript);
+            Cr.append_to_transcript(b"Cr_claim", transcript);
+            [Ar, Br, Cr]
+          };
+          timer_eval.stop();
+    
+          let r1cs_eval_proof = {
+            let proof = R1CSEvalProof::prove(
+              &vir_mem_cohere_decomm.decomm,
+              &rx,
+              &ry,
+              &inst_evals,
+              &vir_mem_cohere_gens.gens_r1cs_eval,
+              transcript,
+              &mut random_tape,
+            );
+    
+            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+            proof
+          };
+    
+          
+          (inst_evals, r1cs_eval_proof)
+        };
+        timer_proof.stop();
+
+        Some(MemAddrProofs {
+          mem_cohere_r1cs_sat_proof: vir_mem_cohere_r1cs_sat_proof,
+          mem_cohere_inst_evals: vir_mem_cohere_inst_evals,
+          mem_cohere_r1cs_eval_proof: vir_mem_cohere_r1cs_eval_proof,
         })
       } else {
         None
@@ -2137,6 +2244,7 @@ impl SNARK {
       addr_comm_phy_mems_shifted,
       addr_comm_vir_mems,
       addr_comm_vir_mems_shifted,
+      addr_comm_ts_bits,
 
       perm_exec_comm_w2_list,
       perm_block_comm_w2_list,
@@ -2165,7 +2273,8 @@ impl SNARK {
       perm_root_r1cs_eval_proof,
 
       mem_block_proofs,
-      mem_addr_proofs,
+      phy_mem_addr_proofs,
+      vir_mem_addr_proofs,
 
       perm_poly_poly_r1cs_sat_proof,
       perm_poly_poly_inst_evals,
@@ -2228,6 +2337,8 @@ impl SNARK {
     phy_mem_cohere_comm: &ComputationCommitment,
     phy_mem_cohere_gens: &SNARKGens,
 
+    max_block_num_vir_mem_accesses: usize,
+
     total_num_vir_mem_accesses: usize,
     vir_mem_cohere_num_vars: usize,
     vir_mem_cohere_num_cons: usize,
@@ -2274,6 +2385,7 @@ impl SNARK {
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
       Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
       Scalar::from(max_block_num_phy_mem_accesses as u64).append_to_transcript(b"max_block_num_phy_mem_accesses", transcript);
+      Scalar::from(max_block_num_vir_mem_accesses as u64).append_to_transcript(b"max_block_num_vir_mem_accesses", transcript);
       Scalar::from(total_num_phy_mem_accesses as u64).append_to_transcript(b"total_num_phy_mem_accesses", transcript);
       Scalar::from(total_num_vir_mem_accesses as u64).append_to_transcript(b"total_num_vir_mem_accesses", transcript);
       Scalar::from(vir_mem_cohere_num_vars as u64).append_to_transcript(b"vir_mem_cohere_num_vars", transcript);
@@ -2393,17 +2505,21 @@ impl SNARK {
 
     let (
       addr_vir_mems_verifier,
-      addr_vir_mems_shifted_verifier
+      addr_vir_mems_shifted_verifier,
+      addr_ts_bits_verifier
      ) = {
       if total_num_vir_mem_accesses > 0 {
         self.addr_comm_vir_mems[0].append_to_transcript(b"poly_commitment", transcript);
         self.addr_comm_vir_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
+        self.addr_comm_ts_bits[0].append_to_transcript(b"poly_commitment", transcript);
         (
-          VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems),
-          VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems_shifted)
+          VerifierWitnessSecInfo::new(false, vec![vir_mem_cohere_num_vars], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems),
+          VerifierWitnessSecInfo::new(false, vec![vir_mem_cohere_num_vars], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems_shifted),
+          VerifierWitnessSecInfo::new(false, vec![2 * vir_mem_cohere_num_vars], &vec![total_num_vir_mem_accesses], &self.addr_comm_ts_bits)
         )
       } else {
         (
+          VerifierWitnessSecInfo::dummy(),
           VerifierWitnessSecInfo::dummy(),
           VerifierWitnessSecInfo::dummy()
         )
@@ -2641,17 +2757,17 @@ impl SNARK {
     }
 
     // --
-    // MEM_ADDR
+    // PHY_MEM_ADDR
     // --
     if total_num_phy_mem_accesses > 0 {
-      let mem_addr_proofs = self.mem_addr_proofs.as_ref().unwrap();
+      let phy_mem_addr_proofs = self.phy_mem_addr_proofs.as_ref().unwrap();
 
       // --
       // PHY_MEM_COHERE
       // --
       {
         let timer_sat_proof = Timer::new("Phy Mem Cohere Sat");
-        let phy_mem_cohere_challenges = mem_addr_proofs.phy_mem_cohere_r1cs_sat_proof.verify(
+        let phy_mem_cohere_challenges = phy_mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify(
           1,
           total_num_phy_mem_accesses,
           &vec![total_num_phy_mem_accesses],
@@ -2659,24 +2775,67 @@ impl SNARK {
           vec![&addr_phy_mems_verifier, &addr_phy_mems_shifted_verifier],
           phy_mem_cohere_num_cons,
           &vars_gens,
-          &mem_addr_proofs.phy_mem_cohere_inst_evals,
+          &phy_mem_addr_proofs.mem_cohere_inst_evals,
           transcript,
         )?;
         timer_sat_proof.stop();
 
         let timer_eval_proof = Timer::new("Phy Mem Cohere Eval");
         // Verify Evaluation on PHY_MEM_COHERE
-        let [Ar, Br, Cr] = &mem_addr_proofs.phy_mem_cohere_inst_evals;
+        let [Ar, Br, Cr] = &phy_mem_addr_proofs.mem_cohere_inst_evals;
         Ar.append_to_transcript(b"Ar_claim", transcript);
         Br.append_to_transcript(b"Br_claim", transcript);
         Cr.append_to_transcript(b"Cr_claim", transcript);
         let [_, _, rx, ry] = &phy_mem_cohere_challenges;
-        mem_addr_proofs.phy_mem_cohere_r1cs_eval_proof.verify(
+        phy_mem_addr_proofs.mem_cohere_r1cs_eval_proof.verify(
           &phy_mem_cohere_comm.comm,
           rx,
           ry,
-          &mem_addr_proofs.phy_mem_cohere_inst_evals,
+          &phy_mem_addr_proofs.mem_cohere_inst_evals,
           &phy_mem_cohere_gens.gens_r1cs_eval,
+          transcript,
+        )?;
+        timer_eval_proof.stop();
+      };
+    }
+
+    // --
+    // VIR_MEM_ADDR
+    // --
+    if total_num_vir_mem_accesses > 0 {
+      let vir_mem_addr_proofs = self.vir_mem_addr_proofs.as_ref().unwrap();
+
+      // --
+      // VIR_MEM_COHERE
+      // --
+      {
+        let timer_sat_proof = Timer::new("Vir Mem Cohere Sat");
+        let vir_mem_cohere_challenges = vir_mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify(
+          1,
+          total_num_vir_mem_accesses,
+          &vec![total_num_vir_mem_accesses],
+          vir_mem_cohere_num_vars,
+          vec![&addr_vir_mems_verifier, &addr_vir_mems_shifted_verifier, &addr_ts_bits_verifier],
+          vir_mem_cohere_num_cons,
+          &vars_gens,
+          &vir_mem_addr_proofs.mem_cohere_inst_evals,
+          transcript,
+        )?;
+        timer_sat_proof.stop();
+
+        let timer_eval_proof = Timer::new("Phy Mem Cohere Eval");
+        // Verify Evaluation on PHY_MEM_COHERE
+        let [Ar, Br, Cr] = &vir_mem_addr_proofs.mem_cohere_inst_evals;
+        Ar.append_to_transcript(b"Ar_claim", transcript);
+        Br.append_to_transcript(b"Br_claim", transcript);
+        Cr.append_to_transcript(b"Cr_claim", transcript);
+        let [_, _, rx, ry] = &vir_mem_cohere_challenges;
+        vir_mem_addr_proofs.mem_cohere_r1cs_eval_proof.verify(
+          &vir_mem_cohere_comm.comm,
+          rx,
+          ry,
+          &vir_mem_addr_proofs.mem_cohere_inst_evals,
+          &vir_mem_cohere_gens.gens_r1cs_eval,
           transcript,
         )?;
         timer_eval_proof.stop();
@@ -3763,7 +3922,7 @@ impl SNARK {
       proof_eval_perm_exec_prod,
 
       mem_block_proofs,
-      mem_addr_proofs
+      phy_mem_addr_proofs
     ) = thread::scope(|s| {
       // --
       // BLOCK CORRECTNESS
@@ -4532,7 +4691,7 @@ impl SNARK {
       // MEM_ADDR
       // --
 
-      let mem_addr_proofs = {
+      let phy_mem_addr_proofs = {
         if total_num_phy_mem_accesses > 0 {
           // --
           // PHY_MEM_COHERE
@@ -4837,7 +4996,7 @@ impl SNARK {
         proof_eval_perm_exec_prod,
 
         mem_block_proofs,
-        mem_addr_proofs
+        phy_mem_addr_proofs
       )
     });
 
@@ -4926,7 +5085,7 @@ impl SNARK {
       proof_eval_perm_exec_prod,
 
       mem_block_proofs,
-      mem_addr_proofs,
+      phy_mem_addr_proofs,
 
       io_proof
     }
@@ -5683,14 +5842,14 @@ impl SNARK {
         // --
         let mem_addr_poly_bound_tau = {
           if total_num_phy_mem_accesses > 0 {
-            let mem_addr_proofs = self.mem_addr_proofs.as_ref().unwrap();
+            let phy_mem_addr_proofs = self.phy_mem_addr_proofs.as_ref().unwrap();
 
             // --
             // PHY_MEM_COHERE
             // --
             s.spawn(move || {
               let timer_sat_proof = Timer::new("Mem Cohere Sat");
-              let phy_mem_cohere_challenges = mem_addr_proofs.phy_mem_cohere_r1cs_sat_proof.verify_single(
+              let phy_mem_cohere_challenges = phy_mem_addr_proofs.phy_mem_cohere_r1cs_sat_proof.verify_single(
                 1,
                 phy_mem_cohere_num_cons_base,
                 4,
@@ -5698,7 +5857,7 @@ impl SNARK {
                 total_num_phy_mem_accesses,
                 &vec![total_num_phy_mem_accesses],
                 &vars_gens,
-                &mem_addr_proofs.phy_mem_cohere_inst_evals,
+                &phy_mem_addr_proofs.phy_mem_cohere_inst_evals,
                 4,
                 &self.addr_comm_phy_mems,
                 &mut transcript10,
@@ -5707,16 +5866,16 @@ impl SNARK {
 
               let timer_eval_proof = Timer::new("Mem Cohere Eval");
               // Verify Evaluation on PHY_MEM_COHERE
-              let (Ar, Br, Cr) = &mem_addr_proofs.phy_mem_cohere_inst_evals;
+              let (Ar, Br, Cr) = &phy_mem_addr_proofs.phy_mem_cohere_inst_evals;
               Ar.append_to_transcript(b"Ar_claim", &mut transcript10);
               Br.append_to_transcript(b"Br_claim", &mut transcript10);
               Cr.append_to_transcript(b"Cr_claim", &mut transcript10);
               let [_, rx, ry] = &phy_mem_cohere_challenges;
-              mem_addr_proofs.phy_mem_cohere_r1cs_eval_proof.verify(
+              phy_mem_addr_proofs.phy_mem_cohere_r1cs_eval_proof.verify(
                 &phy_mem_cohere_comm.comm,
                 rx,
                 ry,
-                &mem_addr_proofs.phy_mem_cohere_inst_evals,
+                &phy_mem_addr_proofs.phy_mem_cohere_inst_evals,
                 &phy_mem_cohere_gens.gens_r1cs_eval,
                 &mut transcript10,
               ).unwrap();
@@ -5728,7 +5887,7 @@ impl SNARK {
             // --
             s.spawn(move || {
               let timer_sat_proof = Timer::new("Mem Addr Comb Sat");
-              let mem_addr_comb_challenges = mem_addr_proofs.mem_addr_comb_r1cs_sat_proof.verify(
+              let mem_addr_comb_challenges = phy_mem_addr_proofs.mem_addr_comb_r1cs_sat_proof.verify(
                 1,
                 total_num_phy_mem_accesses,
                 &vec![total_num_phy_mem_accesses],
@@ -5737,19 +5896,19 @@ impl SNARK {
                 vec![&mem_w0_verifier, &mem_addr_w1_verifier, &addr_phy_mems_verifier, &mem_addr_w3_verifier],
                 mem_addr_comb_num_cons,
                 &vars_gens,
-                &mem_addr_proofs.mem_addr_comb_inst_evals,
+                &phy_mem_addr_proofs.mem_addr_comb_inst_evals,
                 &mut transcript11,
               ).unwrap();
               // Proof that first two entries of mem_w0 are tau and r
               let ry_len = 2;
-              mem_addr_proofs.proof_eval_mem_w0_at_zero.verify_plain(
+              phy_mem_addr_proofs.proof_eval_mem_w0_at_zero.verify_plain(
                 &vars_gens.gens_pc,
                 &mut transcript11,
                 &vec![ZERO; ry_len],
                 &comb_tau,
                 &self.mem_comm_w0[0],
               ).unwrap();
-              mem_addr_proofs.proof_eval_mem_w0_at_one.verify_plain(
+              phy_mem_addr_proofs.proof_eval_mem_w0_at_one.verify_plain(
                 &vars_gens.gens_pc,
                 &mut transcript11,
                 &[vec![ZERO; ry_len - 1], vec![ONE]].concat(),
@@ -5760,16 +5919,16 @@ impl SNARK {
 
               let timer_eval_proof = Timer::new("Mem Addr Comb Eval");
               // Verify Evaluation on PERM_EXEC_ROOT
-              let (Ar, Br, Cr) = &mem_addr_proofs.mem_addr_comb_inst_evals;
+              let (Ar, Br, Cr) = &phy_mem_addr_proofs.mem_addr_comb_inst_evals;
               Ar.append_to_transcript(b"Ar_claim", &mut transcript11);
               Br.append_to_transcript(b"Br_claim", &mut transcript11);
               Cr.append_to_transcript(b"Cr_claim", &mut transcript11);
               let [_, _, rx, ry] = mem_addr_comb_challenges;
-              mem_addr_proofs.mem_addr_comb_r1cs_eval_proof.verify(
+              phy_mem_addr_proofs.mem_addr_comb_r1cs_eval_proof.verify(
                 &mem_addr_comb_comm.comm,
                 &rx,
                 &ry,
-                &mem_addr_proofs.mem_addr_comb_inst_evals,
+                &phy_mem_addr_proofs.mem_addr_comb_inst_evals,
                 &mem_addr_comb_gens.gens_r1cs_eval,
                 &mut transcript11,
               ).unwrap();
@@ -5781,7 +5940,7 @@ impl SNARK {
             // --
             let mem_addr_poly_bound_tau = s.spawn(move || {
               let timer_sat_proof = Timer::new("Mem Addr Poly Sat");
-              let mem_addr_poly_challenges = mem_addr_proofs.mem_addr_poly_r1cs_sat_proof.verify_single(
+              let mem_addr_poly_challenges = phy_mem_addr_proofs.mem_addr_poly_r1cs_sat_proof.verify_single(
                 1,
                 perm_poly_num_cons_base,
                 4,
@@ -5789,7 +5948,7 @@ impl SNARK {
                 total_num_phy_mem_accesses,
                 &vec![total_num_phy_mem_accesses],
                 &vars_gens,
-                &mem_addr_proofs.mem_addr_poly_inst_evals,
+                &phy_mem_addr_proofs.mem_addr_poly_inst_evals,
                 4,
                 &self.mem_addr_comm_w1,
                 &mut transcript12,
@@ -5798,16 +5957,16 @@ impl SNARK {
 
               let timer_eval_proof = Timer::new("Mem Addr Poly Eval");
               // Verify Evaluation on PERM_EXEC_POLY
-              let (Ar, Br, Cr) = &mem_addr_proofs.mem_addr_poly_inst_evals;
+              let (Ar, Br, Cr) = &phy_mem_addr_proofs.mem_addr_poly_inst_evals;
               Ar.append_to_transcript(b"Ar_claim", &mut transcript12);
               Br.append_to_transcript(b"Br_claim", &mut transcript12);
               Cr.append_to_transcript(b"Cr_claim", &mut transcript12);
               let [_, rx, ry] = &mem_addr_poly_challenges;
-              mem_addr_proofs.mem_addr_poly_r1cs_eval_proof.verify(
+              phy_mem_addr_proofs.mem_addr_poly_r1cs_eval_proof.verify(
                 &perm_poly_comm.comm,
                 rx,
                 ry,
-                &mem_addr_proofs.mem_addr_poly_inst_evals,
+                &phy_mem_addr_proofs.mem_addr_poly_inst_evals,
                 &perm_poly_gens.gens_r1cs_eval,
                 &mut transcript12,
               ).unwrap();
@@ -5815,14 +5974,14 @@ impl SNARK {
 
               // COMPUTE POLY FOR PERM_EXEC
               let r_len = (total_num_phy_mem_accesses * 4).log_2();
-              mem_addr_proofs.proof_eval_mem_addr_prod.verify_plain(
+              phy_mem_addr_proofs.proof_eval_mem_addr_prod.verify_plain(
                 &vars_gens.gens_pc,
                 &mut transcript12,
                 &[vec![ZERO; r_len - 2], vec![ONE; 2]].concat(),
-                &mem_addr_proofs.mem_addr_poly,
+                &phy_mem_addr_proofs.mem_addr_poly,
                 &self.mem_addr_comm_w1[0],
               ).unwrap();
-              mem_addr_proofs.mem_addr_poly
+              phy_mem_addr_proofs.mem_addr_poly
             });
 
             mem_addr_poly_bound_tau.join().unwrap()
