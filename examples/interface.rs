@@ -429,6 +429,7 @@ fn main() {
   let mem_block_w3_size = (4 + 3 * max_block_num_phy_mem_accesses).next_power_of_two();
   // Number of non-zero entries for each block
   let mem_block_w3_size_per_block = block_num_phy_mem_accesses.iter().map(|i| 4 + 3 * i).collect();
+  let mem_addr_ts_bits_size = (4 + ctk.max_ts_width).next_power_of_two();
 
   assert_eq!(num_vars, num_vars.next_power_of_two());
   assert!(ctk.args.len() == block_num_instances_bound);
@@ -458,7 +459,7 @@ fn main() {
   // PHY_MEM_COHERE
   let (phy_mem_cohere_num_cons, phy_mem_cohere_num_non_zero_entries, phy_mem_cohere_inst) = Instance::gen_phy_mem_cohere_inst();
   // VIR_MEM_COHERE
-  let (vir_mem_cohere_num_vars, vir_mem_cohere_num_cons, vir_mem_cohere_num_non_zero_entries, vir_mem_cohere_inst) = Instance::gen_vir_mem_cohere_inst(ctk.max_ts_width);
+  let (vir_mem_cohere_num_vars, vir_mem_cohere_num_cons, vir_mem_cohere_num_non_zero_entries, vir_mem_cohere_inst) = Instance::gen_vir_mem_cohere_inst(ctk.max_ts_width, mem_addr_ts_bits_size);
   println!("Finished Mem");
 
   // --
@@ -525,8 +526,10 @@ fn main() {
     num_ios,
     mem_block_w3_size,
     &mem_block_w3_size_per_block,
+    mem_addr_ts_bits_size,
     num_inputs_unpadded,
     &ctk.num_vars_per_block,
+
     block_num_instances_bound,
     rtk.block_max_num_proofs,
     &block_num_proofs,
@@ -565,7 +568,6 @@ fn main() {
     max_block_num_vir_mem_accesses,
 
     rtk.total_num_vir_mem_accesses,
-    vir_mem_cohere_num_vars,
     &vir_mem_cohere_inst,
     &vir_mem_cohere_comm,
     &vir_mem_cohere_decomm,
@@ -602,8 +604,10 @@ fn main() {
     num_ios,
     mem_block_w3_size,
     &mem_block_w3_size_per_block,
+    mem_addr_ts_bits_size,
     num_inputs_unpadded,
     &ctk.num_vars_per_block,
+    
     block_num_instances_bound, 
     rtk.block_max_num_proofs, 
     &block_num_proofs, 
@@ -634,7 +638,6 @@ fn main() {
 
     max_block_num_vir_mem_accesses,
     rtk.total_num_vir_mem_accesses,
-    vir_mem_cohere_num_vars,
     vir_mem_cohere_num_cons,
     &vir_mem_cohere_comm,
     &vir_mem_cohere_gens,

@@ -650,8 +650,8 @@ impl Instance {
   ///             Op[k]                           Op[k + 1]              D2, D3, D4 & bits of ts[k + 1] - ts[k]
   /// 0   1   2   3   4   5   6   7  |  0   1   2   3   4   5   6   7  |  0   1   2   3   4   5
   /// v  D1  pa  va data ls  ts   _  |  v  D1  pa  va data ls  ts   _  | D2  D3  D4  EQ  B0  B1  ...
-  pub fn gen_vir_mem_cohere_inst(max_ts_width: usize) -> (usize, usize, usize, Instance) {
-    let vir_mem_cohere_num_vars = max(2 * 8, (max_ts_width + 4).next_power_of_two()) / 2;
+  pub fn gen_vir_mem_cohere_inst(max_ts_width: usize, mem_addr_ts_bits_size: usize) -> (usize, usize, usize, Instance) {
+    let vir_mem_cohere_num_vars = max(2 * 8, mem_addr_ts_bits_size) / 2;
     let width = vir_mem_cohere_num_vars;
     let vir_mem_cohere_num_cons = max_ts_width + 11;
     let vir_mem_cohere_num_non_zero_entries = max(16 + max_ts_width, 6 + 2 * max_ts_width);

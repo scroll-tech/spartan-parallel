@@ -717,6 +717,7 @@ impl SNARK {
     num_ios: usize,
     mem_block_w3_size: usize,
     mem_block_w3_size_per_block: &Vec<usize>,
+    mem_addr_ts_bits_size: usize,
     num_inputs_unpadded: usize,
     num_vars_per_block: &Vec<usize>,
 
@@ -759,7 +760,6 @@ impl SNARK {
     max_block_num_vir_mem_accesses: usize,
 
     total_num_vir_mem_accesses: usize,
-    vir_mem_cohere_num_vars: usize,
     vir_mem_cohere_inst: &Instance,
     vir_mem_cohere_comm: &ComputationCommitment,
     vir_mem_cohere_decomm: &ComputationDecommitment,
@@ -828,6 +828,7 @@ impl SNARK {
         Scalar::from(*n as u64).append_to_transcript(b"num_vars_per_block", transcript);
       }
       Scalar::from(mem_block_w3_size as u64).append_to_transcript(b"mem_block_w3_size", transcript);
+      Scalar::from(mem_addr_ts_bits_size as u64).append_to_transcript(b"mem_addr_ts_bits_size", transcript);
       Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
       Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
@@ -835,7 +836,6 @@ impl SNARK {
       Scalar::from(max_block_num_vir_mem_accesses as u64).append_to_transcript(b"max_block_num_vir_mem_accesses", transcript);
       Scalar::from(total_num_phy_mem_accesses as u64).append_to_transcript(b"total_num_phy_mem_accesses", transcript);
       Scalar::from(total_num_vir_mem_accesses as u64).append_to_transcript(b"total_num_vir_mem_accesses", transcript);
-      Scalar::from(vir_mem_cohere_num_vars as u64).append_to_transcript(b"vir_mem_cohere_num_vars", transcript);
       
       // commit mem_block_mask
       for c in mem_block_comm_mask_list {
@@ -919,9 +919,9 @@ impl SNARK {
     let total_num_phy_mem_accesses = if total_num_phy_mem_accesses == 0 { 0 } else { total_num_phy_mem_accesses.next_power_of_two() };
     // Pad addr_vir_mems with dummys so the length is a power of 2
     if total_num_vir_mem_accesses > 0 {
-      let dummy_addr = vec![zero; vir_mem_cohere_num_vars];
+      let dummy_addr = vec![zero; 8];
       addr_vir_mems_list.extend(vec![dummy_addr; total_num_vir_mem_accesses.next_power_of_two() - total_num_vir_mem_accesses]);
-      let dummy_ts = vec![zero; 2 * vir_mem_cohere_num_vars];
+      let dummy_ts = vec![zero; mem_addr_ts_bits_size];
       addr_ts_bits_list.extend(vec![dummy_ts; total_num_vir_mem_accesses.next_power_of_two() - total_num_vir_mem_accesses]);
     }
     let total_num_vir_mem_accesses = if total_num_vir_mem_accesses == 0 { 0 } else { total_num_vir_mem_accesses.next_power_of_two() };
@@ -1081,7 +1081,7 @@ impl SNARK {
         // Remove the first entry and shift the remaining entries up by one
         // Used later by coherence check
         let (addr_vir_mems_shifted_prover, addr_comm_vir_mems_shifted) = {
-          let addr_vir_mems_shifted = [addr_vir_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; vir_mem_cohere_num_vars]].concat();
+          let addr_vir_mems_shifted = [addr_vir_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
           // create a multilinear polynomial using the supplied assignment for variables
           let addr_poly_vir_mems_shifted = DensePolynomial::new(addr_vir_mems_shifted);
 
@@ -1090,7 +1090,7 @@ impl SNARK {
           // add the commitment to the prover's transcript
           addr_comm_vir_mems_shifted.append_to_transcript(b"poly_commitment", transcript);
 
-          let addr_vir_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_vir_mems_list[1..].to_vec(), vec![vec![ZERO; vir_mem_cohere_num_vars]]].concat()], vec![addr_poly_vir_mems_shifted]);
+          let addr_vir_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_vir_mems_list[1..].to_vec(), vec![vec![ZERO; 8]]].concat()], vec![addr_poly_vir_mems_shifted]);
           (addr_vir_mems_shifted_prover, addr_comm_vir_mems_shifted)
         };
         let (addr_ts_bits_prover, addr_comm_ts_bits) = {
@@ -1953,7 +1953,7 @@ impl SNARK {
               1,
               total_num_vir_mem_accesses,
               &vec![total_num_vir_mem_accesses],
-              vir_mem_cohere_num_vars,
+              max(2 * 8, mem_addr_ts_bits_size) / 2,
               vec![&addr_vir_mems_prover, &addr_vir_mems_shifted_prover, &addr_ts_bits_prover],
               &vir_mem_cohere_inst.inst,
               &vars_gens,
@@ -2170,6 +2170,7 @@ impl SNARK {
     // - (if exist) mem_addr_w3 => shift by 8
     // - (if exist) addr_phy_mems => shift by 4
     // - (if exist) mem_block_w3 => shift by mem_block_w3_size
+    // - (if exist) addr_vir_mems => shift by 8
     let timer_proof = Timer::new("Shift Proofs");
     let shift_proof = {
       let mut orig_polys = vec![&perm_exec_w3_prover.poly_w[0]];
@@ -2197,6 +2198,11 @@ impl SNARK {
           shifted_polys.push(poly);
         }
         header_len_list.extend(mem_block_w3_size_per_block);
+      }
+      if total_num_vir_mem_accesses > 0 {
+        orig_polys.push(&addr_vir_mems_prover.poly_w[0]);
+        shifted_polys.push(&addr_vir_mems_shifted_prover.poly_w[0]);
+        header_len_list.push(7);
       }
       let shift_proof = ShiftProofs::prove(
         orig_polys,
@@ -2303,6 +2309,8 @@ impl SNARK {
     num_ios: usize,
     mem_block_w3_size: usize,
     mem_block_w3_size_per_block: &Vec<usize>,
+    mem_addr_ts_bits_size: usize,
+
     num_inputs_unpadded: usize,
     // How many variables (witnesses) are used by each block? Round to the next power of 2
     num_vars_per_block: &Vec<usize>,
@@ -2340,7 +2348,6 @@ impl SNARK {
     max_block_num_vir_mem_accesses: usize,
 
     total_num_vir_mem_accesses: usize,
-    vir_mem_cohere_num_vars: usize,
     vir_mem_cohere_num_cons: usize,
     vir_mem_cohere_comm: &ComputationCommitment,
     vir_mem_cohere_gens: &SNARKGens,
@@ -2381,6 +2388,7 @@ impl SNARK {
         Scalar::from(*n as u64).append_to_transcript(b"num_vars_per_block", transcript);
       }
       Scalar::from(mem_block_w3_size as u64).append_to_transcript(b"mem_block_w3_size", transcript);
+      Scalar::from(mem_addr_ts_bits_size as u64).append_to_transcript(b"mem_addr_ts_bits_size", transcript);
       Scalar::from(num_inputs_unpadded as u64).append_to_transcript(b"num_inputs_unpadded", transcript);
       Scalar::from(block_num_instances_bound as u64).append_to_transcript(b"block_num_instances_bound", transcript);
       Scalar::from(block_max_num_proofs as u64).append_to_transcript(b"block_max_num_proofs", transcript);
@@ -2388,7 +2396,6 @@ impl SNARK {
       Scalar::from(max_block_num_vir_mem_accesses as u64).append_to_transcript(b"max_block_num_vir_mem_accesses", transcript);
       Scalar::from(total_num_phy_mem_accesses as u64).append_to_transcript(b"total_num_phy_mem_accesses", transcript);
       Scalar::from(total_num_vir_mem_accesses as u64).append_to_transcript(b"total_num_vir_mem_accesses", transcript);
-      Scalar::from(vir_mem_cohere_num_vars as u64).append_to_transcript(b"vir_mem_cohere_num_vars", transcript);
       
       // commit mem_block_mask
       for c in mem_block_comm_mask_list {
@@ -2513,9 +2520,9 @@ impl SNARK {
         self.addr_comm_vir_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         self.addr_comm_ts_bits[0].append_to_transcript(b"poly_commitment", transcript);
         (
-          VerifierWitnessSecInfo::new(false, vec![vir_mem_cohere_num_vars], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems),
-          VerifierWitnessSecInfo::new(false, vec![vir_mem_cohere_num_vars], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems_shifted),
-          VerifierWitnessSecInfo::new(false, vec![2 * vir_mem_cohere_num_vars], &vec![total_num_vir_mem_accesses], &self.addr_comm_ts_bits)
+          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems),
+          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems_shifted),
+          VerifierWitnessSecInfo::new(false, vec![mem_addr_ts_bits_size], &vec![total_num_vir_mem_accesses], &self.addr_comm_ts_bits)
         )
       } else {
         (
@@ -2814,7 +2821,7 @@ impl SNARK {
           1,
           total_num_vir_mem_accesses,
           &vec![total_num_vir_mem_accesses],
-          vir_mem_cohere_num_vars,
+          max(2 * 8, mem_addr_ts_bits_size) / 2,
           vec![&addr_vir_mems_verifier, &addr_vir_mems_shifted_verifier, &addr_ts_bits_verifier],
           vir_mem_cohere_num_cons,
           &vars_gens,
@@ -3018,6 +3025,13 @@ impl SNARK {
         poly_size_list.extend::<Vec<usize>>((0..block_num_instances).map(|i| mem_block_w3_size * block_num_proofs[i]).collect());
         shift_size_list.extend(vec![mem_block_w3_size; block_num_instances]);
         header_len_list.extend(mem_block_w3_size_per_block);
+      }
+      if total_num_vir_mem_accesses > 0 {
+        orig_comms.push(&addr_vir_mems_verifier.comm_w[0]);
+        shifted_comms.push(&addr_vir_mems_shifted_verifier.comm_w[0]);
+        poly_size_list.push(8 * total_num_vir_mem_accesses);
+        shift_size_list.push(8);
+        header_len_list.push(7);
       }
 
       self.shift_proof.verify(
