@@ -2202,7 +2202,7 @@ impl SNARK {
       if total_num_vir_mem_accesses > 0 {
         orig_polys.push(&addr_vir_mems_prover.poly_w[0]);
         shifted_polys.push(&addr_vir_mems_shifted_prover.poly_w[0]);
-        header_len_list.push(7);
+        header_len_list.push(6);
       }
       let shift_proof = ShiftProofs::prove(
         orig_polys,
@@ -3031,7 +3031,7 @@ impl SNARK {
         shifted_comms.push(&addr_vir_mems_shifted_verifier.comm_w[0]);
         poly_size_list.push(8 * total_num_vir_mem_accesses);
         shift_size_list.push(8);
-        header_len_list.push(7);
+        header_len_list.push(6);
       }
 
       self.shift_proof.verify(
