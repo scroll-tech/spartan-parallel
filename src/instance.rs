@@ -446,40 +446,68 @@ impl Instance {
   /// Used for gen_mem_extract_inst
   pub fn gen_mem_extract_mask(
     num_instances: usize,
-    num_vars: usize, 
-    num_mems_accesses: &Vec<usize>, 
+    num_vars_phy: usize,
+    num_vars_vir: usize,
+    num_phy_mems_accesses: &Vec<usize>,
+    num_vir_mems_accesses: &Vec<usize>, 
     vars_gens: &R1CSGens
   ) -> (
     Vec<Vec<Vec<Scalar>>>,
     Vec<DensePolynomial>,
+    Vec<PolyCommitment>,
+    Vec<Vec<Vec<Scalar>>>,
+    Vec<DensePolynomial>,
     Vec<PolyCommitment>
   ) {
+    assert_eq!(num_phy_mems_accesses.len(), num_instances);
+    assert_eq!(num_vir_mems_accesses.len(), num_instances);
     // Generate Mask
     let zero = Scalar::zero();
     let one = Scalar::one();
-    let mem_block_mask: Vec<Vec<Vec<Scalar>>> = num_mems_accesses.iter().map(|i| vec![[vec![one; *i], vec![zero; num_vars - i]].concat()]).collect();
+    let phy_mem_block_mask: Vec<Vec<Vec<Scalar>>> = num_phy_mems_accesses.iter().map(|i| vec![[vec![one; *i], vec![zero; num_vars_phy - i]].concat()]).collect();
+    let vir_mem_block_mask: Vec<Vec<Vec<Scalar>>> = (0..num_instances).map(|b| {
+      let p = num_phy_mems_accesses[b];
+      let v = num_vir_mems_accesses[b];
+      vec![[vec![zero; p], vec![one; v], vec![zero; num_vars_vir - p - v]].concat()]
+    }).collect();
 
     // commit the witnesses and inputs separately instance-by-instance
-    let mut mem_block_poly_mask_list = Vec::new();
-    let mut mem_block_comm_mask_list = Vec::new();
+    let mut phy_mem_block_poly_mask_list = Vec::new();
+    let mut phy_mem_block_comm_mask_list = Vec::new();
+    let mut vir_mem_block_poly_mask_list = Vec::new();
+    let mut vir_mem_block_comm_mask_list = Vec::new();
 
     for p in 0..num_instances {
-      let (mem_block_poly_mask, mem_block_comm_mask) = {
+      let (phy_mem_block_poly_mask, phy_mem_block_comm_mask) = {
         // create a multilinear polynomial using the supplied assignment for variables
-        let mem_block_poly_mask = DensePolynomial::new(mem_block_mask[p][0].clone());
+        let phy_mem_block_poly_mask = DensePolynomial::new(phy_mem_block_mask[p][0].clone());
         // produce a commitment to the satisfying assignment
-        let (mem_block_comm_mask, _blinds_vars) = mem_block_poly_mask.commit(&vars_gens.gens_pc, None);
+        let (phy_mem_block_comm_mask, _blinds_vars) = phy_mem_block_poly_mask.commit(&vars_gens.gens_pc, None);
 
-        (mem_block_poly_mask, mem_block_comm_mask)
+        (phy_mem_block_poly_mask, phy_mem_block_comm_mask)
       };
-      mem_block_poly_mask_list.push(mem_block_poly_mask);
-      mem_block_comm_mask_list.push(mem_block_comm_mask);
+      phy_mem_block_poly_mask_list.push(phy_mem_block_poly_mask);
+      phy_mem_block_comm_mask_list.push(phy_mem_block_comm_mask);
+      
+      let (vir_mem_block_poly_mask, vir_mem_block_comm_mask) = {
+        // create a multilinear polynomial using the supplied assignment for variables
+        let vir_mem_block_poly_mask = DensePolynomial::new(vir_mem_block_mask[p][0].clone());
+        // produce a commitment to the satisfying assignment
+        let (vir_mem_block_comm_mask, _blinds_vars) = vir_mem_block_poly_mask.commit(&vars_gens.gens_pc, None);
+
+        (vir_mem_block_poly_mask, vir_mem_block_comm_mask)
+      };
+      vir_mem_block_poly_mask_list.push(vir_mem_block_poly_mask);
+      vir_mem_block_comm_mask_list.push(vir_mem_block_comm_mask);
     }
 
     (
-      mem_block_mask,
-      mem_block_poly_mask_list,
-      mem_block_comm_mask_list,
+      phy_mem_block_mask,
+      phy_mem_block_poly_mask_list,
+      phy_mem_block_comm_mask_list,
+      vir_mem_block_mask,
+      vir_mem_block_poly_mask_list,
+      vir_mem_block_comm_mask_list,
     )
   }
 
@@ -493,7 +521,7 @@ impl Instance {
   /// The final product is stored in x = MC[max_num_mems_accesses - 1]
   ///
   /// Input composition: 
-  ///           Challenges                            Masks                              Vars                                   W3
+  ///           Challenges                            Masks                               Vars                                  W3
   /// 0   1   2   3   4   5   6   7   |   0   1   2   3   4   5   6   7   |   0   1   2   3   4   5   6   7    |  0   1   2   3     4   5   6   7
   /// tau r  r^2  _   _   _   _   _   |   1   1   0   0   _   _   _   _   |   w   A0  V0  A1  V1  Z0  Z1 ...   |  v   x  pi   D  | MR  MD  MC  MR ...
   ///
