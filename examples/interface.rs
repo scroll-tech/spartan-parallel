@@ -429,7 +429,7 @@ fn main() {
   let mem_block_w3_size = (4 + 3 * max_block_num_phy_mem_accesses).next_power_of_two();
   // Number of non-zero entries for each block
   let mem_block_w3_size_per_block = block_num_phy_mem_accesses.iter().map(|i| 4 + 3 * i).collect();
-  let mem_addr_ts_bits_size = (4 + ctk.max_ts_width).next_power_of_two();
+  let mem_addr_ts_bits_size = (2 + ctk.max_ts_width).next_power_of_two();
 
   assert_eq!(num_vars, num_vars.next_power_of_two());
   assert!(ctk.args.len() == block_num_instances_bound);
