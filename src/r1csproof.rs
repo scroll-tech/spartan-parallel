@@ -240,7 +240,7 @@ impl R1CSProof {
       // assert size of w_mat
       assert!(w.is_single && w.w_mat.len() == 1 || !w.is_single && w.w_mat.len() == num_instances);
       for p in 0..w.w_mat.len() {
-        assert!(w.is_short && w.w_mat[p].len() == 1 || !w.is_short && w.w_mat[p].len() == num_proofs[p]);
+        assert!(w.w_mat[p].len() <= num_proofs[p]);
         for q in 0..w.w_mat[p].len() {
           assert_eq!(w.w_mat[p][q].len(), w.num_inputs[p]);
         }
@@ -261,7 +261,7 @@ impl R1CSProof {
         z_mat[p].push(Vec::new());
         for w in &witness_secs {
           let p_w = if w.is_single { 0 } else { p };
-          let q_w = if w.is_short { 0 } else { q };
+          let q_w = q * w.w_mat[p_w].len() / num_proofs[p_w];
           // Only append the first num_inputs_entries of w_mat[p][q]
           for i in 0..num_inputs {
             if i < w.w_mat[p_w][q_w].len() {
@@ -448,6 +448,11 @@ impl R1CSProof {
     for i in num_witness_secs.next_power_of_two().log_2()..num_rounds_y {
       ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
     }
+    // Similarly for rq, except there is no baseline
+    let mut rq_factors = vec![ONE; num_rounds_q + 1];
+    for i in 0..num_rounds_q {
+      rq_factors[i + 1] = (rq_factors[i]) * (ONE - rq[i]);
+    }
 
     // If w.num_inputs[p] == num_inputs, evaluate ry_baseline on the witness sec
     let ry_baseline = ry[num_rounds_y - num_inputs.log_2()..].to_vec();
@@ -466,7 +471,7 @@ impl R1CSProof {
       comm_vars_at_ry_list.push(Vec::new());
       for p in 0..wit_sec_num_instance {
         poly_list.push(&w.poly_w[p]);
-        num_proofs_list.push(if w.is_short { 1 } else { num_proofs[p] });
+        num_proofs_list.push(w.w_mat[p].len());
         num_inputs_list.push(w.num_inputs[p]);
         // Depending on w.num_inputs[p], ry_short can be two different values
         let ry_short = {
@@ -481,14 +486,21 @@ impl R1CSProof {
             ry[num_rounds_y - w.num_inputs[p].log_2()..].to_vec()
           }
         };
-        let rq_short = rq[num_rounds_q - num_proofs_list[num_proofs_list.len() - 1].log_2()..].to_vec();
+        let rq_short = rq[num_rounds_q - w.w_mat[p].len().log_2()..].to_vec();
         let r = &[rq_short, ry_short.clone()].concat();
         let eval_vars_at_ry = poly_list[poly_list.len() - 1].evaluate(r);
         Zr_list.push(eval_vars_at_ry);
         if w.num_inputs[p] >= num_inputs {
-          eval_vars_at_ry_list[i].push(eval_vars_at_ry);
+          eval_vars_at_ry_list[i].push(
+            eval_vars_at_ry
+            * rq_factors[num_rounds_q - w.w_mat[p].len().log_2()]
+          );
         } else {
-          eval_vars_at_ry_list[i].push(eval_vars_at_ry * ry_factors[num_rounds_y - w.num_inputs[p].log_2()]);
+          eval_vars_at_ry_list[i].push(
+            eval_vars_at_ry 
+            * rq_factors[num_rounds_q - w.w_mat[p].len().log_2()] 
+            * ry_factors[num_rounds_y - w.num_inputs[p].log_2()]
+          );
         }
         comm_vars_at_ry_list[i].push(eval_vars_at_ry.commit(&Scalar::zero(), &gens.gens_pc.gens.gens_1).compress());
       }
@@ -515,16 +527,16 @@ impl R1CSProof {
     for p in 0..num_instances {
       let wit_sec_p = |i: usize| if witness_secs[i].is_single { 0 } else { p };
       let e = |i: usize| eval_vars_at_ry_list[i][wit_sec_p(i)];
-      let mut eval_vars_comb = match num_witness_secs {
+      let eval_vars_comb = match num_witness_secs {
         1 => { e(0) }
         2 => { (ONE - ry[0]) * e(0) + ry[0] * e(1) }
         3 => { (ONE - ry[0]) * (ONE - ry[1]) * e(0) + (ONE - ry[0]) * ry[1] * e(1) + ry[0] * (ONE - ry[1]) * e(2) }
         4 => { (ONE - ry[0]) * (ONE - ry[1]) * e(0) + (ONE - ry[0]) * ry[1] * e(1) + ry[0] * (ONE - ry[1]) * e(2) + ry[0] * ry[1] * e(3) }
         _ => { panic!("Unsupported num_witness_secs: {}", num_witness_secs); }
       };
-      for q in 0..(num_rounds_q - num_proofs[p].log_2()) {
-        eval_vars_comb *= ONE - rq[q];
-      }
+      // for q in 0..(num_rounds_q - num_proofs[p].log_2()) {
+        // eval_vars_comb *= ONE - rq[q];
+      // }
       eval_vars_comb_list.push(eval_vars_comb);
     }
     timer_polyeval.stop();
@@ -728,6 +740,11 @@ impl R1CSProof {
     for i in num_witness_secs.next_power_of_two().log_2()..num_rounds_y {
       ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
     }
+    // Similarly for rq, except there is no baseline
+    let mut rq_factors = vec![ONE; num_rounds_q + 1];
+    for i in 0..num_rounds_q {
+      rq_factors[i + 1] = (rq_factors[i]) * (ONE - rq[i]);
+    }
 
     let timer_commit_opening = Timer::new("verify_sc_commitment_opening");
     // If w.num_inputs[p] == num_inputs, evaluate ry_baseline on the witness sec
@@ -741,7 +758,7 @@ impl R1CSProof {
       let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
       for p in 0..wit_sec_num_instance {
         comm_list.push(&w.comm_w[p]);
-        num_proofs_list.push(if w.is_short { 1 } else { num_proofs[p] });
+        num_proofs_list.push(w.num_proofs[p]);
         num_inputs_list.push(w.num_inputs[p]);
         comm_Zr_list.push(self.comm_vars_at_ry_list[i][p].decompress().unwrap());
       }
@@ -763,22 +780,25 @@ impl R1CSProof {
     let mut expected_comm_vars_list = Vec::new();
     for p in 0..num_instances {
       let wit_sec_p = |i: usize| if witness_secs[i].is_single { 0 } else { p };
-      let c = |i: usize| 
-        if witness_secs[i].num_inputs[wit_sec_p(i)] >= num_inputs {
-          self.comm_vars_at_ry_list[i][wit_sec_p(i)].decompress().unwrap()
+      let c = |i: usize|  {
+        let w = witness_secs[i];
+        let w_p = wit_sec_p(i);
+        if w.num_inputs[w_p] >= num_inputs {
+          self.comm_vars_at_ry_list[i][w_p].decompress().unwrap() * rq_factors[num_rounds_q - w.num_proofs[w_p].log_2()]
         } else {
-          self.comm_vars_at_ry_list[i][wit_sec_p(i)].decompress().unwrap() * ry_factors[num_rounds_y - witness_secs[i].num_inputs[wit_sec_p(i)].log_2()]
-        };
-      let mut comm_vars_comb = match num_witness_secs {
+          self.comm_vars_at_ry_list[i][w_p].decompress().unwrap() * rq_factors[num_rounds_q - w.num_proofs[w_p].log_2()] * ry_factors[num_rounds_y - w.num_inputs[w_p].log_2()]
+        }
+      };
+      let comm_vars_comb = match num_witness_secs {
         1 => { c(0) }
         2 => { (ONE - ry[0]) * c(0) + ry[0] * c(1) }
         3 => { (ONE - ry[0]) * (ONE - ry[1]) * c(0) + (ONE - ry[0]) * ry[1] * c(1) + ry[0] * (ONE - ry[1]) * c(2) }
         4 => { (ONE - ry[0]) * (ONE - ry[1]) * c(0) + (ONE - ry[0]) * ry[1] * c(1) + ry[0] * (ONE - ry[1]) * c(2) + ry[0] * ry[1] * c(3) }
         _ => { panic!("Unsupported num_witness_secs: {}", num_witness_secs); }
       };
-      for q in 0..(num_rounds_q - num_proofs[p].log_2()) {
-        comm_vars_comb *= ONE - rq[q];
-      }
+      // for q in 0..(num_rounds_q - num_proofs[p].log_2()) {
+        // comm_vars_comb *= ONE - rq[q];
+      // }
       expected_comm_vars_list.push(comm_vars_comb);
     }
 

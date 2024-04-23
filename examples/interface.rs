@@ -43,8 +43,8 @@ struct CompileTimeKnowledge {
   num_vars: usize,
   num_inputs_unpadded: usize,
   num_vars_per_block: Vec<usize>,
-  block_num_phy_mem_accesses: Vec<usize>,
-  block_num_vir_mem_accesses: Vec<usize>,
+  block_num_phy_ops: Vec<usize>,
+  block_num_vir_ops: Vec<usize>,
   max_ts_width: usize,
 
   args: Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
@@ -63,7 +63,7 @@ impl CompileTimeKnowledge {
     let mut reader = BufReader::new(f);
     let mut buffer = String::new();
 
-    let (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, block_num_phy_mem_accesses, block_num_vir_mem_accesses, max_ts_width) = {
+    let (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, block_num_phy_ops, block_num_vir_ops, max_ts_width) = {
       reader.read_line(&mut buffer)?;
       let block_num_instances = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
@@ -77,14 +77,14 @@ impl CompileTimeKnowledge {
       let num_vars_per_block: Vec<usize> = string_to_vec(buffer.clone());
       buffer.clear();
       reader.read_line(&mut buffer)?;
-      let block_num_phy_mem_accesses: Vec<usize> = string_to_vec(buffer.clone());
+      let block_num_phy_ops: Vec<usize> = string_to_vec(buffer.clone());
       buffer.clear();
       reader.read_line(&mut buffer)?;
-      let block_num_vir_mem_accesses: Vec<usize> = string_to_vec(buffer.clone());
+      let block_num_vir_ops: Vec<usize> = string_to_vec(buffer.clone());
       buffer.clear();
       reader.read_line(&mut buffer)?;
       let max_ts_width = buffer.trim().parse::<usize>().unwrap();
-      (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, block_num_phy_mem_accesses, block_num_vir_mem_accesses, max_ts_width)
+      (block_num_instances, num_vars, num_inputs_unpadded, num_vars_per_block, block_num_phy_ops, block_num_vir_ops, max_ts_width)
     };
 
     let mut args = vec![Vec::new(); block_num_instances];
@@ -156,8 +156,8 @@ impl CompileTimeKnowledge {
       num_vars,
       num_inputs_unpadded,
       num_vars_per_block,
-      block_num_phy_mem_accesses,
-      block_num_vir_mem_accesses,
+      block_num_phy_ops,
+      block_num_vir_ops,
       max_ts_width,
       args,
       func_input_width,
@@ -422,29 +422,29 @@ fn main() {
   let num_inputs_unpadded = ctk.num_inputs_unpadded;
   // num_ios is the width used by all input related computations
   let num_ios = (num_inputs_unpadded * 2).next_power_of_two();
-  let block_num_phy_mem_accesses = ctk.block_num_phy_mem_accesses;
-  let block_num_vir_mem_accesses = ctk.block_num_vir_mem_accesses;
-  let block_num_total_mem_accesses: Vec<usize> = (0..block_num_instances_bound).map(|i| { block_num_phy_mem_accesses[i] + block_num_vir_mem_accesses[i] }).collect();
-  let max_block_num_phy_mem_accesses = *block_num_phy_mem_accesses.iter().max().unwrap();
-  let max_block_num_vir_mem_accesses = *block_num_vir_mem_accesses.iter().max().unwrap();
-  let max_block_num_total_mem_accesses = *block_num_total_mem_accesses.iter().max().unwrap();
-  // mem_block_w3_size is used specifically by phy_mem_block_w3_size and MEM_BLOCK_POLY
-  let phy_mem_block_w3_size = (4 + 3 * max_block_num_phy_mem_accesses).next_power_of_two();
-  let phy_mem_block_w3_size_per_block = block_num_phy_mem_accesses.iter().map(|i| 4 + 3 * i).collect();
-  let vir_mem_block_w3_size = (4 + 3 * max_block_num_total_mem_accesses).next_power_of_two();
-  let vir_mem_block_w3_size_per_block = block_num_total_mem_accesses.iter().map(|i| 4 + 3 * i).collect();
+  let block_num_phy_ops = ctk.block_num_phy_ops;
+  let block_num_vir_ops = ctk.block_num_vir_ops;
+  let max_block_num_phy_ops = *block_num_phy_ops.iter().max().unwrap();
+  let max_block_num_vir_ops = *block_num_vir_ops.iter().max().unwrap();
+
   let mem_addr_ts_bits_size = (2 + ctk.max_ts_width).next_power_of_two();
 
   assert_eq!(num_vars, num_vars.next_power_of_two());
   assert!(ctk.args.len() == block_num_instances_bound);
-  assert!(block_num_phy_mem_accesses.len() == block_num_instances_bound);
+  assert!(block_num_phy_ops.len() == block_num_instances_bound);
   // If output_block_num < block_num_instances, the prover can cheat by executing the program multiple times
   assert!(ctk.output_block_num >= block_num_instances_bound);
 
   println!("Generating Circuits...");
   // --
   // BLOCK INSTANCES
-  let (block_num_cons, block_num_non_zero_entries, mut block_inst) = Instance::gen_block_inst(block_num_instances_bound, num_vars, &ctk.args);
+  let (block_num_cons, block_num_non_zero_entries, mut block_inst) = Instance::gen_block_inst(
+    block_num_instances_bound, 
+    num_vars, 
+    &ctk.args,
+    &block_num_phy_ops,
+    &block_num_vir_ops,
+  );
   println!("Finished Block");
 
   // CONSIS INSTANCES
@@ -458,8 +458,7 @@ fn main() {
   let (perm_poly_num_cons, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst();
   println!("Finished Perm");
 
-  // MEM_EXTRACT
-  let (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst) = Instance::gen_mem_extract_inst(vir_mem_block_w3_size, max_block_num_phy_mem_accesses);
+  // MEM INSTANCES
   // PHY_MEM_COHERE
   let (phy_mem_cohere_num_cons, phy_mem_cohere_num_non_zero_entries, phy_mem_cohere_inst) = Instance::gen_phy_mem_cohere_inst();
   // VIR_MEM_COHERE
@@ -471,11 +470,10 @@ fn main() {
   // --
   println!("Producing Public Parameters...");
   // produce public parameters
-  let block_gens = SNARKGens::new(block_num_cons, 2 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
+  let block_gens = SNARKGens::new(block_num_cons, 8 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, 2 * 8, 1, consis_check_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, 2 * 4, 1, perm_poly_num_non_zero_entries);
-  let mem_extract_gens = SNARKGens::new(mem_extract_num_cons, 4 * vir_mem_block_w3_size, 1, mem_extract_num_non_zero_entries);
   let phy_mem_cohere_gens = SNARKGens::new(phy_mem_cohere_num_cons, 2 * 4, 1, phy_mem_cohere_num_non_zero_entries);
   let vir_mem_cohere_gens = SNARKGens::new(vir_mem_cohere_num_cons, 4 * vir_mem_cohere_num_vars, 1, vir_mem_cohere_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
@@ -490,27 +488,9 @@ fn main() {
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
   println!("Finished Perm");
-  let (mem_extract_comm, mem_extract_decomm) = SNARK::encode(&mem_extract_inst, &mem_extract_gens);
   let (phy_mem_cohere_comm, phy_mem_cohere_decomm) = SNARK::encode(&phy_mem_cohere_inst, &phy_mem_cohere_gens);
   let (vir_mem_cohere_comm, vir_mem_cohere_decomm) = SNARK::encode(&vir_mem_cohere_inst, &vir_mem_cohere_gens);
   println!("Finished Mem");
-
-  // Mask vector for mem_extract
-  let (
-    phy_mem_block_mask_list, 
-    phy_mem_block_mask_poly_list, 
-    phy_mem_block_mask_comm_list,
-    vir_mem_block_mask_list, 
-    vir_mem_block_mask_poly_list, 
-    vir_mem_block_mask_comm_list,
-  ) = Instance::gen_mem_extract_mask(
-    block_num_instances_bound, 
-    max_block_num_phy_mem_accesses.next_power_of_two(), 
-    max_block_num_total_mem_accesses.next_power_of_two(),
-    &block_num_phy_mem_accesses, 
-    &block_num_vir_mem_accesses, 
-    &vars_gens
-  );
 
   // --
   // WITNESS PREPROCESSING
@@ -541,10 +521,10 @@ fn main() {
     
     num_vars,
     num_ios,
-    phy_mem_block_w3_size,
-    &phy_mem_block_w3_size_per_block,
-    vir_mem_block_w3_size,
-    &vir_mem_block_w3_size_per_block,
+    max_block_num_phy_ops,
+    &block_num_phy_ops,
+    max_block_num_vir_ops,
+    &block_num_vir_ops,
     mem_addr_ts_bits_size,
     num_inputs_unpadded,
     &ctk.num_vars_per_block,
@@ -572,20 +552,11 @@ fn main() {
     &perm_poly_decomm,
     &perm_poly_gens,
 
-    max_block_num_phy_mem_accesses,
-    &mem_extract_inst,
-    &mem_extract_comm,
-    &mem_extract_decomm,
-    &mem_extract_gens,
-
     rtk.total_num_phy_mem_accesses,
     &phy_mem_cohere_inst,
     &phy_mem_cohere_comm,
     &phy_mem_cohere_decomm,
     &phy_mem_cohere_gens,
-
-    max_block_num_total_mem_accesses,
-    max_block_num_vir_mem_accesses,
 
     rtk.total_num_vir_mem_accesses,
     &vir_mem_cohere_inst,
@@ -599,12 +570,6 @@ fn main() {
     rtk.addr_phy_mems_list,
     rtk.addr_vir_mems_list,
     rtk.addr_ts_bits_list,
-    &phy_mem_block_mask_list,
-    &phy_mem_block_mask_poly_list,
-    &phy_mem_block_mask_comm_list,
-    &vir_mem_block_mask_list,
-    &vir_mem_block_mask_poly_list,
-    &vir_mem_block_mask_comm_list,
 
     &vars_gens,
     &mut prover_transcript,
@@ -625,10 +590,10 @@ fn main() {
 
     num_vars,
     num_ios,
-    phy_mem_block_w3_size,
-    &phy_mem_block_w3_size_per_block,
-    vir_mem_block_w3_size,
-    &vir_mem_block_w3_size_per_block,
+    max_block_num_phy_ops,
+    &block_num_phy_ops,
+    max_block_num_vir_ops,
+    &block_num_vir_ops,
     mem_addr_ts_bits_size,
     num_inputs_unpadded,
     &ctk.num_vars_per_block,
@@ -652,25 +617,15 @@ fn main() {
     &perm_poly_comm,
     &perm_poly_gens,
 
-    max_block_num_phy_mem_accesses,
-    mem_extract_num_cons,
-    &mem_extract_comm,
-    &mem_extract_gens,
     rtk.total_num_phy_mem_accesses,
     phy_mem_cohere_num_cons,
     &phy_mem_cohere_comm,
     &phy_mem_cohere_gens,
 
-    max_block_num_total_mem_accesses,
-    max_block_num_vir_mem_accesses,
-
     rtk.total_num_vir_mem_accesses,
     vir_mem_cohere_num_cons,
     &vir_mem_cohere_comm,
     &vir_mem_cohere_gens,
-
-    &phy_mem_block_mask_comm_list,
-    &vir_mem_block_mask_comm_list,
 
     &vars_gens,
     &mut verifier_transcript
