@@ -263,24 +263,24 @@ impl Instance {
     let V_VL = |b: usize, i: usize| num_vars + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 2;
     let V_VT = |b: usize, i: usize| num_vars + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 3;
     // in PHY_W2
-    let V_PMR = |i: usize| 3 * num_vars + 2 * i;
-    let V_PMC = |i: usize| 3 * num_vars + 2 * i + 1;
+    let V_PMR = |i: usize| 2 * num_vars + 2 * i;
+    let V_PMC = |i: usize| 2 * num_vars + 2 * i + 1;
     // in VIR_W2
-    let V_VMR1 = |i: usize| 4 * num_vars + 4 * i;
-    let V_VMR2 = |i: usize| 4 * num_vars + 4 * i + 1;
-    let V_VMR3 = |i: usize| 4 * num_vars + 4 * i + 2;
-    let V_VMC = |i: usize| 4 * num_vars + 4 * i + 3;
+    let V_VMR1 = |i: usize| 3 * num_vars + 4 * i;
+    let V_VMR2 = |i: usize| 3 * num_vars + 4 * i + 1;
+    let V_VMR3 = |i: usize| 3 * num_vars + 4 * i + 2;
+    let V_VMC = |i: usize| 3 * num_vars + 4 * i + 3;
     // in CHALLENGES
-    let V_tau = 5 * num_vars;
-    let V_r = 5 * num_vars + 1;
-    let V_r2 = 5 * num_vars + 2;
-    let V_r3 = 5 * num_vars + 3;
+    let V_tau = 4 * num_vars;
+    let V_r = 4 * num_vars + 1;
+    let V_r2 = 4 * num_vars + 2;
+    let V_r3 = 4 * num_vars + 3;
     // in PHY_W3
-    let V_Pv = 6 * num_vars;
-    let V_Px = 6 * num_vars + 1;
+    let V_Pv = 5 * num_vars;
+    let V_Px = 5 * num_vars + 1;
     // in VIR_W3
-    let V_Vv = 7 * num_vars;
-    let V_Vx = 7 * num_vars + 1;
+    let V_Vv = 6 * num_vars;
+    let V_Vx = 6 * num_vars + 1;
 
     for b in 0..num_instances {
       let arg = &args[b];
@@ -312,7 +312,7 @@ impl Instance {
           // PMC = (1 or PMC[i-1]) * (tau - PA - PMR)
           if i == 0 {
             (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_valid, 1)], vec![(V_tau, 1), (V_PA(i), -1), (V_PMR(i), -1)], vec![(V_PMC(i), 1)]);
+              counter, vec![(V_cnst, 1)], vec![(V_tau, 1), (V_PA(i), -1), (V_PMR(i), -1)], vec![(V_PMC(i), 1)]);
           } else {
             (A, B, C) = Instance::gen_constr(A, B, C,
               counter, vec![(V_PMC(i - 1), 1)], vec![(V_tau, 1), (V_PA(i), -1), (V_PMR(i), -1)], vec![(V_PMC(i), 1)]);
@@ -350,10 +350,10 @@ impl Instance {
           // VMC = (1 or VMC[i-1]) * (tau - VA - VMR1 - VMR2 - VMR3)
           if i == 0 {
             (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_valid, 1)], vec![(V_tau, 1), (V_VA(b, i), -1), (V_VMR1(i), -1), (V_VMR2(i), -1), (V_VMR3(i), -1)], vec![(V_VMC(i), 1)]);
+              counter, vec![(V_cnst, 1)], vec![(V_tau, 1), (V_VA(b, i), -1), (V_VMR1(i), -1), (V_VMR2(i), -1), (V_VMR3(i), -1)], vec![(V_VMC(i), 1)]);
           } else {
             (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_PMC(i - 1), 1)], vec![(V_tau, 1), (V_PA(i), -1), (V_VMR1(i), -1), (V_VMR2(i), -1), (V_VMR3(i), -1)], vec![(V_VMC(i), 1)]);
+              counter, vec![(V_VMC(i - 1), 1)], vec![(V_tau, 1), (V_VA(b, i), -1), (V_VMR1(i), -1), (V_VMR2(i), -1), (V_VMR3(i), -1)], vec![(V_VMC(i), 1)]);
           }
           counter += 1;
         }
@@ -390,55 +390,6 @@ impl Instance {
     let block_inst = Instance::new(num_instances, block_num_cons, 8 * num_vars, &A_list, &B_list, &C_list).unwrap();
     (block_num_cons, block_num_non_zero_entries, block_inst)
   }
-
-
-  /*
-  /// Generates BLOCK instances based on inputs
-  pub fn gen_block_inst(
-    num_instances: usize, 
-    num_vars: usize, 
-    args: &Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
-  ) -> (usize, usize, Instance) {
-    assert_eq!(num_instances, args.len());
-
-    let mut block_num_cons = 0;
-    let mut block_num_non_zero_entries = 0;
-
-    let mut A_list = Vec::new();
-    let mut B_list = Vec::new();
-    let mut C_list = Vec::new();
-    for arg in args {
-      // Check if num_cons > block_num_cons
-      block_num_cons = max(block_num_cons, arg.len());
-      let mut tmp_nnz_A = 0;
-      let mut tmp_nnz_B = 0;
-      let mut tmp_nnz_C = 0;
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-  
-        for i in 0..arg.len() {
-          tmp_nnz_A += arg[i].0.len();
-          tmp_nnz_B += arg[i].1.len();
-          tmp_nnz_C += arg[i].2.len();
-          (A, B, C) = Instance::gen_constr_bytes(A, B, C,
-            i, arg[i].0.clone(), arg[i].1.clone(), arg[i].2.clone());
-        }
-        (A, B, C)
-      };
-      // Recalculate num_non_zero_entries
-      block_num_non_zero_entries = max(max(max(block_num_non_zero_entries, tmp_nnz_A), tmp_nnz_B), tmp_nnz_C);
-      A_list.push(A);
-      B_list.push(B);
-      C_list.push(C);
-    }
-    block_num_cons = block_num_cons.next_power_of_two();
-    
-    let block_inst = Instance::new(num_instances, block_num_cons, 2 * num_vars, &A_list, &B_list, &C_list).unwrap();
-    (block_num_cons, block_num_non_zero_entries, block_inst)
-  }
-  */
 
   /// Generates CONSIS_CHECK instance based on parameters
   /// CONSIS_CHECK takes in consis_w2 = <_, _, _, _, i, o, _, _>
@@ -629,163 +580,6 @@ impl Instance {
       perm_poly_inst
     };
     (perm_poly_num_cons, perm_poly_num_non_zero_entries, perm_poly_inst)
-  }
-
-  /// Generates a num_instances x num_vars INPUT MATRIX
-  /// For row i, the first num_mems_accesses[i] entries is 1 and the rest is 0
-  /// Used for gen_mem_extract_inst
-  pub fn gen_mem_extract_mask(
-    num_instances: usize,
-    num_vars_phy: usize,
-    num_vars_vir: usize,
-    num_phy_mems_accesses: &Vec<usize>,
-    num_vir_mems_accesses: &Vec<usize>, 
-    vars_gens: &R1CSGens
-  ) -> (
-    Vec<Vec<Vec<Scalar>>>,
-    Vec<DensePolynomial>,
-    Vec<PolyCommitment>,
-    Vec<Vec<Vec<Scalar>>>,
-    Vec<DensePolynomial>,
-    Vec<PolyCommitment>
-  ) {
-    assert_eq!(num_phy_mems_accesses.len(), num_instances);
-    assert_eq!(num_vir_mems_accesses.len(), num_instances);
-    // Generate Mask
-    let zero = Scalar::zero();
-    let one = Scalar::one();
-    let phy_mem_block_mask: Vec<Vec<Vec<Scalar>>> = num_phy_mems_accesses.iter().map(|i| vec![[vec![one; *i], vec![zero; num_vars_phy - i]].concat()]).collect();
-    let vir_mem_block_mask: Vec<Vec<Vec<Scalar>>> = (0..num_instances).map(|b| {
-      let p = num_phy_mems_accesses[b];
-      let v = num_vir_mems_accesses[b];
-      vec![[vec![zero; p], vec![one; v], vec![zero; num_vars_vir - p - v]].concat()]
-    }).collect();
-
-    // commit the witnesses and inputs separately instance-by-instance
-    let mut phy_mem_block_poly_mask_list = Vec::new();
-    let mut phy_mem_block_comm_mask_list = Vec::new();
-    let mut vir_mem_block_poly_mask_list = Vec::new();
-    let mut vir_mem_block_comm_mask_list = Vec::new();
-
-    for p in 0..num_instances {
-      let (phy_mem_block_poly_mask, phy_mem_block_comm_mask) = {
-        // create a multilinear polynomial using the supplied assignment for variables
-        let phy_mem_block_poly_mask = DensePolynomial::new(phy_mem_block_mask[p][0].clone());
-        // produce a commitment to the satisfying assignment
-        let (phy_mem_block_comm_mask, _blinds_vars) = phy_mem_block_poly_mask.commit(&vars_gens.gens_pc, None);
-
-        (phy_mem_block_poly_mask, phy_mem_block_comm_mask)
-      };
-      phy_mem_block_poly_mask_list.push(phy_mem_block_poly_mask);
-      phy_mem_block_comm_mask_list.push(phy_mem_block_comm_mask);
-      
-      let (vir_mem_block_poly_mask, vir_mem_block_comm_mask) = {
-        // create a multilinear polynomial using the supplied assignment for variables
-        let vir_mem_block_poly_mask = DensePolynomial::new(vir_mem_block_mask[p][0].clone());
-        // produce a commitment to the satisfying assignment
-        let (vir_mem_block_comm_mask, _blinds_vars) = vir_mem_block_poly_mask.commit(&vars_gens.gens_pc, None);
-
-        (vir_mem_block_poly_mask, vir_mem_block_comm_mask)
-      };
-      vir_mem_block_poly_mask_list.push(vir_mem_block_poly_mask);
-      vir_mem_block_comm_mask_list.push(vir_mem_block_comm_mask);
-    }
-
-    (
-      phy_mem_block_mask,
-      phy_mem_block_poly_mask_list,
-      phy_mem_block_comm_mask_list,
-      vir_mem_block_mask,
-      vir_mem_block_poly_mask_list,
-      vir_mem_block_comm_mask_list,
-    )
-  }
-
-  /// Generates MEM_EXTRACT instance based on parameters
-  /// We want to combine all memory accesses in the witness list to a single polynomial root, given by the formula
-  ///                           PI(mask * (tau - addr - r * val) + 1 - mask)
-  /// Which is then divided into three intermediate variables for each (addr, val)
-  /// - MR = r * val
-  /// - MD = mask * (tau - addr - MR)
-  /// - MC = (1 or MC[i-1]) * (MD + 1 - mask)
-  /// The final product is stored in x = MC[max_num_mems_accesses - 1]
-  ///
-  /// Input composition: 
-  ///           Challenges                            Masks                               Vars                                  W3
-  /// 0   1   2   3   4   5   6   7   |   0   1   2   3   4   5   6   7   |   0   1   2   3   4   5   6   7    |  0   1   2   3     4   5   6   7
-  /// tau r   _   _   _   _   _   _   |   1   1   0   0   _   _   _   _   |   w   A0  V0  A1  V1  Z0  Z1 ...   |  v   x  pi   D  | MR  MD  MC  MR ...
-  ///
-  /// All memory accesses should be in the form (A0, V0, A1, V1, ...) at the front of the witnesses
-  /// Mask is the unary representation of L
-  /// There can be at most max_num_mems_accesses memory accesses
-  pub fn gen_mem_extract_inst(num_vars: usize, max_num_mems_accesses: usize) -> (usize, usize, Instance) {
-    let mem_extract_num_cons = 3 * max_num_mems_accesses + 2;
-    let mem_extract_num_non_zero_entries = 7 * max_num_mems_accesses + 4;
-  
-    let mem_extract_inst = {
-      let mut A_list = Vec::new();
-      let mut B_list = Vec::new();
-      let mut C_list = Vec::new();
-  
-      let V_tau = 0;
-      let V_r = 1;
-      let V_mask = |i: usize| num_vars + i;
-      // Valid is now w
-      let V_valid = 2 * num_vars;
-      let V_cnst = V_valid;
-      let V_addr = |i: usize| 2 * num_vars + 1 + 2 * i;
-      let V_val = |i: usize| 2 * num_vars + 2 + 2 * i;
-      let V_v = 3 * num_vars;
-      let V_x = 3 * num_vars + 1;
-      let V_MR = |i: usize| 3 * num_vars + 4 + 3 * i;
-      let V_MD = |i: usize| 3 * num_vars + 5 + 3 * i;
-      let V_MC = |i: usize| 3 * num_vars + 6 + 3 * i;
-
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-  
-        let mut counter = 0;
-        // v
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          counter, vec![], vec![], vec![(V_valid, 1), (V_v, -1)]);
-        counter += 1;
-        // x
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          counter, vec![], vec![], vec![(V_x, 1), (V_MC(max_num_mems_accesses - 1), -1)]);
-        counter += 1;
-        // MR, MD, MC
-        for i in 0..max_num_mems_accesses {
-          // MR = r * val
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            counter, vec![(V_r, 1)], vec![(V_val(i), 1)], vec![(V_MR(i), 1)]);
-          counter += 1;
-          // MD = mask * (tau - addr - MR)
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            counter, vec![(V_mask(i), 1)], vec![(V_tau, 1), (V_addr(i), -1), (V_MR(i), -1)], vec![(V_MD(i), 1)]);
-          counter += 1;  
-          // MC = (1 or MC[i-1]) * (MD + 1 - mask)
-          if i == 0 {
-            (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_valid, 1)], vec![(V_MD(i), 1), (V_cnst, 1), (V_mask(i), -1)], vec![(V_MC(i), 1)]);
-          } else {
-            (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_MC(i - 1), 1)], vec![(V_MD(i), 1), (V_cnst, 1), (V_mask(i), -1)], vec![(V_MC(i), 1)]);
-          }
-          counter += 1;
-        }
-        (A, B, C)
-      };
-      A_list.push(A);
-      B_list.push(B);
-      C_list.push(C);
-  
-      let mem_extract_inst = Instance::new(1, mem_extract_num_cons, 4 * num_vars, &A_list, &B_list, &C_list).unwrap();
-      
-      mem_extract_inst
-    };
-    (mem_extract_num_cons, mem_extract_num_non_zero_entries, mem_extract_inst)
   }
 
   /// Generates PHY_MEM_COHERE instance based on parameters

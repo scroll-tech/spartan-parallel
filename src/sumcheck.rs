@@ -850,7 +850,7 @@ impl ZKSumcheckInstanceProof {
     for j in 0..num_rounds {
       /* For debugging only */
       /* If the value is not 0, the instance / input is wrong */
-
+      /*
       if j == 0 {
         println!("\nNEW INSTANCE");
         let mut expected = Scalar::zero();
@@ -867,6 +867,7 @@ impl ZKSumcheckInstanceProof {
         println!("CLAIM: {:?}", claim_per_round);
         println!("EXPECTED: {:?}", expected);
       }
+      */
 
       // Use mode to decide which variable we are working with
       // Mode = 1 ==> p

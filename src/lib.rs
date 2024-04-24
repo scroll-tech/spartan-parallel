@@ -1657,14 +1657,14 @@ impl SNARK {
         let vir_mem_block_w2_size = (4 * max_block_num_vir_ops).next_power_of_two();
         let vir_mem_block_w3_size = 4;
 
-        let V_VA = |i: usize| 1 + 2 * i;
-        let V_VD = |i: usize| 1 + 2 * i + 1;
-        let V_VL = |i: usize| 1 + 2 * i + 2;
-        let V_VT = |i: usize| 1 + 2 * i + 3;
-        let V_VMR1 = |i: usize| 2 * i;
-        let V_VMR2 = |i: usize| 2 * i + 1;
-        let V_VMR3 = |i: usize| 2 * i + 2;
-        let V_VMC = |i: usize| 2 * i + 3;
+        let V_VA = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i;
+        let V_VD = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i + 1;
+        let V_VL = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i + 2;
+        let V_VT = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i + 3;
+        let V_VMR1 = |i: usize| 4 * i;
+        let V_VMR2 = |i: usize| 4 * i + 1;
+        let V_VMR3 = |i: usize| 4 * i + 2;
+        let V_VMC = |i: usize| 4 * i + 3;
         for p in 0..block_num_instances {
           vir_mem_block_w2.push(vec![Vec::new(); block_num_proofs[p]]);
           vir_mem_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
@@ -1674,16 +1674,16 @@ impl SNARK {
             // Compute VMR1, VMR2, VMR3, VMC
             for i in 0..block_num_vir_ops[p] {
               // VMR1 = r * VD
-              vir_mem_block_w2[p][q][V_VMR1(i)] = comb_r * block_vars_mat[p][q][V_VD(i)];
+              vir_mem_block_w2[p][q][V_VMR1(i)] = comb_r * block_vars_mat[p][q][V_VD(p, i)];
               // VMR2 = r^2 * VL
-              vir_mem_block_w2[p][q][V_VMR2(i)] = comb_r * comb_r * block_vars_mat[p][q][V_VL(i)];
+              vir_mem_block_w2[p][q][V_VMR2(i)] = comb_r * comb_r * block_vars_mat[p][q][V_VL(p, i)];
               // VMR1 = r^3 * VT
-              vir_mem_block_w2[p][q][V_VMR3(i)] = comb_r * comb_r * comb_r * block_vars_mat[p][q][V_VT(i)];
+              vir_mem_block_w2[p][q][V_VMR3(i)] = comb_r * comb_r * comb_r * block_vars_mat[p][q][V_VT(p, i)];
               // VMC = (1 or VMC[i-1]) * (tau - VA - VMR1 - VMR2 - VMR3)
-              let t = if i == 0 { ONE } else {vir_mem_block_w2[p][q][V_VMC(i - 1)] };
+              let t = if i == 0 { ONE } else { vir_mem_block_w2[p][q][V_VMC(i - 1)] };
               vir_mem_block_w2[p][q][V_VMC(i)] = t * (
                 comb_tau 
-                - block_vars_mat[p][q][V_VA(i)] 
+                - block_vars_mat[p][q][V_VA(p, i)] 
                 - vir_mem_block_w2[p][q][V_VMR1(i)] 
                 - vir_mem_block_w2[p][q][V_VMR2(i)] 
                 - vir_mem_block_w2[p][q][V_VMR3(i)]
@@ -2669,8 +2669,6 @@ impl SNARK {
     // index[i] = j => the original jth entry should now be at the ith position
     let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
     let block_num_vars: Vec<usize> = (0..block_num_instances).map(|i| block_num_vars[index[i]]).collect();
-    let block_num_phy_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_phy_ops[index[i]]).collect();
-    let block_num_vir_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_vir_ops[index[i]]).collect();
 
     // --
     // PADDING
