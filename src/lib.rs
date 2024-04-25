@@ -1944,6 +1944,10 @@ impl SNARK {
     // --
 
     let timer_proof = Timer::new("Block Correctness Extract");
+    let mut block_wit_secs = vec![&block_inputs_prover, &block_vars_prover];
+    if max_block_num_phy_ops > 0 || max_block_num_vir_ops > 0 { block_wit_secs.push(&perm_w0_prover); }
+    if max_block_num_phy_ops > 0 { block_wit_secs.extend([&phy_mem_block_w2_prover, &phy_mem_block_w3_prover]); }
+    if max_block_num_vir_ops > 0 { block_wit_secs.extend([&vir_mem_block_w2_prover, &vir_mem_block_w3_prover]); }
     let (block_r1cs_sat_proof, block_challenges) = {
       let (proof, block_challenges) = {
         R1CSProof::prove(
@@ -1951,15 +1955,7 @@ impl SNARK {
           block_max_num_proofs,
           block_num_proofs,
           num_vars,
-          vec![
-            &block_inputs_prover, 
-            &block_vars_prover, 
-            &phy_mem_block_w2_prover, 
-            &vir_mem_block_w2_prover, 
-            &perm_w0_prover, 
-            &phy_mem_block_w3_prover, 
-            &vir_mem_block_w3_prover
-          ],
+          block_wit_secs,
           &block_inst.inst,
           &vars_gens,
           transcript,
@@ -2906,20 +2902,16 @@ impl SNARK {
     // --
     {
       let timer_sat_proof = Timer::new("Block Correctness Extract Sat");
+      let mut block_wit_secs = vec![&block_inputs_verifier, &block_vars_verifier];
+      if max_block_num_phy_ops > 0 || max_block_num_vir_ops > 0 { block_wit_secs.push(&perm_w0_verifier); }
+      if max_block_num_phy_ops > 0 { block_wit_secs.extend([&phy_mem_block_w2_verifier, &phy_mem_block_w3_verifier]); }
+      if max_block_num_vir_ops > 0 { block_wit_secs.extend([&vir_mem_block_w2_verifier, &vir_mem_block_w3_verifier]); }
       let block_challenges = self.block_r1cs_sat_proof.verify(
         block_num_instances,
         block_max_num_proofs,
         block_num_proofs,
         num_vars,
-        vec![
-          &block_inputs_verifier, 
-          &block_vars_verifier, 
-          &phy_mem_block_w2_verifier, 
-          &vir_mem_block_w2_verifier, 
-          &perm_w0_verifier,
-          &phy_mem_block_w3_verifier,
-          &vir_mem_block_w3_verifier
-        ],
+        block_wit_secs,
         block_num_cons,
         &vars_gens,
         &self.block_inst_evals_bound_rp,

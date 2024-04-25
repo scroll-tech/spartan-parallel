@@ -1,7 +1,6 @@
 //! Reads in constraints and inputs from zok_tests/constraints and zok_tests/inputs
 //! Used as a temporary interface to / from CirC
 #![allow(clippy::assertions_on_result_states)]
-use std::cmp::max;
 use std::{fs::File, io::BufReader};
 use std::io::BufRead;
 use std::env;
@@ -438,10 +437,12 @@ fn main() {
   println!("Generating Circuits...");
   // --
   // BLOCK INSTANCES
-  let (block_num_cons, block_num_non_zero_entries, mut block_inst) = Instance::gen_block_inst(
+  let (block_num_vars, block_num_cons, block_num_non_zero_entries, mut block_inst) = Instance::gen_block_inst(
     block_num_instances_bound, 
     num_vars, 
     &ctk.args,
+    max_block_num_phy_ops > 0,
+    max_block_num_vir_ops > 0,
     &block_num_phy_ops,
     &block_num_vir_ops,
   );
@@ -470,7 +471,7 @@ fn main() {
   // --
   println!("Producing Public Parameters...");
   // produce public parameters
-  let block_gens = SNARKGens::new(block_num_cons, 8 * num_vars, block_num_instances_bound, block_num_non_zero_entries);
+  let block_gens = SNARKGens::new(block_num_cons, block_num_vars, block_num_instances_bound, block_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, 2 * 8, 1, consis_check_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
   let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, 2 * 4, 1, perm_poly_num_non_zero_entries);
