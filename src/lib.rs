@@ -284,7 +284,7 @@ impl ShiftProofs {
     let mut openings = vec![Vec::new(); num_instances];
     for p in 0..num_instances {
       for i in 0..header_len_list[p] {
-        let entry = orig_polys[p][i].commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1).compress();
+        let entry = orig_polys[p][i].commit(&ZERO, &vars_gens.gens_pc.gens.gens_1).compress();
         entry.append_to_transcript(b"shift_header_entry", transcript);
         openings[p].push(entry);
       }
@@ -307,8 +307,8 @@ impl ShiftProofs {
       let shifted_eval = (0..shifted_poly.len()).fold(ZERO, |a, b| a + shifted_poly[b] * rc[b]);
       orig_evals.push(orig_eval);
       shifted_evals.push(shifted_eval);
-      C_orig_evals.push(orig_eval.commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1).compress());
-      C_shifted_evals.push(shifted_eval.commit(&Scalar::zero(), &vars_gens.gens_pc.gens.gens_1).compress());
+      C_orig_evals.push(orig_eval.commit(&ZERO, &vars_gens.gens_pc.gens.gens_1).compress());
+      C_shifted_evals.push(shifted_eval.commit(&ZERO, &vars_gens.gens_pc.gens.gens_1).compress());
     }
     let (addr_phy_mems_shift_proof, _eval) = PolyEvalProof::prove_uni_batched_instances(
       &[orig_polys, shifted_polys].concat(),
@@ -877,12 +877,11 @@ impl SNARK {
     // --
     // PADDING
     // --
-    let zero = ZERO;
-    let dummy_inputs = vec![zero; num_ios];
+    let dummy_inputs = vec![ZERO; num_ios];
     // For every block that num_proofs is not a power of 2, pad vars_mat and inputs_mat until the length is a power of 2
     let block_max_num_proofs = block_max_num_proofs.next_power_of_two();
     for i in 0..block_num_instances {
-      let dummy_vars = vec![zero; block_vars_mat[i][0].len()];
+      let dummy_vars = vec![ZERO; block_vars_mat[i][0].len()];
       let gap = block_num_proofs[i].next_power_of_two() - block_num_proofs[i];
       block_vars_mat[i].extend(vec![dummy_vars.clone(); gap]);
       block_inputs_mat[i].extend(vec![dummy_inputs.clone(); gap]);
@@ -894,15 +893,15 @@ impl SNARK {
 
     // Pad addr_phy_mems with dummys so the length is a power of 2
     if total_num_phy_mem_accesses > 0 {
-      let dummy_addr = vec![zero; 4];
+      let dummy_addr = vec![ZERO; 4];
       addr_phy_mems_list.extend(vec![dummy_addr; total_num_phy_mem_accesses.next_power_of_two() - total_num_phy_mem_accesses]);
     }
     let total_num_phy_mem_accesses = if total_num_phy_mem_accesses == 0 { 0 } else { total_num_phy_mem_accesses.next_power_of_two() };
     // Pad addr_vir_mems with dummys so the length is a power of 2
     if total_num_vir_mem_accesses > 0 {
-      let dummy_addr = vec![zero; 8];
+      let dummy_addr = vec![ZERO; 8];
       addr_vir_mems_list.extend(vec![dummy_addr; total_num_vir_mem_accesses.next_power_of_two() - total_num_vir_mem_accesses]);
-      let dummy_ts = vec![zero; mem_addr_ts_bits_size];
+      let dummy_ts = vec![ZERO; mem_addr_ts_bits_size];
       addr_ts_bits_list.extend(vec![dummy_ts; total_num_vir_mem_accesses.next_power_of_two() - total_num_vir_mem_accesses]);
     }
     let total_num_vir_mem_accesses = if total_num_vir_mem_accesses == 0 { 0 } else { total_num_vir_mem_accesses.next_power_of_two() };
@@ -1143,7 +1142,7 @@ impl SNARK {
         perm_w0.push(r_tmp);
         r_tmp *= comb_r;
       }
-      perm_w0.extend(vec![zero; num_ios - 2 * num_inputs_unpadded]);
+      perm_w0.extend(vec![ZERO; num_ios - 2 * num_inputs_unpadded]);
       
       // FOR PERM
       // w2 is _, _, ZO, r * i1, r^2 * i2, r^3 * i3, ...
@@ -1151,9 +1150,9 @@ impl SNARK {
       // are used by the consistency check
       let mut perm_exec_w2: Vec<Vec<Scalar>> = exec_inputs_list.iter().map(|input|
         [
-          vec![zero; 3],
+          vec![ZERO; 3],
           (1..2 * num_inputs_unpadded - 2).map(|j| perm_w0[j] * input[j + 2]).collect(),
-          vec![zero; num_ios - 2 * num_inputs_unpadded]
+          vec![ZERO; num_ios - 2 * num_inputs_unpadded]
         ].concat()
       ).collect();
       for q in 0..consis_num_proofs {
@@ -1173,9 +1172,9 @@ impl SNARK {
       let mut perm_block_w2: Vec<Vec<Vec<Scalar>>> = block_inputs_mat.iter().map(
         |i| i.iter().map(|input|
           [
-            vec![zero; 3],
+            vec![ZERO; 3],
             (1..2 * num_inputs_unpadded - 2).map(|j| perm_w0[j] * input[j + 2]).collect(),
-            vec![zero; num_ios - 2 * num_inputs_unpadded]
+            vec![ZERO; num_ios - 2 * num_inputs_unpadded]
           ].concat()
         ).collect()
       ).collect();
@@ -1411,20 +1410,22 @@ impl SNARK {
           phy_mem_block_w2.push(vec![Vec::new(); block_num_proofs[p]]);
           phy_mem_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
           for q in (0..block_num_proofs[p]).rev() {
-            phy_mem_block_w2[p][q] = vec![zero; phy_mem_block_w2_size];
-            phy_mem_block_w3[p][q] = vec![zero; phy_mem_block_w3_size];
+            let V_CNST = block_vars_mat[p][q][0];
+
+            phy_mem_block_w2[p][q] = vec![ZERO; phy_mem_block_w2_size];
+            phy_mem_block_w3[p][q] = vec![ZERO; phy_mem_block_w3_size];
             // Compute PMR, PMC
             for i in 0..block_num_phy_ops[p] {
               // PMR = r * PD
               phy_mem_block_w2[p][q][V_PMR(i)] = comb_r * block_vars_mat[p][q][V_PD(i)];
               // PMC = (1 or PMC[i-1]) * (tau - PA - PMR)
-              let t = if i == 0 { ONE } else {phy_mem_block_w2[p][q][V_PMC(i - 1)] };
+              let t = if i == 0 { V_CNST } else {phy_mem_block_w2[p][q][V_PMC(i - 1)] };
               phy_mem_block_w2[p][q][V_PMC(i)] = t * (comb_tau - block_vars_mat[p][q][V_PA(i)] - phy_mem_block_w2[p][q][V_PMR(i)]);
             }
             // V
             phy_mem_block_w3[p][q][0] = block_vars_mat[p][q][0];
             // Compute x
-            phy_mem_block_w3[p][q][1] = if block_num_phy_ops[p] == 0 { ONE } else { phy_mem_block_w2[p][q][V_PMC(block_num_phy_ops[p] - 1)] };
+            phy_mem_block_w3[p][q][1] = if block_num_phy_ops[p] == 0 { V_CNST } else { phy_mem_block_w2[p][q][V_PMC(block_num_phy_ops[p] - 1)] };
             // Compute D and pi
             if q != block_num_proofs[p] - 1 {
               phy_mem_block_w3[p][q][3] = phy_mem_block_w3[p][q][1] * (phy_mem_block_w3[p][q + 1][2] + ONE - phy_mem_block_w3[p][q + 1][0]);
@@ -1669,8 +1670,10 @@ impl SNARK {
           vir_mem_block_w2.push(vec![Vec::new(); block_num_proofs[p]]);
           vir_mem_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
           for q in (0..block_num_proofs[p]).rev() {
-            vir_mem_block_w2[p][q] = vec![zero; vir_mem_block_w2_size];
-            vir_mem_block_w3[p][q] = vec![zero; vir_mem_block_w3_size];
+            let V_CNST = block_vars_mat[p][q][0];
+
+            vir_mem_block_w2[p][q] = vec![ZERO; vir_mem_block_w2_size];
+            vir_mem_block_w3[p][q] = vec![ZERO; vir_mem_block_w3_size];
             // Compute VMR1, VMR2, VMR3, VMC
             for i in 0..block_num_vir_ops[p] {
               // VMR1 = r * VD
@@ -1680,7 +1683,7 @@ impl SNARK {
               // VMR1 = r^3 * VT
               vir_mem_block_w2[p][q][V_VMR3(i)] = comb_r * comb_r * comb_r * block_vars_mat[p][q][V_VT(p, i)];
               // VMC = (1 or VMC[i-1]) * (tau - VA - VMR1 - VMR2 - VMR3)
-              let t = if i == 0 { ONE } else { vir_mem_block_w2[p][q][V_VMC(i - 1)] };
+              let t = if i == 0 { V_CNST } else { vir_mem_block_w2[p][q][V_VMC(i - 1)] };
               vir_mem_block_w2[p][q][V_VMC(i)] = t * (
                 comb_tau 
                 - block_vars_mat[p][q][V_VA(p, i)] 
@@ -1692,7 +1695,7 @@ impl SNARK {
             // V
             vir_mem_block_w3[p][q][0] = block_vars_mat[p][q][0];
             // Compute x
-            vir_mem_block_w3[p][q][1] = if block_num_vir_ops[p] == 0 { ONE } else { vir_mem_block_w2[p][q][V_VMC(block_num_vir_ops[p] - 1)] };
+            vir_mem_block_w3[p][q][1] = if block_num_vir_ops[p] == 0 { V_CNST } else { vir_mem_block_w2[p][q][V_VMC(block_num_vir_ops[p] - 1)] };
             // Compute D and pi
             if q != block_num_proofs[p] - 1 {
               vir_mem_block_w3[p][q][3] = vir_mem_block_w3[p][q][1] * (vir_mem_block_w3[p][q + 1][2] + ONE - vir_mem_block_w3[p][q + 1][0]);
@@ -2767,7 +2770,7 @@ impl SNARK {
         perm_w0.push(r_tmp);
         r_tmp *= comb_r;
       }
-      perm_w0.extend(vec![Scalar::zero(); num_ios - 2 * num_inputs_unpadded]);
+      perm_w0.extend(vec![ZERO; num_ios - 2 * num_inputs_unpadded]);
       // create a multilinear polynomial using the supplied assignment for variables
       let perm_poly_w0 = DensePolynomial::new(perm_w0.clone());
       // produce a commitment to the satisfying assignment

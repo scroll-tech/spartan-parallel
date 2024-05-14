@@ -8,7 +8,7 @@ use std::env;
 use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
 
-const TOTAL_NUM_VARS_BOUND: usize = 10000;
+const TOTAL_NUM_VARS_BOUND: usize = 10000000;
 
 // Convert a string of numbers separated by spaces into a vector
 fn string_to_vec(buffer: String) -> Vec<usize> {

@@ -390,8 +390,10 @@ impl Instance {
 
         (A, B, C)
       };
+
       // Check if num_cons > block_num_cons
       block_num_cons = max(block_num_cons, counter);
+
       // Recalculate num_non_zero_entries
       block_num_non_zero_entries = max(max(max(block_num_non_zero_entries, tmp_nnz_A), tmp_nnz_B), tmp_nnz_C);
       A_list.push(A);
