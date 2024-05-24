@@ -7,6 +7,7 @@ use std::env;
 
 use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
+use std::time::*;
 
 const TOTAL_NUM_VARS_BOUND: usize = 10000000;
 
@@ -415,6 +416,7 @@ fn main() {
   // INSTANCE PREPROCESSING
   // --
   println!("Preprocessing instances...");
+  let preprocess_start = Instant::now();
   let block_num_instances_bound = ctk.block_num_instances;
   let num_vars = ctk.num_vars;
   // num_inputs_unpadded is the actual size of the input
@@ -506,6 +508,8 @@ fn main() {
   for p in 0..block_vars_matrix.len() {
     assert_eq!(block_vars_matrix[p].len(), block_inputs_matrix[p].len());
   }
+  let preprocess_time = preprocess_start.elapsed();
+  println!("Preprocess time: {}ms", preprocess_time.as_millis());
 
   println!("Running the proof...");
   // produce a proof of satisfiability
