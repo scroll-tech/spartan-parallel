@@ -744,6 +744,7 @@ impl R1CSProof {
     let mut num_proofs_list = Vec::new();
     let mut num_inputs_list = Vec::new();
     let mut comm_Zr_list = Vec::new();
+
     for i in 0..num_witness_secs {
       let w = witness_secs[i];
       let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };

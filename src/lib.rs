@@ -1111,8 +1111,9 @@ impl SNARK {
     // CHALLENGES AND WITNESSES FOR PERMUTATION
     // --
 
-    // Non-memory
     let timer_gen = Timer::new("witness_gen");
+    // Non-memory
+    let timer_sec_gen = Timer::new("non_mem_witness_gen");
     let (
       comb_tau,
       comb_r,
@@ -1384,8 +1385,10 @@ impl SNARK {
         perm_block_comm_w3_list_shifted,
       )
     };
+    timer_sec_gen.stop();
 
     // Physical Memory-per-block
+    let timer_sec_gen = Timer::new("phy_mem_bl_witness_gen");
     let (
       phy_mem_block_w2_prover,
       phy_mem_block_comm_w2_list,
@@ -1399,7 +1402,7 @@ impl SNARK {
         // w3 is (V, X, PI, D)
         let mut phy_mem_block_w2 = Vec::new();
         let mut phy_mem_block_w3 = Vec::new();
-        let phy_mem_block_w2_size = (2 * max_block_num_phy_ops).next_power_of_two();
+        let phy_mem_block_w2_size_list: Vec<usize> = block_num_phy_ops.iter().map(|i| (2 * i).next_power_of_two()).collect();
         let phy_mem_block_w3_size = 4;
 
         let V_PA = |i: usize| 1 + 2 * i;
@@ -1412,7 +1415,7 @@ impl SNARK {
           for q in (0..block_num_proofs[p]).rev() {
             let V_CNST = block_vars_mat[p][q][0];
 
-            phy_mem_block_w2[p][q] = vec![ZERO; phy_mem_block_w2_size];
+            phy_mem_block_w2[p][q] = vec![ZERO; phy_mem_block_w2_size_list[p]];
             phy_mem_block_w3[p][q] = vec![ZERO; phy_mem_block_w3_size];
             // Compute PMR, PMC
             for i in 0..block_num_phy_ops[p] {
@@ -1517,8 +1520,10 @@ impl SNARK {
         )
       }
     };
+    timer_sec_gen.stop();
 
     // Physical Memory-as-a-whole
+    let timer_sec_gen = Timer::new("phy_mem_addr_witness_gen");
     let (
       phy_mem_addr_w2_prover,
       phy_mem_addr_comm_w2,
@@ -1640,8 +1645,10 @@ impl SNARK {
         )
       }
     };
+    timer_sec_gen.stop();
 
     // Virtual Memory-per-block
+    let timer_sec_gen = Timer::new("vir_mem_bl_witness_gen");
     let (
       vir_mem_block_w2_prover,
       vir_mem_block_comm_w2_list,
@@ -1655,7 +1662,7 @@ impl SNARK {
         // w3 is (V, X, PI, D)
         let mut vir_mem_block_w2 = Vec::new();
         let mut vir_mem_block_w3 = Vec::new();
-        let vir_mem_block_w2_size = (4 * max_block_num_vir_ops).next_power_of_two();
+        let vir_mem_block_w2_size_list: Vec<usize> = block_num_vir_ops.iter().map(|i| (4 * i).next_power_of_two()).collect();
         let vir_mem_block_w3_size = 4;
 
         let V_VA = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i;
@@ -1672,7 +1679,7 @@ impl SNARK {
           for q in (0..block_num_proofs[p]).rev() {
             let V_CNST = block_vars_mat[p][q][0];
 
-            vir_mem_block_w2[p][q] = vec![ZERO; vir_mem_block_w2_size];
+            vir_mem_block_w2[p][q] = vec![ZERO; vir_mem_block_w2_size_list[p]];
             vir_mem_block_w3[p][q] = vec![ZERO; vir_mem_block_w3_size];
             // Compute VMR1, VMR2, VMR3, VMC
             for i in 0..block_num_vir_ops[p] {
@@ -1787,8 +1794,10 @@ impl SNARK {
         )
       }
     };
+    timer_sec_gen.stop();
 
     // Virtual Memory-as-a-whole
+    let timer_sec_gen = Timer::new("vir_mem_addr_witness_gen");
     let (
       vir_mem_addr_w2_prover,
       vir_mem_addr_comm_w2,
@@ -1924,6 +1933,7 @@ impl SNARK {
         )
       }
     };
+    timer_sec_gen.stop();
 
     timer_gen.stop();
 
@@ -2668,6 +2678,8 @@ impl SNARK {
     // index[i] = j => the original jth entry should now be at the ith position
     let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
     let block_num_vars: Vec<usize> = (0..block_num_instances).map(|i| block_num_vars[index[i]]).collect();
+    let block_num_phy_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_phy_ops[index[i]]).collect();
+    let block_num_vir_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_vir_ops[index[i]]).collect();
 
     // --
     // PADDING
@@ -2802,7 +2814,7 @@ impl SNARK {
       phy_mem_block_w3_verifier,
       phy_mem_block_w3_shifted_verifier
     ) = {
-      let phy_mem_block_w2_size = (2 * max_block_num_phy_ops).next_power_of_two();
+      let phy_mem_block_w2_size_list: Vec<usize> = block_num_phy_ops.iter().map(|i| (2 * i).next_power_of_two()).collect();
       let phy_mem_block_w3_size = 4;
 
       if max_block_num_phy_ops > 0 {
@@ -2812,7 +2824,7 @@ impl SNARK {
           self.phy_mem_block_comm_w3_list_shifted[p].append_to_transcript(b"poly_commitment", transcript);
         }
         (
-          VerifierWitnessSecInfo::new(false, vec![phy_mem_block_w2_size; block_num_instances], &block_num_proofs, &self.phy_mem_block_comm_w2_list),
+          VerifierWitnessSecInfo::new(false, phy_mem_block_w2_size_list, &block_num_proofs, &self.phy_mem_block_comm_w2_list),
           VerifierWitnessSecInfo::new(false, vec![phy_mem_block_w3_size; block_num_instances], &block_num_proofs, &self.phy_mem_block_comm_w3_list),
           VerifierWitnessSecInfo::new(false, vec![phy_mem_block_w3_size; block_num_instances], &block_num_proofs, &self.phy_mem_block_comm_w3_list_shifted)
         )
@@ -2853,7 +2865,7 @@ impl SNARK {
       vir_mem_block_w3_verifier,
       vir_mem_block_w3_shifted_verifier
     ) = {
-      let vir_mem_block_w2_size = (4 * max_block_num_vir_ops).next_power_of_two();
+      let vir_mem_block_w2_size_list: Vec<usize> = block_num_vir_ops.iter().map(|i| (4 * i).next_power_of_two()).collect();
       let vir_mem_block_w3_size = 4;
 
       if max_block_num_vir_ops > 0 {
@@ -2863,7 +2875,7 @@ impl SNARK {
           self.vir_mem_block_comm_w3_list_shifted[p].append_to_transcript(b"poly_commitment", transcript);
         }
         (
-          VerifierWitnessSecInfo::new(false, vec![vir_mem_block_w2_size; block_num_instances], &block_num_proofs, &self.vir_mem_block_comm_w2_list),
+          VerifierWitnessSecInfo::new(false, vir_mem_block_w2_size_list, &block_num_proofs, &self.vir_mem_block_comm_w2_list),
           VerifierWitnessSecInfo::new(false, vec![vir_mem_block_w3_size; block_num_instances], &block_num_proofs, &self.vir_mem_block_comm_w3_list),
           VerifierWitnessSecInfo::new(false, vec![vir_mem_block_w3_size; block_num_instances], &block_num_proofs, &self.vir_mem_block_comm_w3_list_shifted)
         )
