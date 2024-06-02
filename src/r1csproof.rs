@@ -232,7 +232,7 @@ impl R1CSProof {
     assert!(inst.get_num_instances() == 1 || inst.get_num_instances() == num_instances);
 
     // Assert num_witness_secs is valid
-    assert!(num_witness_secs >= 1 && num_witness_secs <= 8);
+    assert!(num_witness_secs >= 1 && num_witness_secs <= 16);
     for w in &witness_secs {
       // If a witness_sec is single, it is also short
       assert!(!w.is_single || w.is_short);
@@ -519,15 +519,33 @@ impl R1CSProof {
         2 => { vec![(ONE - ry[0]), ry[0]] }
         4 => { vec![(ONE - ry[0]) * (ONE - ry[1]), (ONE - ry[0]) * ry[1], ry[0] * (ONE - ry[1]), ry[0] * ry[1]] }
         8 => { vec![
-                      (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]),
-                      (ONE - ry[0]) * (ONE - ry[1]) * ry[2],
-                      (ONE - ry[0]) * ry[1] * (ONE - ry[2]),
-                      (ONE - ry[0]) * ry[1] * ry[2],
-                      ry[0] * (ONE - ry[1]) * (ONE - ry[2]),
-                      ry[0] * (ONE - ry[1]) * ry[2],
-                      ry[0] * ry[1] * (ONE - ry[2]),
-                      ry[0] * ry[1] * ry[2],
-                    ] }
+          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]),
+          (ONE - ry[0]) * (ONE - ry[1]) * ry[2],
+          (ONE - ry[0]) * ry[1] * (ONE - ry[2]),
+          (ONE - ry[0]) * ry[1] * ry[2],
+          ry[0] * (ONE - ry[1]) * (ONE - ry[2]),
+          ry[0] * (ONE - ry[1]) * ry[2],
+          ry[0] * ry[1] * (ONE - ry[2]),
+          ry[0] * ry[1] * ry[2],
+        ] }
+        16 => { vec![
+          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]) * (ONE - ry[3]),
+          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]) * ry[3],
+          (ONE - ry[0]) * (ONE - ry[1]) * ry[2] * (ONE - ry[3]),
+          (ONE - ry[0]) * (ONE - ry[1]) * ry[2] * ry[3],
+          (ONE - ry[0]) * ry[1] * (ONE - ry[2]) * (ONE - ry[3]),
+          (ONE - ry[0]) * ry[1] * (ONE - ry[2]) * ry[3],
+          (ONE - ry[0]) * ry[1] * ry[2] * (ONE - ry[3]),
+          (ONE - ry[0]) * ry[1] * ry[2] * ry[3],
+          ry[0] * (ONE - ry[1]) * (ONE - ry[2]) * (ONE - ry[3]),
+          ry[0] * (ONE - ry[1]) * (ONE - ry[2]) * ry[3],
+          ry[0] * (ONE - ry[1]) * ry[2] * (ONE - ry[3]),
+          ry[0] * (ONE - ry[1]) * ry[2] * ry[3],
+          ry[0] * ry[1] * (ONE - ry[2]) * (ONE - ry[3]),
+          ry[0] * ry[1] * (ONE - ry[2]) * ry[3],
+          ry[0] * ry[1] * ry[2] * (ONE - ry[3]),
+          ry[0] * ry[1] * ry[2] * ry[3],
+        ] }
         _ => { panic!("Unsupported num_witness_secs: {}", num_witness_secs); }
       };
       let mut eval_vars_comb = (0..num_witness_secs).fold(ZERO, |s, i| s + prefix_list[i] * e(i));
@@ -613,7 +631,7 @@ impl R1CSProof {
     let num_witness_secs = witness_secs.len();
 
     // Assert num_witness_secs is valid
-    assert!(num_witness_secs >= 1 && num_witness_secs <= 8);
+    assert!(num_witness_secs >= 1 && num_witness_secs <= 16);
     for w in &witness_secs {
       // If a witness_sec is single, it is also short
       assert!(!w.is_single || w.is_short);
@@ -744,7 +762,6 @@ impl R1CSProof {
     let mut num_proofs_list = Vec::new();
     let mut num_inputs_list = Vec::new();
     let mut comm_Zr_list = Vec::new();
-
     for i in 0..num_witness_secs {
       let w = witness_secs[i];
       let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
@@ -783,15 +800,33 @@ impl R1CSProof {
         2 => { vec![(ONE - ry[0]), ry[0]] }
         4 => { vec![(ONE - ry[0]) * (ONE - ry[1]), (ONE - ry[0]) * ry[1], ry[0] * (ONE - ry[1]), ry[0] * ry[1]] }
         8 => { vec![
-                      (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]),
-                      (ONE - ry[0]) * (ONE - ry[1]) * ry[2],
-                      (ONE - ry[0]) * ry[1] * (ONE - ry[2]),
-                      (ONE - ry[0]) * ry[1] * ry[2],
-                      ry[0] * (ONE - ry[1]) * (ONE - ry[2]),
-                      ry[0] * (ONE - ry[1]) * ry[2],
-                      ry[0] * ry[1] * (ONE - ry[2]),
-                      ry[0] * ry[1] * ry[2],
-                    ] }
+          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]),
+          (ONE - ry[0]) * (ONE - ry[1]) * ry[2],
+          (ONE - ry[0]) * ry[1] * (ONE - ry[2]),
+          (ONE - ry[0]) * ry[1] * ry[2],
+          ry[0] * (ONE - ry[1]) * (ONE - ry[2]),
+          ry[0] * (ONE - ry[1]) * ry[2],
+          ry[0] * ry[1] * (ONE - ry[2]),
+          ry[0] * ry[1] * ry[2],
+        ] }
+        16 => { vec![
+          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]) * (ONE - ry[3]),
+          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]) * ry[3],
+          (ONE - ry[0]) * (ONE - ry[1]) * ry[2] * (ONE - ry[3]),
+          (ONE - ry[0]) * (ONE - ry[1]) * ry[2] * ry[3],
+          (ONE - ry[0]) * ry[1] * (ONE - ry[2]) * (ONE - ry[3]),
+          (ONE - ry[0]) * ry[1] * (ONE - ry[2]) * ry[3],
+          (ONE - ry[0]) * ry[1] * ry[2] * (ONE - ry[3]),
+          (ONE - ry[0]) * ry[1] * ry[2] * ry[3],
+          ry[0] * (ONE - ry[1]) * (ONE - ry[2]) * (ONE - ry[3]),
+          ry[0] * (ONE - ry[1]) * (ONE - ry[2]) * ry[3],
+          ry[0] * (ONE - ry[1]) * ry[2] * (ONE - ry[3]),
+          ry[0] * (ONE - ry[1]) * ry[2] * ry[3],
+          ry[0] * ry[1] * (ONE - ry[2]) * (ONE - ry[3]),
+          ry[0] * ry[1] * (ONE - ry[2]) * ry[3],
+          ry[0] * ry[1] * ry[2] * (ONE - ry[3]),
+          ry[0] * ry[1] * ry[2] * ry[3],
+        ] }
         _ => { panic!("Unsupported num_witness_secs: {}", num_witness_secs); }
       };
       let mut comm_vars_comb = (1..num_witness_secs).fold(prefix_list[0] * c(0), |s, i| s + prefix_list[i] * c(i));
@@ -824,6 +859,7 @@ impl R1CSProof {
     Ok([rp, rq_rev, rx, ry])
   }
 
+  /*
   // Proving a single instance with multiple proofs specialized for PERM_POLY and CONSIS_CHECK
   // Constraints is of size max_input_rows_bound * base_constraint_size
   // Inputs of each proof is of size max_input_rows_bound * base_input_size
@@ -1340,6 +1376,7 @@ impl R1CSProof {
     let pad = (max_input_rows_bound / max_input_rows).log_2();
     Ok([rp, [vec![ZERO; pad], rq_rx, rx].concat(), [vec![ZERO; pad], ry].concat()])
   }
+  */
 }
 
 #[cfg(test)]

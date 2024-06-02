@@ -1,8 +1,7 @@
-| Proofs | Shift | W0 | NI | W1 | NI | W2 | NI | w3 | NI | W4 | NI | W5 | NI | W6 | NI |
-|--------|-------|----|----|----|----|----|----|----|----|----|----|----|----|----|----|
-| BLOCK_CORRECTNESS | false | block_inputs | P | block_vars | P | pm_block_w2 | P | vm_block_w2 | P | perm_w0 | 1 | pm_block_w3 | P | vm_block_w3 | P |
-| CONSIS_CHECK | true | perm_root_w3 | 1 | perm_root_w3_shifted | 1 |
-| PHY_MEM_COHERE | true | addr_phy_mems | 1 | addr_phy_mems_shifted | 1 |
-| VIR_MEM_COHERE | true | addr_vir_mems | 1 | addr_vir_mems_shifted | 1 | addr_ts_bits | 1 |
-| PERM_ROOT | false | perm_w0 | 1 | perm_root_w1 | P + 2 | perm_root_w2 | P + 2 | perm_root_w3 | P + 2 |
-| PERM_POLY | true | perm_poly_w3 | 2 * P + 2 | perm_poly_w3_shifted | 2 * P + 2 |
+| Proofs | W0 | W1 | w2 | W3 | W4 | W5 | W6 | W7 | W8 |
+|--------|----|----|----|----|----|----|----|----|----|
+| BLOCK_CORRECTNESS | block_inputs | block_vars | perm_w0 | pm_block_w2 | pm_block_w3 | pm_block_shifted_w3 | vm_block_w2 | vm_block_w3 | vm_block_shifted_w3 |
+| CONSIS_CHECK | perm_exec_w3 | perm_exec_w3_shifted |
+| PHY_MEM_COHERE | addr_phy_mems | addr_phy_mems_shifted |
+| VIR_MEM_COHERE | addr_vir_mems | addr_vir_mems_shifted | addr_ts_bits |
+| PERM_ROOT | perm_w0 | perm_root_wperm_root_w2 | perm_root_w3 | perm_root_shifted_w3 |

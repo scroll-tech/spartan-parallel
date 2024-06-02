@@ -458,7 +458,6 @@ fn main() {
   // PERM INSTANCES
   // PERM_ROOT
   let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_ios);
-  let (perm_poly_num_cons, perm_poly_num_non_zero_entries, perm_poly_inst) = Instance::gen_perm_poly_inst();
   println!("Finished Perm");
 
   // MEM INSTANCES
@@ -475,8 +474,7 @@ fn main() {
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, block_num_vars, block_num_instances_bound, block_num_non_zero_entries);
   let consis_check_gens = SNARKGens::new(consis_check_num_cons, 2 * 8, 1, consis_check_num_non_zero_entries);
-  let perm_root_gens = SNARKGens::new(perm_root_num_cons, 4 * num_ios, 1, perm_root_num_non_zero_entries);
-  let perm_poly_gens = SNARKGens::new(perm_poly_num_cons, 2 * 4, 1, perm_poly_num_non_zero_entries);
+  let perm_root_gens = SNARKGens::new(perm_root_num_cons, 8 * num_ios, 1, perm_root_num_non_zero_entries);
   let phy_mem_cohere_gens = SNARKGens::new(phy_mem_cohere_num_cons, 2 * 4, 1, phy_mem_cohere_num_non_zero_entries);
   let vir_mem_cohere_gens = SNARKGens::new(vir_mem_cohere_num_cons, 4 * vir_mem_cohere_num_vars, 1, vir_mem_cohere_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
@@ -489,7 +487,6 @@ fn main() {
   let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
   println!("Finished Consis");
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
-  let (perm_poly_comm, perm_poly_decomm) = SNARK::encode(&perm_poly_inst, &perm_poly_gens);
   println!("Finished Perm");
   let (phy_mem_cohere_comm, phy_mem_cohere_decomm) = SNARK::encode(&phy_mem_cohere_inst, &phy_mem_cohere_gens);
   let (vir_mem_cohere_comm, vir_mem_cohere_decomm) = SNARK::encode(&vir_mem_cohere_inst, &vir_mem_cohere_gens);
@@ -552,10 +549,6 @@ fn main() {
     &perm_root_comm,
     &perm_root_decomm,
     &perm_root_gens,
-    &perm_poly_inst,
-    &perm_poly_comm,
-    &perm_poly_decomm,
-    &perm_poly_gens,
 
     rtk.total_num_phy_mem_accesses,
     &phy_mem_cohere_inst,
@@ -618,9 +611,6 @@ fn main() {
     perm_root_num_cons,
     &perm_root_comm,
     &perm_root_gens,
-    perm_poly_num_cons,
-    &perm_poly_comm,
-    &perm_poly_gens,
 
     rtk.total_num_phy_mem_accesses,
     phy_mem_cohere_num_cons,
