@@ -2301,6 +2301,7 @@ impl SNARK {
     // PERM_PRODUCT_PROOF
     // --
 
+    let timer_proof = Timer::new("Perm Product");
     // Record the prod of exec, blocks, mem_block, & mem_addr
     let (perm_poly_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &perm_block_w3_prover, &phy_mem_block_w3_prover, &vir_mem_block_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover]);
     let (perm_poly_poly_list, proof_eval_perm_poly_prod_list) = {
@@ -3064,7 +3065,7 @@ impl SNARK {
     // PERM_PRODUCT_PROOF
     // --
     {
-      let timer_eval_opening = Timer::new("Perm Mem Poly Opening");
+      let timer_eval_opening = Timer::new("Perm Product");
       // Verify prod of exec, blocks, mem_block, & mem_addr
       let (perm_poly_w3_verifier, inst_map) = VerifierWitnessSecInfo::merge(
         vec![&perm_exec_w3_verifier, &perm_block_w3_verifier, &phy_mem_block_w3_verifier, &vir_mem_block_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier]
