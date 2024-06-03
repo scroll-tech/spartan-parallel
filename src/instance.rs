@@ -208,9 +208,9 @@ impl Instance {
   /// Verify the correctness of each block execution, as well as extracting all memory operations
   /// 
   /// Input composition: (if every segment exists)
-  ///    INPUT                     VAR                 Challenges           PHY_W2              PHY_W3        PHY_W3_SHIFTED         VIR_W2                    VIR_W3        VIR_W3_SHIFTED
-  ///  0   1   2  |   0   1   2   3   4   5   6   |  0   1   2   3   |  0   1   2   3    |  0   1   2   3  |  0   1   2   3  |  0   1   2   3   4       |  0   1   2   3  |  0   1   2   3  |
-  ///  v  i0  ... |   w  PA0 PD0 ... VA0 VD0 ...  |  tau r  r^2 r^3  |  MR  MC  MR  ...  |  v   x  pi   D  |  v   x  pi   D  | MR1 MR2 MR3 MC  MR1 ...  |  v   x  pi   D  |  v   x  pi   D  |
+  ///    INPUT                     VAR                 Challenges           INPUT_W2              INPUT_W3      INPUT_W3_SHIFTED       PHY_W2            PHY_W3        PHY_W3_SHIFTED         VIR_W2                    VIR_W3        VIR_W3_SHIFTED
+  ///  0   1   2  |   0   1   2   3   4   5   6   |  0   1   2   3   |  0   1   2   3   4   |  0   1   2   3  |  0   1   2   3  |  0   1   2   3  |  0   1   2   3  |  0   1   2   3  |  0   1   2   3   4       |  0   1   2   3  |  0   1   2   3  |
+  ///  v  i0  ... |   w  PA0 PD0 ... VA0 VD0 ...  |  tau r  r^2 ...  |  _   _  ZO r*i1 ...  |  v   x  pi   D  |  v   x  pi   D  |  MR  MC  MR ... |  v   x  pi   D  |  v   x  pi   D  | MR1 MR2 MR3 MC  MR1 ...  |  v   x  pi   D  |  v   x  pi   D  |
   /// 
   /// VAR:
   /// We assume that the witnesses are of the following format:
@@ -239,6 +239,7 @@ impl Instance {
     num_instances: usize, 
     num_vars: usize, 
     args: &Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
+    num_inputs_unpadded: usize, 
     // Is there physical & virtual memory accesses at all?
     has_phy_ops: bool,
     has_vir_ops: bool,
@@ -258,6 +259,8 @@ impl Instance {
     // in INPUT
     let V_valid = 0;
     let V_cnst = 0;
+    let V_input = |i: usize| 2 + i;
+    let V_output = |i: usize| 2 + (num_inputs_unpadded - 1) + i;
     // in VAR
     let V_PA = |i: usize| num_vars + 1 + 2 * i;
     let V_PD = |i: usize| num_vars + 1 + 2 * i + 1;
@@ -267,34 +270,43 @@ impl Instance {
     let V_VT = |b: usize, i: usize| num_vars + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 3;
     // in CHALLENGES, not used if !has_phy_ops && !has_vir_ops
     let V_tau = 2 * num_vars;
-    let V_r = 2 * num_vars + 1;
-    let V_r2 = 2 * num_vars + 2;
-    let V_r3 = 2 * num_vars + 3;
+    let V_r = |i: usize| 2 * num_vars + i;
+    // in INPUT_W2
+    let V_input_dot_prod = |i: usize| if i == 0 { V_input(0) } else { 3 * num_vars + 2 + i };
+    let V_output_dot_prod = |i: usize| 3 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
+    // in INPUT_W3
+    let V_v = 4 * num_vars;
+    let V_x = 4 * num_vars + 1;
+    let V_pi = 4 * num_vars + 2;
+    let V_d = 4 * num_vars + 3;
+    // in INPUT_W3_SHIFTED
+    let V_sv = 5 * num_vars;
+    let V_spi = 5 * num_vars + 2;
     // in PHY_W2
-    let V_PMR = |i: usize| 3 * num_vars + 2 * i;
-    let V_PMC = |i: usize| 3 * num_vars + 2 * i + 1;
+    let V_PMR = |i: usize| 6 * num_vars + 2 * i;
+    let V_PMC = |i: usize| 6 * num_vars + 2 * i + 1;
     // in PHY_W3
-    let V_Pv = 4 * num_vars;
-    let V_Px = 4 * num_vars + 1;
-    let V_Pp = 4 * num_vars + 2;
-    let V_Pd = 4 * num_vars + 3;
+    let V_Pv = 7 * num_vars;
+    let V_Px = 7 * num_vars + 1;
+    let V_Pp = 7 * num_vars + 2;
+    let V_Pd = 7 * num_vars + 3;
     // in PHY_W3_SHIFTED
-    let V_Psv = 5 * num_vars;
-    let V_Psp = 5 * num_vars + 2;
+    let V_Psv = 8 * num_vars;
+    let V_Psp = 8 * num_vars + 2;
     // in VIR_W2
-    let VIR_W2_OFFSET = if has_phy_ops { 6 * num_vars } else { 3 * num_vars };
+    let VIR_W2_OFFSET = if has_phy_ops { 9 * num_vars } else { 6 * num_vars };
     let V_VMR1 = |i: usize| VIR_W2_OFFSET + 4 * i;
     let V_VMR2 = |i: usize| VIR_W2_OFFSET + 4 * i + 1;
     let V_VMR3 = |i: usize| VIR_W2_OFFSET + 4 * i + 2;
     let V_VMC = |i: usize| VIR_W2_OFFSET + 4 * i + 3;
     // in VIR_W3
-    let VIR_W3_OFFSET = if has_phy_ops { 7 * num_vars } else { 4 * num_vars };
+    let VIR_W3_OFFSET = if has_phy_ops { 10 * num_vars } else { 7 * num_vars };
     let V_Vv = VIR_W3_OFFSET;
     let V_Vx = VIR_W3_OFFSET + 1;
     let V_Vp = VIR_W3_OFFSET + 2;
     let V_Vd = VIR_W3_OFFSET + 3;
     // in VIR_W3_SHIFTED
-    let VIR_W3_SHIFTED_OFFSET = if has_phy_ops { 8 * num_vars } else { 5 * num_vars };
+    let VIR_W3_SHIFTED_OFFSET = if has_phy_ops { 11 * num_vars } else { 8 * num_vars };
     let V_Vsv = VIR_W3_SHIFTED_OFFSET;
     let V_Vsp = VIR_W3_SHIFTED_OFFSET + 2;
 
@@ -318,13 +330,55 @@ impl Instance {
             i, arg[i].0.clone(), arg[i].1.clone(), arg[i].2.clone());
         }
 
+        // constraints for input permutation
+        {
+          // correctness of w2
+          // for i1..
+          for i in 1..num_inputs_unpadded - 1 {
+            (A, B, C) = Instance::gen_constr(A, B, C,
+              counter, vec![(V_input(i), 1)], vec![(V_r(i), 1)], vec![(V_input_dot_prod(i), 1)]);
+            counter += 1;
+          }
+          // for o0, o1..
+          for i in 0..num_inputs_unpadded - 1 {
+            (A, B, C) = Instance::gen_constr(A, B, C,
+              counter, vec![(V_output(i), 1)], vec![(V_r(i + num_inputs_unpadded - 1), 1)], vec![(V_output_dot_prod(i), 1)]);
+            counter += 1;
+          }
+          // v[k]
+          (A, B, C) = Instance::gen_constr(A, B, C, 
+            counter, vec![], vec![], vec![(V_valid, 1), (V_v, -1)]);
+          counter += 1;
+          // x[k]
+          (A, B, C) = Instance::gen_constr(A, B, C, counter,
+              [vec![(V_tau, 1)], (0..2 * num_inputs_unpadded - 2).map(|i| (V_input_dot_prod(i), -1)).collect()].concat(), 
+              vec![(num_vars, 1)], 
+              vec![(V_x, 1)]);
+          counter += 1;
+          // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))
+          (A, B, C) = Instance::gen_constr(A, B, C,
+            counter, 
+            vec![(V_x, 1)], 
+            vec![(V_spi, 1), (V_cnst, 1), (V_sv, -1)], 
+            vec![(V_d, 1)]);
+          counter += 1;
+          // pi[k] = v[k] * D[k]
+          (A, B, C) = Instance::gen_constr(A, B, C,
+            counter, vec![(V_v, 1)], vec![(V_d, 1)], vec![(V_pi, 1)]);
+          counter += 1;
+
+          tmp_nnz_A += 4 * num_inputs_unpadded - 2;
+          tmp_nnz_B += 2 * num_inputs_unpadded + 2;
+          tmp_nnz_C += 2 * num_inputs_unpadded + 2;
+        }
+
         // constraints for memory extraction
         // Physical Memory
         if has_phy_ops {
           for i in 0..num_phy_mems_accesses[b] {
             // PMR = r * PD
             (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_r, 1)], vec![(V_PD(i), 1)], vec![(V_PMR(i), 1)]);
+              counter, vec![(V_r(1), 1)], vec![(V_PD(i), 1)], vec![(V_PMR(i), 1)]);
             counter += 1;
             // PMC = (1 or PMC[i-1]) * (tau - PA - PMR)
             if i == 0 {
@@ -361,25 +415,25 @@ impl Instance {
             counter, vec![(V_Pv, 1)], vec![(V_Pd, 1)], vec![(V_Pp, 1)]);
           counter += 1;
 
-            tmp_nnz_A += 3 * num_phy_mems_accesses[b] + 2;
-            tmp_nnz_B += 7 * num_phy_mems_accesses[b] + 4;
-            tmp_nnz_C += 3 * num_phy_mems_accesses[b] + 6;
-          }
+          tmp_nnz_A += 3 * num_phy_mems_accesses[b] + 2;
+          tmp_nnz_B += 7 * num_phy_mems_accesses[b] + 4;
+          tmp_nnz_C += 3 * num_phy_mems_accesses[b] + 6;
+        }
 
         // Virtual Memory
         if has_vir_ops {
           for i in 0..num_vir_mems_accesses[b] {
             // VMR1 = r * VD
             (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_r, 1)], vec![(V_VD(b, i), 1)], vec![(V_VMR1(i), 1)]);
+              counter, vec![(V_r(1), 1)], vec![(V_VD(b, i), 1)], vec![(V_VMR1(i), 1)]);
             counter += 1;
             // VMR2 = r^2 * VL
             (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_r2, 1)], vec![(V_VL(b, i), 1)], vec![(V_VMR2(i), 1)]);
+              counter, vec![(V_r(2), 1)], vec![(V_VL(b, i), 1)], vec![(V_VMR2(i), 1)]);
             counter += 1;
             // VMR3 = r^3 * VT
             (A, B, C) = Instance::gen_constr(A, B, C,
-              counter, vec![(V_r3, 1)], vec![(V_VT(b, i), 1)], vec![(V_VMR3(i), 1)]);
+              counter, vec![(V_r(3), 1)], vec![(V_VT(b, i), 1)], vec![(V_VMR3(i), 1)]);
             counter += 1;
             // VMC = (1 or VMC[i-1]) * (tau - VA - VMR1 - VMR2 - VMR3)
             if i == 0 {
@@ -436,9 +490,9 @@ impl Instance {
     block_num_cons = block_num_cons.next_power_of_two();
     
     let block_num_vars = match (has_phy_ops, has_vir_ops) {
-      (false, false) => 2 * num_vars,
-      (false, true) => 8 * num_vars,
-      (true, false) => 8 * num_vars,
+      (false, false) => 8 * num_vars,
+      (false, true) => 16 * num_vars,
+      (true, false) => 16 * num_vars,
       (true, true) => 16 * num_vars,
     };
 

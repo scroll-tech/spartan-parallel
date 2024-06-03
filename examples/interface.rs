@@ -443,6 +443,7 @@ fn main() {
     block_num_instances_bound, 
     num_vars, 
     &ctk.args,
+    num_inputs_unpadded,
     max_block_num_phy_ops > 0,
     max_block_num_vir_ops > 0,
     &block_num_phy_ops,

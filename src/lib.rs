@@ -1199,11 +1199,9 @@ impl SNARK {
       for p in 0..block_num_instances {
         perm_block_w3.push(vec![Vec::new(); block_num_proofs[p]]);
         for q in (0..block_num_proofs[p]).rev() {
-          perm_block_w3[p][q] = vec![ZERO; 8];
+          perm_block_w3[p][q] = vec![ZERO; 4];
           perm_block_w3[p][q][0] = block_inputs_mat[p][q][0];
           perm_block_w3[p][q][1] = perm_block_w3[p][q][0] * (comb_tau - perm_block_w2[p][q][3..].iter().fold(ZERO, |a, b| a + b) - block_inputs_mat[p][q][2]);
-          perm_block_w3[p][q][4] = perm_block_w2[p][q][0];
-          perm_block_w3[p][q][5] = perm_block_w2[p][q][1];
           if q != block_num_proofs[p] - 1 {
             perm_block_w3[p][q][3] = perm_block_w3[p][q][1] * (perm_block_w3[p][q + 1][2] + ONE - perm_block_w3[p][q + 1][0]);
           } else {
@@ -1318,7 +1316,7 @@ impl SNARK {
 
         let (perm_block_poly_w3_shifted, perm_block_comm_w3_shifted) = {
           // Flatten the witnesses into a Q_i * X list
-          let w3_list_p = [perm_block_w3[p][1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
+          let w3_list_p = [perm_block_w3[p][1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 4]].concat();
           // create a multilinear polynomial using the supplied assignment for variables
           let perm_block_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1345,7 +1343,7 @@ impl SNARK {
       let perm_block_w3_prover = ProverWitnessSecInfo::new(perm_block_w3.clone(), perm_block_poly_w3_list);
       let perm_exec_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[perm_exec_w3[1..].to_vec(), vec![vec![ZERO; 8]]].concat()], vec![perm_exec_poly_w3_shifted]);
       let perm_block_w3_shifted_prover = ProverWitnessSecInfo::new(
-        perm_block_w3.iter().map(|i| [i[1..].to_vec(), vec![vec![ZERO; 8]]].concat()).collect(), 
+        perm_block_w3.iter().map(|i| [i[1..].to_vec(), vec![vec![ZERO; 4]]].concat()).collect(), 
         perm_block_poly_w3_list_shifted
       );
 
@@ -1940,8 +1938,7 @@ impl SNARK {
     // --
 
     let timer_proof = Timer::new("Block Correctness Extract");
-    let mut block_wit_secs = vec![&block_inputs_prover, &block_vars_prover];
-    if max_block_num_phy_ops > 0 || max_block_num_vir_ops > 0 { block_wit_secs.push(&perm_w0_prover); }
+    let mut block_wit_secs = vec![&block_inputs_prover, &block_vars_prover, &perm_w0_prover, &perm_block_w2_prover, &perm_block_w3_prover, &perm_block_w3_shifted_prover];
     if max_block_num_phy_ops > 0 { block_wit_secs.extend([&phy_mem_block_w2_prover, &phy_mem_block_w3_prover, &phy_mem_block_w3_shifted_prover]); }
     if max_block_num_vir_ops > 0 { block_wit_secs.extend([&vir_mem_block_w2_prover, &vir_mem_block_w3_prover, &vir_mem_block_w3_shifted_prover]); }
     let (block_r1cs_sat_proof, block_challenges) = {
@@ -2079,14 +2076,14 @@ impl SNARK {
     timer_proof.stop();
 
     // --
-    // PERM_BLOCK_ROOT, PERM_EXEC_ROOT, MEM_ADDR_ROOT
+    // PERM_EXEC_ROOT, MEM_ADDR_ROOT
     // --
     let timer_proof = Timer::new("Perm Root");
     let perm_size = max(max(consis_num_proofs, total_num_phy_mem_accesses), total_num_vir_mem_accesses);
-    let (perm_root_w1_prover, _) = ProverWitnessSecInfo::merge(vec![&exec_inputs_prover, &block_inputs_prover, &addr_phy_mems_prover, &addr_vir_mems_prover]);
-    let (perm_root_w2_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w2_prover, &perm_block_w2_prover, &phy_mem_addr_w2_prover, &vir_mem_addr_w2_prover]);
-    let (perm_root_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &perm_block_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover]);
-    let (perm_root_w3_shifted_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_prover, &perm_block_w3_shifted_prover, &phy_mem_addr_w3_shifted_prover, &vir_mem_addr_w3_shifted_prover]);
+    let (perm_root_w1_prover, _) = ProverWitnessSecInfo::merge(vec![&exec_inputs_prover, &addr_phy_mems_prover, &addr_vir_mems_prover]);
+    let (perm_root_w2_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w2_prover, &phy_mem_addr_w2_prover, &vir_mem_addr_w2_prover]);
+    let (perm_root_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover]);
+    let (perm_root_w3_shifted_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_prover, &phy_mem_addr_w3_shifted_prover, &vir_mem_addr_w3_shifted_prover]);
     let perm_root_num_instances = perm_root_w1_prover.w_mat.len();
     let mut perm_root_num_proofs: Vec<usize> = perm_root_w1_prover.w_mat.iter().map(|i| i.len()).collect();
     perm_root_num_proofs.extend(vec![1; perm_root_num_instances.next_power_of_two() - perm_root_num_instances]);
@@ -2173,7 +2170,8 @@ impl SNARK {
     // SHIFT_PROOFS
     // --
     // Prove in the order of
-    // - perm_exec_w3, perm_block_w3 => shift by 8
+    // - perm_block_w3 => shift by 4
+    // - perm_exec_w3 => shift by 8
     // - (if exist) phy_mem_block_w3 => shift by 4
     // - (if exist) addr_phy_mems => shift by 4
     // - (if exist) phy_mem_addr_w3 => shift by 8
@@ -2184,19 +2182,30 @@ impl SNARK {
       // perm_exec_w3, perm_block_w3
       let mut orig_polys = vec![&perm_exec_w3_prover.poly_w[0]];
       let mut shifted_polys = vec![&perm_exec_w3_shifted_prover.poly_w[0]];
+      let mut header_len_list = vec![6];
       for poly in &perm_block_w3_prover.poly_w {
         orig_polys.push(poly);
       }
       for poly in &perm_block_w3_shifted_prover.poly_w {
         shifted_polys.push(poly);
       }
-      let mut header_len_list = vec![6; block_num_instances + 1];
+      header_len_list.extend(vec![4; block_num_instances]);
       // phy_mem_block_w3
       if max_block_num_phy_ops > 0 {
         for poly in &phy_mem_block_w3_prover.poly_w {
           orig_polys.push(poly);
         }
         for poly in &phy_mem_block_w3_shifted_prover.poly_w {
+          shifted_polys.push(poly);
+        }
+        header_len_list.extend(vec![4; block_num_instances]);
+      }
+      // vir_mem_block_w3
+      if max_block_num_vir_ops > 0 {
+        for poly in &vir_mem_block_w3_prover.poly_w {
+          orig_polys.push(poly);
+        }
+        for poly in &vir_mem_block_w3_shifted_prover.poly_w {
           shifted_polys.push(poly);
         }
         header_len_list.extend(vec![4; block_num_instances]);
@@ -2582,9 +2591,9 @@ impl SNARK {
         VerifierWitnessSecInfo::new(false, vec![num_ios], &vec![consis_num_proofs], &self.perm_exec_comm_w2_list),
         VerifierWitnessSecInfo::new(false, vec![num_ios; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w2_list),
         VerifierWitnessSecInfo::new(false, vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_list),
-        VerifierWitnessSecInfo::new(false, vec![8; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w3_list),
+        VerifierWitnessSecInfo::new(false, vec![4; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w3_list),
         VerifierWitnessSecInfo::new(false, vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_shifted),
-        VerifierWitnessSecInfo::new(false, vec![8; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w3_list_shifted),
+        VerifierWitnessSecInfo::new(false, vec![4; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w3_list_shifted),
       )
     };
 
@@ -2696,8 +2705,7 @@ impl SNARK {
     // --
     {
       let timer_sat_proof = Timer::new("Block Correctness Extract Sat");
-      let mut block_wit_secs = vec![&block_inputs_verifier, &block_vars_verifier];
-      if max_block_num_phy_ops > 0 || max_block_num_vir_ops > 0 { block_wit_secs.push(&perm_w0_verifier); }
+      let mut block_wit_secs = vec![&block_inputs_verifier, &block_vars_verifier, &perm_w0_verifier, &perm_block_w2_verifier, &perm_block_w3_verifier, &perm_block_w3_shifted_verifier];
       if max_block_num_phy_ops > 0 { block_wit_secs.extend([&phy_mem_block_w2_verifier, &phy_mem_block_w3_verifier, &phy_mem_block_w3_shifted_verifier]); }
       if max_block_num_vir_ops > 0 { block_wit_secs.extend([&vir_mem_block_w2_verifier, &vir_mem_block_w3_verifier, &vir_mem_block_w3_shifted_verifier]); }
       let block_challenges = self.block_r1cs_sat_proof.verify(
@@ -2808,15 +2816,15 @@ impl SNARK {
     };
 
     // --
-    // PERM_BLOCK_ROOT, PERM_EXEC_ROOT, MEM_ADDR_ROOT
+    // PERM_EXEC_ROOT, MEM_ADDR_ROOT
     // --
     let perm_size = max(max(consis_num_proofs, total_num_phy_mem_accesses), total_num_vir_mem_accesses);
     {
       let timer_sat_proof = Timer::new("Perm Root Sat");
-      let (perm_root_w1_verifier, _) = VerifierWitnessSecInfo::merge(vec![&exec_inputs_verifier, &block_inputs_verifier, &addr_phy_mems_verifier, &addr_vir_mems_verifier]);
-      let (perm_root_w2_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w2_verifier, &perm_block_w2_verifier, &phy_mem_addr_w2_verifier, &vir_mem_addr_w2_verifier]);
-      let (perm_root_w3_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_verifier, &perm_block_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier]);
-      let (perm_root_w3_shifted_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_verifier, &perm_block_w3_shifted_verifier, &phy_mem_addr_w3_shifted_verifier, &vir_mem_addr_w3_shifted_verifier]);
+      let (perm_root_w1_verifier, _) = VerifierWitnessSecInfo::merge(vec![&exec_inputs_verifier, &addr_phy_mems_verifier, &addr_vir_mems_verifier]);
+      let (perm_root_w2_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w2_verifier, &phy_mem_addr_w2_verifier, &vir_mem_addr_w2_verifier]);
+      let (perm_root_w3_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier]);
+      let (perm_root_w3_shifted_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_verifier, &phy_mem_addr_w3_shifted_verifier, &vir_mem_addr_w3_shifted_verifier]);
       let perm_root_num_instances = perm_root_w1_verifier.num_proofs.len();
       let mut perm_root_num_proofs: Vec<usize> = perm_root_w1_verifier.num_proofs.clone();
       perm_root_num_proofs.extend(vec![1; perm_root_num_instances.next_power_of_two() - perm_root_num_instances]);
@@ -2864,7 +2872,7 @@ impl SNARK {
       let mut perm_poly_num_proofs: Vec<usize> = perm_poly_w3_verifier.num_proofs.clone();
       perm_poly_num_proofs.extend(vec![1; perm_poly_num_instances.next_power_of_two() - perm_poly_num_instances]);
       // mem_block has size 4, everything else takes size 8
-      let perm_poly_num_inputs: Vec<usize> = inst_map.iter().map(|i| if *i == 2 || *i == 3 { 4 } else { 8 }).collect();
+      let perm_poly_num_inputs: Vec<usize> = inst_map.iter().map(|i| if *i == 1 || *i == 2 || *i == 3 { 4 } else { 8 }).collect();
 
       // Compute poly for PERM_EXEC, PERM_BLOCK, MEM_BLOCK, MEM_ADDR base on INST_MAP
       let mut perm_block_poly_bound_tau = ONE;
@@ -2932,15 +2940,27 @@ impl SNARK {
       for comm in &perm_block_w3_shifted_verifier.comm_w {
         shifted_comms.push(comm);
       }
-      let mut poly_size_list = [vec![8 * consis_num_proofs], (0..block_num_instances).map(|i| 8 * block_num_proofs[i]).collect()].concat();
-      let mut shift_size_list = vec![8; block_num_instances + 1];
-      let mut header_len_list = vec![6; block_num_instances + 1];
+      let mut poly_size_list = [vec![8 * consis_num_proofs], (0..block_num_instances).map(|i| 4 * block_num_proofs[i]).collect()].concat();
+      let mut shift_size_list = [vec![8], vec![4; block_num_instances]].concat();
+      let mut header_len_list = [vec![6], vec![4; block_num_instances]].concat();
       // phy_mem_block_w3
       if max_block_num_phy_ops > 0 {
         for comm in &phy_mem_block_w3_verifier.comm_w {
           orig_comms.push(comm);
         }
         for comm in &phy_mem_block_w3_shifted_verifier.comm_w {
+          shifted_comms.push(comm);
+        }
+        poly_size_list.extend::<Vec<usize>>((0..block_num_instances).map(|i| 4 * block_num_proofs[i]).collect());
+        shift_size_list.extend(vec![4; block_num_instances]);
+        header_len_list.extend(vec![4; block_num_instances]);
+      }
+      // vir_mem_block_w3
+      if max_block_num_vir_ops > 0 {
+        for comm in &vir_mem_block_w3_verifier.comm_w {
+          orig_comms.push(comm);
+        }
+        for comm in &vir_mem_block_w3_shifted_verifier.comm_w {
           shifted_comms.push(comm);
         }
         poly_size_list.extend::<Vec<usize>>((0..block_num_instances).map(|i| 4 * block_num_proofs[i]).collect());
