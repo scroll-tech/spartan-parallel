@@ -664,12 +664,12 @@ impl PolyEvalProof {
     Ok(())
   }
 
-  // Evaluation of the same point on multiple instances
+  // Evaluation on multiple instances, each at different point
   // Size of each instance might be different, but all are larger than the evaluation point
   pub fn prove_batched_instances(
     poly_list: &Vec<DensePolynomial>,        // list of instances 
     blinds_opt: Option<&PolyCommitmentBlinds>,
-    r: &[Scalar],                       // point at which the polynomial is evaluated
+    r_list: Vec<&Vec<Scalar>>,                       // point at which the polynomial is evaluated
     Zr_list: &Vec<Scalar>,              // evaluation of \widetilde{Z}(r) on each instance
     blind_Zr_opt: Option<&Scalar>,      // specifies a blind for Zr
     gens: &PolyCommitmentGens,
@@ -678,14 +678,15 @@ impl PolyEvalProof {
   ) -> Vec<PolyEvalProof> {
     transcript.append_protocol_name(PolyEvalProof::protocol_name());
     // assert vectors are of the right size
+    assert_eq!(poly_list.len(), r_list.len());
     assert_eq!(poly_list.len(), Zr_list.len());
 
-    // We need one proof per poly size
-    let mut index_map: HashMap<usize, usize> = HashMap::new();
+    // We need one proof per poly size & R
+    let mut index_map: HashMap<(usize, Vec<Scalar>), usize> = HashMap::new();
     let mut LZ_list: Vec<Vec<Scalar>> = Vec::new();
     let mut Zc_list = Vec::new();
     let mut L_list: Vec<Vec<Scalar>> = Vec::new();
-    let mut R_list = Vec::new();
+    let mut R_list: Vec<Vec<Scalar>> = Vec::new();
 
     // generate coefficient for RLC
     let c_base = transcript.challenge_scalar(b"challenge_c");
@@ -694,28 +695,30 @@ impl PolyEvalProof {
     for i in 0..poly_list.len() {
       let poly = &poly_list[i];
       let num_vars = poly.get_num_vars();
-      if let Some(index) = index_map.get(&num_vars) {
+
+      // compute L and R
+      let (L, R) = {
+        let r = r_list[i];
+        // pad or trim r to correct length
+        let r = {
+          if num_vars >= r.len() {
+            [vec![zero; num_vars - r.len()], r.to_vec()].concat()
+          } else {
+            r[r.len() - num_vars..].to_vec()
+          }
+        };
+        let eq = EqPolynomial::new(r);
+        eq.compute_factored_evals()
+      };
+
+      if let Some(index) = index_map.get(&(num_vars, R.clone())) {
         c *= c_base;
-        let L = &L_list[*index];
         let LZ = poly.bound(&L);
         LZ_list[*index] = (0..LZ.len()).map(|j| LZ_list[*index][j] + c * LZ[j]).collect();
         Zc_list[*index] += c * Zr_list[i];
       } else {
-        index_map.insert(num_vars, LZ_list.len());
+        index_map.insert((num_vars, R.clone()), LZ_list.len());
         Zc_list.push(Zr_list[i]);
-        // pad or trim rq and ry to correct length
-        let (L, R) = {
-          // pad or trim r to correct length
-          let r = {
-            if num_vars >= r.len() {
-              [vec![zero; num_vars - r.len()], r.to_vec()].concat()
-            } else {
-              r[r.len() - num_vars..].to_vec()
-            }
-          };
-          let eq = EqPolynomial::new(r);
-          eq.compute_factored_evals()
-        };
         // compute a weighted sum of commitments and L
         let LZ = poly.bound(&L);
         L_list.push(L);
@@ -758,19 +761,20 @@ impl PolyEvalProof {
     proof_list: &Vec<PolyEvalProof>,
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
-    r: &[Scalar],           // point at which the polynomial is evaluated
+    r_list: Vec<&Vec<Scalar>>,  // point at which the polynomial is evaluated
     Zr_list: &Vec<Scalar>,   // commitment to \widetilde{Z}(r) of each instance
     comm_list: &Vec<PolyCommitment>, // commitment of each instance
     num_vars_list: &Vec<usize>, // size of each polynomial
   ) -> Result<(), ProofVerifyError> {
     transcript.append_protocol_name(PolyEvalProof::protocol_name());
+    assert_eq!(comm_list.len(), r_list.len());
 
-    // We need one proof per poly size
-    let mut index_map: HashMap<usize, usize> = HashMap::new();
+    // We need one proof per poly size + L size
+    let mut index_map: HashMap<(usize, Vec<Scalar>), usize> = HashMap::new();
     let mut LZ_list: Vec<RistrettoPoint> = Vec::new();
     let mut Zc_list = Vec::new();
-    let mut L_list = Vec::new();
-    let mut R_list = Vec::new();
+    let mut L_list: Vec<Vec<Scalar>> = Vec::new();
+    let mut R_list: Vec<Vec<Scalar>> = Vec::new();
 
     // generate coefficient for RLC
     let c_base = transcript.challenge_scalar(b"challenge_c");
@@ -779,28 +783,30 @@ impl PolyEvalProof {
     for i in 0..comm_list.len() {
       let C_decompressed: Vec<RistrettoPoint> = comm_list[i].C.iter().map(|pt| pt.decompress().unwrap()).collect();
       let num_vars = num_vars_list[i];
-      if let Some(index) = index_map.get(&num_vars) {
+
+      // compute L and R
+      let (L, R) = {
+        let r = r_list[i];
+        // pad or trim r to correct length
+        let r = {
+          if num_vars >= r.len() {
+            [vec![zero; num_vars - r.len()], r.to_vec()].concat()
+          } else {
+            r[r.len() - num_vars..].to_vec()
+          }
+        };
+        let eq = EqPolynomial::new(r);
+        eq.compute_factored_evals()
+      };
+
+      if let Some(index) = index_map.get(&(num_vars, R.clone())) {
         c *= c_base;
-        let L = &L_list[*index];
         let LZ = GroupElement::vartime_multiscalar_mul(L, &C_decompressed);
         LZ_list[*index] += c * LZ;
         Zc_list[*index] += c * Zr_list[i];
       } else {
-        index_map.insert(num_vars, LZ_list.len());
+        index_map.insert((num_vars, R.clone()), LZ_list.len());
         Zc_list.push(Zr_list[i]);
-        // pad or trim rq and ry to correct length
-        let (L, R) = {
-          // pad or trim r to correct length
-          let r = {
-            if num_vars >= r.len() {
-              [vec![zero; num_vars - r.len()], r.to_vec()].concat()
-            } else {
-              r[r.len() - num_vars..].to_vec()
-            }
-          };
-          let eq = EqPolynomial::new(r);
-          eq.compute_factored_evals()
-        };
         // compute a weighted sum of commitments and L
         let LZ = GroupElement::vartime_multiscalar_mul(&L, &C_decompressed);
         L_list.push(L);

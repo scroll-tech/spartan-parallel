@@ -607,8 +607,8 @@ pub struct SNARK {
   perm_root_r1cs_eval_proof: R1CSEvalProof,
 
   // Product proof for permutation
-  perm_poly_poly_list: (Vec<Scalar>, Vec<Scalar>, Vec<Scalar>),
-  proof_eval_perm_poly_prod_list: (Vec<PolyEvalProof>, Vec<PolyEvalProof>, Vec<PolyEvalProof>),
+  perm_poly_poly_list: Vec<Scalar>,
+  proof_eval_perm_poly_prod_list: Vec<PolyEvalProof>,
 
   shift_proof: ShiftProofs,
   io_proof: IOProofs
@@ -2068,44 +2068,24 @@ impl SNARK {
     // --
     let timer_proof = Timer::new("Perm Product");
     // Record the prod of exec, blocks, mem_block, & mem_addr
-    // Entry 2
-    let (perm_poly_poly_list_2, proof_eval_perm_poly_prod_list_2) = {
-      let (perm_poly_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &block_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover]);
-      let perm_poly_poly_list: Vec<Scalar> = perm_poly_w3_prover.poly_w.iter().map(|i| i[2]).collect();
+    let (perm_poly_poly_list, proof_eval_perm_poly_prod_list) = {
+      //                                                                                                                   INPUT_EXEC           INPUT_BLOCK       PHY_MEM_BLOCK     VIR_MEM_BLOCK     PHY_MEM_ADDR             VIR_MEM_ADDR
+      let (perm_poly_w3_prover, inst_map) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &block_w3_prover, &block_w3_prover, &block_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover]);
+      // PHY_MEM_BLOCK takes r = 6, VIR_MEM_BLOCK takes r = 10, everything else takes r = 2
+      let perm_poly_poly_list: Vec<Scalar> = (0..inst_map.len()).map(|i| {
+          let p = &perm_poly_w3_prover.poly_w[i];
+          let i = inst_map[i];
+          if i == 2 { p[6] } else if i == 3 { p[10] } else { p[2] }
+        }
+      ).collect();
+      let two_b = vec![ONE, ZERO];
+      let six_b = vec![ONE, ONE, ZERO];
+      let ten_b = vec![ONE, ZERO, ONE, ZERO];
+      let r_list: Vec<&Vec<Scalar>> = inst_map.iter().map(|i| if *i == 2 { &six_b } else if *i == 3 { &ten_b } else { &two_b }).collect();
       let proof_eval_perm_poly_prod_list = PolyEvalProof::prove_batched_instances(
         &perm_poly_w3_prover.poly_w,
         None,
-        &[ONE, ZERO],
-        &perm_poly_poly_list,
-        None,
-        &vars_gens.gens_pc,
-        transcript,
-        &mut random_tape,
-      );
-      (perm_poly_poly_list, proof_eval_perm_poly_prod_list)
-    };
-    // Entry 6 for block_w3
-    let (perm_poly_poly_list_6, proof_eval_perm_poly_prod_list_6) = {
-      let perm_poly_poly_list: Vec<Scalar> = block_w3_prover.poly_w.iter().map(|i| i[6]).collect();
-      let proof_eval_perm_poly_prod_list = PolyEvalProof::prove_batched_instances(
-        &block_w3_prover.poly_w,
-        None,
-        &[ONE, ONE, ZERO],
-        &perm_poly_poly_list,
-        None,
-        &vars_gens.gens_pc,
-        transcript,
-        &mut random_tape,
-      );
-      (perm_poly_poly_list, proof_eval_perm_poly_prod_list)
-    };
-    // Entry 10 for block_w3
-    let (perm_poly_poly_list_10, proof_eval_perm_poly_prod_list_10) = {
-      let perm_poly_poly_list: Vec<Scalar> = block_w3_prover.poly_w.iter().map(|i| i[10]).collect();
-      let proof_eval_perm_poly_prod_list = PolyEvalProof::prove_batched_instances(
-        &block_w3_prover.poly_w,
-        None,
-        &[ONE, ZERO, ONE, ZERO],
+        r_list,
         &perm_poly_poly_list,
         None,
         &vars_gens.gens_pc,
@@ -2239,8 +2219,8 @@ impl SNARK {
       perm_root_inst_evals,
       perm_root_r1cs_eval_proof,
 
-      perm_poly_poly_list: (perm_poly_poly_list_2, perm_poly_poly_list_6, perm_poly_poly_list_10),
-      proof_eval_perm_poly_prod_list: (proof_eval_perm_poly_prod_list_2, proof_eval_perm_poly_prod_list_6, proof_eval_perm_poly_prod_list_10),
+      perm_poly_poly_list,
+      proof_eval_perm_poly_prod_list,
 
       shift_proof,
       io_proof
@@ -2306,7 +2286,6 @@ impl SNARK {
     // --
     // COMMITMENTS
     // --
-
     let input_block_num = Scalar::from(input_block_num as u64);
     let output_block_num = Scalar::from(output_block_num as u64);
     let input: Vec<Scalar> = input.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
@@ -2770,43 +2749,26 @@ impl SNARK {
       let timer_eval_opening = Timer::new("Perm Product");
       // Verify prod of exec, blocks, mem_block, & mem_addr
       let (perm_poly_w3_verifier, inst_map) = VerifierWitnessSecInfo::merge(
-        vec![&perm_exec_w3_verifier, &block_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier]
+        vec![&perm_exec_w3_verifier, &block_w3_verifier, &block_w3_verifier, &block_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier]
       );
       let perm_poly_num_instances = perm_poly_w3_verifier.num_proofs.len();
       let mut perm_poly_num_proofs: Vec<usize> = perm_poly_w3_verifier.num_proofs.clone();
       perm_poly_num_proofs.extend(vec![1; perm_poly_num_instances.next_power_of_two() - perm_poly_num_instances]);
-      let perm_poly_num_inputs: Vec<usize> = inst_map.iter().map(|i| if *i == 1 { 16 } else { 8 }).collect();
+      let perm_poly_num_inputs: Vec<usize> = inst_map.iter().map(|i| if *i >= 1 && *i <= 3 { 16 } else { 8 }).collect();
 
       // Commitment Opening
       let num_vars_list = (0..perm_poly_num_instances).map(|i| (perm_poly_num_proofs[i] * perm_poly_num_inputs[i]).log_2()).collect();
+      let two_b = vec![ONE, ZERO];
+      let six_b = vec![ONE, ONE, ZERO];
+      let ten_b = vec![ONE, ZERO, ONE, ZERO];
+      let r_list: Vec<&Vec<Scalar>> = inst_map.iter().map(|i| if *i == 2 { &six_b } else if *i == 3 { &ten_b } else { &two_b }).collect();
       PolyEvalProof::verify_plain_batched_instances(
-        &self.proof_eval_perm_poly_prod_list.0,
+        &self.proof_eval_perm_poly_prod_list,
         &vars_gens.gens_pc,
         transcript,
-        &[ONE, ZERO],
-        &self.perm_poly_poly_list.0,
+        r_list,
+        &self.perm_poly_poly_list,
         &perm_poly_w3_verifier.comm_w,
-        &num_vars_list
-      )?;
-
-      let num_vars_list = (0..block_num_instances).map(|i| (block_num_proofs[i] * 16).log_2()).collect();
-      PolyEvalProof::verify_plain_batched_instances(
-        &self.proof_eval_perm_poly_prod_list.1,
-        &vars_gens.gens_pc,
-        transcript,
-        &[ONE, ONE, ZERO],
-        &self.perm_poly_poly_list.1,
-        &block_w3_verifier.comm_w,
-        &num_vars_list
-      )?;
-
-      PolyEvalProof::verify_plain_batched_instances(
-        &self.proof_eval_perm_poly_prod_list.2,
-        &vars_gens.gens_pc,
-        transcript,
-        &[ONE, ZERO, ONE, ZERO],
-        &self.perm_poly_poly_list.2,
-        &block_w3_verifier.comm_w,
         &num_vars_list
       )?;
 
@@ -2817,35 +2779,34 @@ impl SNARK {
       let mut phy_mem_addr_poly_bound_tau = ONE;
       let mut vir_mem_block_poly_bound_tau = ONE;
       let mut vir_mem_addr_poly_bound_tau = ONE;
-      // INST_MAP: 0 -> perm_exec, 1 -> perm_block, 2 -> phy_mem_addr, 3 -> vir_mem_addr
+      // INST_MAP: 0 -> perm_exec, 1 -> perm_block, 2 -> phy_mem_block, 3 -> vir_mem_block, 5 -> phy_mem_addr, 6 -> vir_mem_addr
       for p in 0..perm_poly_num_instances {
         match inst_map[p] {
           0 => {
-              perm_exec_poly_bound_tau *= self.perm_poly_poly_list.0[p]; 
+              perm_exec_poly_bound_tau *= self.perm_poly_poly_list[p]; 
           },
           1 => {
-            perm_block_poly_bound_tau *= self.perm_poly_poly_list.0[p]; 
+            perm_block_poly_bound_tau *= self.perm_poly_poly_list[p]; 
           },
           2 => {
-            phy_mem_addr_poly_bound_tau *= self.perm_poly_poly_list.0[p];
-          }
+            if max_block_num_phy_ops > 0 {
+              phy_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
+            }
+          },
           3 => {
-            vir_mem_addr_poly_bound_tau *= self.perm_poly_poly_list.0[p];
-          }
+            if max_block_num_vir_ops > 0 {
+              vir_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
+            }
+          },
+          4 => {
+            phy_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
+          },
+          5 => {
+            vir_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
+          },
           _ => {}
         }
       }
-      if max_block_num_phy_ops > 0 {
-        for p in 0..block_num_instances {
-          phy_mem_block_poly_bound_tau *= self.perm_poly_poly_list.1[p];
-        }
-      }
-      if max_block_num_vir_ops > 0 {
-        for p in 0..block_num_instances {
-          vir_mem_block_poly_bound_tau *= self.perm_poly_poly_list.2[p];
-        }
-      }
-
       timer_eval_opening.stop();
 
       // Correctness of Permutation
