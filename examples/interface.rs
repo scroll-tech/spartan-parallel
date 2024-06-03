@@ -450,22 +450,15 @@ fn main() {
   );
   println!("Finished Block");
 
-  // CONSIS INSTANCES
-  // CONSIS_CHECK
-  let (consis_check_num_cons, consis_check_num_non_zero_entries, consis_check_inst) = Instance::gen_consis_check_inst();
-  println!("Finished Consis");
+  // Pairwise INSTANCES
+  // CONSIS_CHECK & PHY_MEM_COHERE
+  let (pairwise_check_num_vars, pairwise_check_num_cons, pairwise_check_num_non_zero_entries, mut pairwise_check_inst) = Instance::gen_pairwise_check_inst(ctk.max_ts_width, mem_addr_ts_bits_size);
+  println!("Finished Pairwise");
 
   // PERM INSTANCES
   // PERM_ROOT
   let (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst) = Instance::gen_perm_root_inst(num_inputs_unpadded, num_ios);
   println!("Finished Perm");
-
-  // MEM INSTANCES
-  // PHY_MEM_COHERE
-  let (phy_mem_cohere_num_cons, phy_mem_cohere_num_non_zero_entries, phy_mem_cohere_inst) = Instance::gen_phy_mem_cohere_inst();
-  // VIR_MEM_COHERE
-  let (vir_mem_cohere_num_vars, vir_mem_cohere_num_cons, vir_mem_cohere_num_non_zero_entries, vir_mem_cohere_inst) = Instance::gen_vir_mem_cohere_inst(ctk.max_ts_width, mem_addr_ts_bits_size);
-  println!("Finished Mem");
 
   // --
   // COMMITMENT PREPROCESSING
@@ -473,10 +466,8 @@ fn main() {
   println!("Producing Public Parameters...");
   // produce public parameters
   let block_gens = SNARKGens::new(block_num_cons, block_num_vars, block_num_instances_bound, block_num_non_zero_entries);
-  let consis_check_gens = SNARKGens::new(consis_check_num_cons, 2 * 8, 1, consis_check_num_non_zero_entries);
+  let pairwise_check_gens = SNARKGens::new(pairwise_check_num_cons, 4 * pairwise_check_num_vars, 3, pairwise_check_num_non_zero_entries);
   let perm_root_gens = SNARKGens::new(perm_root_num_cons, 8 * num_ios, 1, perm_root_num_non_zero_entries);
-  let phy_mem_cohere_gens = SNARKGens::new(phy_mem_cohere_num_cons, 2 * 4, 1, phy_mem_cohere_num_non_zero_entries);
-  let vir_mem_cohere_gens = SNARKGens::new(vir_mem_cohere_num_cons, 4 * vir_mem_cohere_num_vars, 1, vir_mem_cohere_num_non_zero_entries);
   // Only use one version of gens_r1cs_sat
   let vars_gens = SNARKGens::new(block_num_cons, TOTAL_NUM_VARS_BOUND, block_num_instances_bound.next_power_of_two(), block_num_non_zero_entries).gens_r1cs_sat;
   
@@ -484,13 +475,10 @@ fn main() {
   println!("Comitting Circuits...");
   let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
   println!("Finished Block");
-  let (consis_check_comm, consis_check_decomm) = SNARK::encode(&consis_check_inst, &consis_check_gens);
-  println!("Finished Consis");
+  let (pairwise_check_comm, pairwise_check_decomm) = SNARK::encode(&pairwise_check_inst, &pairwise_check_gens);
+  println!("Finished Pairwise");
   let (perm_root_comm, perm_root_decomm) = SNARK::encode(&perm_root_inst, &perm_root_gens);
   println!("Finished Perm");
-  let (phy_mem_cohere_comm, phy_mem_cohere_decomm) = SNARK::encode(&phy_mem_cohere_inst, &phy_mem_cohere_gens);
-  let (vir_mem_cohere_comm, vir_mem_cohere_decomm) = SNARK::encode(&vir_mem_cohere_inst, &vir_mem_cohere_gens);
-  println!("Finished Mem");
 
   // --
   // WITNESS PREPROCESSING
@@ -540,27 +528,12 @@ fn main() {
     &block_gens,
     
     rtk.consis_num_proofs,
-    &consis_check_inst,
-    &consis_check_comm,
-    &consis_check_decomm,
-    &consis_check_gens,
-
-    &perm_root_inst,
-    &perm_root_comm,
-    &perm_root_decomm,
-    &perm_root_gens,
-
     rtk.total_num_phy_mem_accesses,
-    &phy_mem_cohere_inst,
-    &phy_mem_cohere_comm,
-    &phy_mem_cohere_decomm,
-    &phy_mem_cohere_gens,
-
     rtk.total_num_vir_mem_accesses,
-    &vir_mem_cohere_inst,
-    &vir_mem_cohere_comm,
-    &vir_mem_cohere_decomm,
-    &vir_mem_cohere_gens,
+    &mut pairwise_check_inst,
+    &pairwise_check_comm,
+    &pairwise_check_decomm,
+    &pairwise_check_gens,
 
     block_vars_matrix,
     block_inputs_matrix,
@@ -568,6 +541,11 @@ fn main() {
     rtk.addr_phy_mems_list,
     rtk.addr_vir_mems_list,
     rtk.addr_ts_bits_list,
+
+    &perm_root_inst,
+    &perm_root_comm,
+    &perm_root_decomm,
+    &perm_root_gens,
 
     &vars_gens,
     &mut prover_transcript,
@@ -604,23 +582,15 @@ fn main() {
     &block_gens,
 
     rtk.consis_num_proofs, 
-    consis_check_num_cons, 
-    &consis_check_comm,
-    &consis_check_gens,
+    rtk.total_num_phy_mem_accesses,
+    rtk.total_num_vir_mem_accesses,
+    pairwise_check_num_cons,
+    &pairwise_check_comm,
+    &pairwise_check_gens,
 
     perm_root_num_cons,
     &perm_root_comm,
     &perm_root_gens,
-
-    rtk.total_num_phy_mem_accesses,
-    phy_mem_cohere_num_cons,
-    &phy_mem_cohere_comm,
-    &phy_mem_cohere_gens,
-
-    rtk.total_num_vir_mem_accesses,
-    vir_mem_cohere_num_cons,
-    &vir_mem_cohere_comm,
-    &vir_mem_cohere_gens,
 
     &vars_gens,
     &mut verifier_transcript

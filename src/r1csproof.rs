@@ -159,6 +159,7 @@ impl R1CSProof {
     (sc_proof_phase_two, r, claims, blind_claim_postsc)
   }
 
+  /*
   fn prove_phase_two_single(
     num_rounds: usize,
     claim: &Scalar,
@@ -186,7 +187,7 @@ impl R1CSProof {
 
     (sc_proof_phase_two, r, claims, blind_claim_postsc)
   }
-
+  */
 
   fn protocol_name() -> &'static [u8] {
     b"R1CS proof"

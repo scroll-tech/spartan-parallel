@@ -446,25 +446,66 @@ impl Instance {
     (block_num_vars, block_num_cons, block_num_non_zero_entries, block_inst)
   }
 
-  /// Generates CONSIS_CHECK instance based on parameters
-  /// CONSIS_CHECK takes in consis_w2 = <_, _, _, _, i, o, _, _>
-  /// where i = v * (v + i0 * r + i1 * r^2 + i2 * r^3 + ...) and o = v * (v + o0 * r + o1 * r^2 + o2 * r^3 + ...)
-  /// See perm_root
+  /// PAIRWISE_CHECK is consisted of two parts:
+  ///
+  /// CONSIS_CHECK
+  /// takes in consis_w3 = <_, _, _, _, i, o, _, _>
   /// and verifies (o[k] - i[k + 1]) * i[k + 1] = 0 for all k
-  pub fn gen_consis_check_inst() -> (usize, usize, Instance) {
-    let consis_check_num_cons = 2;
-    let consis_check_num_non_zero_entries = 2;
+  /// 
+  /// Input composition:
+  ///           Op[k]                        Op[k + 1]
+  ///   0   1   2   3   4   5 ...  |   0   1   2   3   4   5
+  ///   _   _   _   _   i   o      |   _   _   _   _   i   o
+  ///
+  /// --
+  /// 
+  /// PHY_MEM_COHERE 
+  /// takes in addr_mem = <v, D, addr, val>
+  /// and verifies that
+  /// 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
+  /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
+  /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (val[k + 1] - val[k]) = 0: either address difference is 1, or value are the same, unless the next entry is invalid
+  /// So we set D = v[k + 1] * (1 - addr[k + 1] + addr[k])
+  /// 
+  /// Input composition:
+  ///     Op[k]           Op[k + 1]
+  /// 0   1   2   3  |  4   5   6   7
+  /// v   D addr val |  v   D addr val
+  /// 
+  /// --
+  /// 
+  /// VIR_MEM_COHERE 
+  /// takes in addr_mem = <v, D1, addr, data, ls, ts, _, _> (need to keep the last entry 0 for permutation)
+  /// and verifies that
+  /// 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
+  /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: addr difference is 0 or 1, unless the next entry is invalid
+  /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * C_>=(ts[k + 1], ts[k]) = 0: either addr difference is 1, or ts is increasing
+  /// 4. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (ls[k + 1] - STORE) * (data[k + 1] - data[k]) = 0: either addr difference is 1, or next op is STORE, or data are the same
+  /// 5. v[k + 1] * (addr[k + 1] - addr[k]) * (ls[k + 1] - STORE) = 0: either phy addr are the same, or next op is STORE
+  /// So we set D1 = v[k + 1] * (1 - phy_addr[k + 1] + phy_addr[k])
+  ///           D2 = D1 * (ls[i+1] - STORE)
+  /// Where STORE = 0
+  /// Input composition:
+  ///             Op[k]                           Op[k + 1]              D2 & bits of ts[k + 1] - ts[k]
+  /// 0   1   2   3   4   5   6   7  |  0   1   2   3   4   5   6   7  |  0   1   2   3   4
+  /// v  D1   a   d  ls  ts   _   _  |  v  D1   a   d  ls  ts   _   _  | D2  EQ  B0  B1  ...
+  pub fn gen_pairwise_check_inst(max_ts_width: usize, mem_addr_ts_bits_size: usize) -> (usize, usize, usize, Instance) {
+    let pairwise_check_num_vars = max(8, mem_addr_ts_bits_size);
+    let pairwise_check_num_cons = 8 + max_ts_width;
+    let pairwise_check_num_non_zero_entries = max(13 + max_ts_width, 5 + 2 * max_ts_width);
   
-    let V_i = 4;
-    let V_o = 5;
-    let width = 8;
-    let consis_check_inst = {
+    let pairwise_check_inst = {
       let mut A_list = Vec::new();
       let mut B_list = Vec::new();
       let mut C_list = Vec::new();
       
-      // Check output of the last block is the input of the next block
+      // CONSIS_CHECK
       let (A, B, C) = {
+        let width = 8;
+        
+        let V_i = 4;
+        let V_o = 5;
+
         let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
         let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
@@ -478,12 +519,117 @@ impl Instance {
       A_list.push(A);
       B_list.push(B);
       C_list.push(C);
+
+      // PHY_MEM_COHERE
+      let (A, B, C) = {
+        let width = 8;
+        
+        let V_valid = 0;
+        let V_cnst = V_valid;
+        let V_D = 1;
+        let V_addr = 2;
+        let V_val = 3;
+
+        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
   
-      let consis_check_inst = Instance::new(1, consis_check_num_cons, 2 * width, &A_list, &B_list, &C_list).unwrap();
+        let mut num_cons = 0;
+        // (v[k] - 1) * v[k + 1] = 0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_valid, 1), (V_cnst, -1)], vec![(width + V_valid, 1)], vec![]);
+        num_cons += 1;
+        // v[k + 1] * (1 - addr[k + 1] + addr[k]) = D[k]
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(width + V_valid, 1)], vec![(V_cnst, 1), (width + V_addr, -1), (V_addr, 1)], vec![(V_D, 1)]);
+        num_cons += 1;
+        // D[k] * (addr[k + 1] - addr[k]) = 0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_D, 1)], vec![(width + V_addr, 1), (V_addr, -1)], vec![]);
+        num_cons += 1;
+        // D[k] * (val[k + 1] - val[k]) = 0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_D, 1)], vec![(width + V_val, 1), (V_val, -1)], vec![]);
+        
+        (A, B, C)
+      };
+      A_list.push(A);
+      B_list.push(B);
+      C_list.push(C);
+  
+      // VIR_MEM_COHERE
+      let (A, B, C) = {
+        let width = pairwise_check_num_vars;
+        
+        let V_valid = 0;
+        let V_cnst = V_valid;
+        let V_D1 = 1;
+        let V_addr = 2;
+        let V_data = 3;
+        let V_ls = 4;
+        let V_ts = 5;
+        let V_D2 = 2 * width;
+        let V_EQ = 2 * width + 1;
+        let V_B = |i| 2 * width + 2 + i;
+        
+        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
+        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
+        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
+  
+        let mut num_cons = 0;
+        // Sortedness
+        // (v[k] - 1) * v[k + 1] = 0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_valid, 1), (V_cnst, -1)], vec![(width + V_valid, 1)], vec![]);
+        num_cons += 1;
+        // D1[k] = v[k + 1] * (1 - addr[k + 1] + addr[k])
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(width + V_valid, 1)], vec![(V_cnst, 1), (width + V_addr, -1), (V_addr, 1)], vec![(V_D1, 1)]);
+        num_cons += 1;
+        // D1[k] * (addr[k + 1] - addr[k]) = 0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_D1, 1)], vec![(width + V_addr, 1), (V_addr, -1)], vec![]);
+        num_cons += 1;
+        // EQ
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_EQ, 1)], vec![(V_EQ, 1)], vec![(V_EQ, 1)]);
+        num_cons += 1;
+        // C>=
+        for i in 0..max_ts_width {
+          // Bi * Bi = Bi
+          (A, B, C) = Instance::gen_constr(A, B, C,
+            num_cons, vec![(V_B(i), 1)], vec![(V_B(i), 1)], vec![(V_B(i), 1)]);
+          num_cons += 1;
+        }
+        // D1[k] * (ts[k + 1] - ts[k]) = EQ + \Sum_i B_i
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_D1, 1)], vec![(width + V_ts, 1), (V_ts, -1)], [vec![(V_EQ, 1)], (0..max_ts_width).map(|i| (V_B(i), i.pow2() as isize)).collect()].concat()
+        );
+        num_cons += 1;
+
+        // Consistency
+        // D1[k] * (ls[k + 1] - STORE) = D2[k], where STORE = 0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_D1, 1)], vec![(width + V_ls, 1)], vec![(V_D2, 1)]);
+        num_cons += 1;
+        // D2[k] * (data[k + 1] - data[k]) = 0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_D2, 1)], vec![(width + V_data, 1), (V_data, -1)], vec![]);
+        num_cons += 1;
+        // (1 - D1[k]) * (ls[k + 1] - STORE) = 0, where STORE = 0
+        (A, B, C) = Instance::gen_constr(A, B, C,
+          num_cons, vec![(V_cnst, 1), (V_D1, -1)], vec![(width + V_ls, 1)], vec![]);
+        (A, B, C)
+      };
+      A_list.push(A);
+      B_list.push(B);
+      C_list.push(C);
+
+      let pairwise_check_inst = Instance::new(3, pairwise_check_num_cons, 4 * pairwise_check_num_vars, &A_list, &B_list, &C_list).unwrap();
       
-      consis_check_inst
+      pairwise_check_inst
     };
-    (consis_check_num_cons, consis_check_num_non_zero_entries, consis_check_inst)
+    (pairwise_check_num_vars, pairwise_check_num_cons, pairwise_check_num_non_zero_entries, pairwise_check_inst)
   }
 
   /// Generates PERM_ROOT instance based on parameters
@@ -661,167 +807,6 @@ impl Instance {
     (perm_poly_num_cons, perm_poly_num_non_zero_entries, perm_poly_inst)
   }
   */
-
-  /// Generates PHY_MEM_COHERE instance based on parameters
-  /// PHY_MEM_COHERE takes in addr_mem = <v, D, addr, val>
-  /// and verifies that
-  /// 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
-  /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
-  /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (val[k + 1] - val[k]) = 0: either address difference is 1, or value are the same, unless the next entry is invalid
-  /// So we set D = v[k + 1] * (1 - addr[k + 1] + addr[k])
-  /// 
-  /// Input composition:
-  ///     Op[k]           Op[k + 1]
-  /// 0   1   2   3  |  4   5   6   7
-  /// v   D addr val |  v   D addr val
-  pub fn gen_phy_mem_cohere_inst() -> (usize, usize, Instance) {
-    let phy_mem_cohere_num_cons = 4;
-    let phy_mem_cohere_num_non_zero_entries = 8;
-  
-    let phy_mem_cohere_inst = {
-      let V_valid = 0;
-      let V_cnst = V_valid;
-      let V_D = 1;
-      let V_addr = 2;
-      let V_val = 3;
-      let width = 4;
-  
-      let mut A_list = Vec::new();
-      let mut B_list = Vec::new();
-      let mut C_list = Vec::new();
-      
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-  
-        let mut num_cons = 0;
-        // (v[k] - 1) * v[k + 1] = 0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_valid, 1), (V_cnst, -1)], vec![(width + V_valid, 1)], vec![]);
-        num_cons += 1;
-        // v[k + 1] * (1 - addr[k + 1] + addr[k]) = D[k]
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(width + V_valid, 1)], vec![(V_cnst, 1), (width + V_addr, -1), (V_addr, 1)], vec![(V_D, 1)]);
-        num_cons += 1;
-        // D[k] * (addr[k + 1] - addr[k]) = 0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_D, 1)], vec![(width + V_addr, 1), (V_addr, -1)], vec![]);
-        num_cons += 1;
-        // D[k] * (val[k + 1] - val[k]) = 0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_D, 1)], vec![(width + V_val, 1), (V_val, -1)], vec![]);
-        
-        (A, B, C)
-      };
-      A_list.push(A);
-      B_list.push(B);
-      C_list.push(C);
-  
-      let phy_mem_cohere_inst = Instance::new(1, phy_mem_cohere_num_cons, 2 * width, &A_list, &B_list, &C_list).unwrap();
-      
-      phy_mem_cohere_inst
-    };
-    (phy_mem_cohere_num_cons, phy_mem_cohere_num_non_zero_entries, phy_mem_cohere_inst)
-  }
-
-  /// Generates VIR_MEM_COHERE instance based on parameters
-  /// VIR_MEM_COHERE takes in addr_mem = <v, D1, addr, data, ls, ts, _, _> (need to keep the last entry 0 for permutation)
-  /// and verifies that
-  /// 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
-  /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: addr difference is 0 or 1, unless the next entry is invalid
-  /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * C_>=(ts[k + 1], ts[k]) = 0: either addr difference is 1, or ts is increasing
-  /// 4. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (ls[k + 1] - STORE) * (data[k + 1] - data[k]) = 0: either addr difference is 1, or next op is STORE, or data are the same
-  /// 5. v[k + 1] * (addr[k + 1] - addr[k]) * (ls[k + 1] - STORE) = 0: either phy addr are the same, or next op is STORE
-  /// So we set D1 = v[k + 1] * (1 - phy_addr[k + 1] + phy_addr[k])
-  ///           D2 = D1 * (ls[i+1] - STORE)
-  /// Where STORE = 0
-  /// Input composition:
-  ///             Op[k]                           Op[k + 1]              D2 & bits of ts[k + 1] - ts[k]
-  /// 0   1   2   3   4   5   6   7  |  0   1   2   3   4   5   6   7  |  0   1   2   3   4
-  /// v  D1   a   d  ls  ts   _   _  |  v  D1   a   d  ls  ts   _   _  | D2  EQ  B0  B1  ...
-  pub fn gen_vir_mem_cohere_inst(max_ts_width: usize, mem_addr_ts_bits_size: usize) -> (usize, usize, usize, Instance) {
-    let vir_mem_cohere_num_vars = max(8, mem_addr_ts_bits_size);
-    let width = vir_mem_cohere_num_vars;
-    let vir_mem_cohere_num_cons = 8 + max_ts_width;
-    let vir_mem_cohere_num_non_zero_entries = max(13 + max_ts_width, 5 + 2 * max_ts_width);
-  
-    let vir_mem_cohere_inst = {
-      let V_valid = 0;
-      let V_cnst = V_valid;
-      let V_D1 = 1;
-      let V_addr = 2;
-      let V_data = 3;
-      let V_ls = 4;
-      let V_ts = 5;
-      let V_D2 = 2 * width;
-      let V_EQ = 2 * width + 1;
-      let V_B = |i| 2 * width + 2 + i;
-  
-      let mut A_list = Vec::new();
-      let mut B_list = Vec::new();
-      let mut C_list = Vec::new();
-      
-      let (A, B, C) = {
-        let mut A: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut B: Vec<(usize, usize, [u8; 32])> = Vec::new();
-        let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
-  
-        let mut num_cons = 0;
-        // Sortedness
-        // (v[k] - 1) * v[k + 1] = 0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_valid, 1), (V_cnst, -1)], vec![(width + V_valid, 1)], vec![]);
-        num_cons += 1;
-        // D1[k] = v[k + 1] * (1 - addr[k + 1] + addr[k])
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(width + V_valid, 1)], vec![(V_cnst, 1), (width + V_addr, -1), (V_addr, 1)], vec![(V_D1, 1)]);
-        num_cons += 1;
-        // D1[k] * (addr[k + 1] - addr[k]) = 0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_D1, 1)], vec![(width + V_addr, 1), (V_addr, -1)], vec![]);
-        num_cons += 1;
-        // EQ
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_EQ, 1)], vec![(V_EQ, 1)], vec![(V_EQ, 1)]);
-        num_cons += 1;
-        // C>=
-        for i in 0..max_ts_width {
-          // Bi * Bi = Bi
-          (A, B, C) = Instance::gen_constr(A, B, C,
-            num_cons, vec![(V_B(i), 1)], vec![(V_B(i), 1)], vec![(V_B(i), 1)]);
-          num_cons += 1;
-        }
-        // D1[k] * (ts[k + 1] - ts[k]) = EQ + \Sum_i B_i
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_D1, 1)], vec![(width + V_ts, 1), (V_ts, -1)], [vec![(V_EQ, 1)], (0..max_ts_width).map(|i| (V_B(i), i.pow2() as isize)).collect()].concat()
-        );
-        num_cons += 1;
-
-        // Consistency
-        // D1[k] * (ls[k + 1] - STORE) = D2[k], where STORE = 0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_D1, 1)], vec![(width + V_ls, 1)], vec![(V_D2, 1)]);
-        num_cons += 1;
-        // D2[k] * (data[k + 1] - data[k]) = 0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_D2, 1)], vec![(width + V_data, 1), (V_data, -1)], vec![]);
-        num_cons += 1;
-        // (1 - D1[k]) * (ls[k + 1] - STORE) = 0, where STORE = 0
-        (A, B, C) = Instance::gen_constr(A, B, C,
-          num_cons, vec![(V_cnst, 1), (V_D1, -1)], vec![(width + V_ls, 1)], vec![]);
-        (A, B, C)
-      };
-      A_list.push(A);
-      B_list.push(B);
-      C_list.push(C);
-  
-      let vir_mem_cohere_inst = Instance::new(1, vir_mem_cohere_num_cons, 4 * vir_mem_cohere_num_vars, &A_list, &B_list, &C_list).unwrap();
-      
-      vir_mem_cohere_inst
-    };
-    (vir_mem_cohere_num_vars, vir_mem_cohere_num_cons, vir_mem_cohere_num_non_zero_entries, vir_mem_cohere_inst)
-  }
 
   /*
   /// Generates VIR_MEM_COHERE instance based on parameters

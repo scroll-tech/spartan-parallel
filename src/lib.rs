@@ -600,20 +600,14 @@ pub struct SNARK {
   block_inst_evals_list: Vec<Scalar>,
   block_r1cs_eval_proof: R1CSEvalProof,
 
-  consis_check_r1cs_sat_proof: R1CSProof,
-  consis_check_inst_evals: [Scalar; 3],
-  consis_check_r1cs_eval_proof: R1CSEvalProof,
+  pairwise_check_r1cs_sat_proof: R1CSProof,
+  pairwise_check_inst_evals_bound_rp: [Scalar; 3],
+  pairwise_check_inst_evals_list: Vec<Scalar>,
+  pairwise_check_r1cs_eval_proof: R1CSEvalProof,
 
   perm_root_r1cs_sat_proof: R1CSProof,
   perm_root_inst_evals: [Scalar; 3],
   perm_root_r1cs_eval_proof: R1CSEvalProof,
-
-  // If the prover claims that no memory access is performed,
-  // no need to construct mem addr proofs
-  // However, we still need to construct mem proofs per block to ensure
-  // that all executed blocks contain no memory accesses
-  phy_mem_addr_proofs: Option<MemAddrProofs>,
-  vir_mem_addr_proofs: Option<MemAddrProofs>,
 
   // Product proof for permutation
   perm_poly_poly_list: Vec<Scalar>,
@@ -621,14 +615,6 @@ pub struct SNARK {
 
   shift_proof: ShiftProofs,
   io_proof: IOProofs
-}
-
-// Proofs regarding memory accesses as a whole
-#[derive(Serialize, Deserialize, Debug)]
-struct MemAddrProofs {
-  mem_cohere_r1cs_sat_proof: R1CSProof,
-  mem_cohere_inst_evals: [Scalar; 3],
-  mem_cohere_r1cs_eval_proof: R1CSEvalProof
 }
 
 // Sort block_num_proofs and record where each entry is
@@ -726,27 +712,12 @@ impl SNARK {
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
-    consis_check_inst: &Instance,
-    consis_check_comm: &ComputationCommitment,
-    consis_check_decomm: &ComputationDecommitment,
-    consis_check_gens: &SNARKGens,
-
-    perm_root_inst: &Instance,
-    perm_root_comm: &ComputationCommitment,
-    perm_root_decomm: &ComputationDecommitment,
-    perm_root_gens: &SNARKGens,
-
     total_num_phy_mem_accesses: usize,
-    phy_mem_cohere_inst: &Instance,
-    phy_mem_cohere_comm: &ComputationCommitment,
-    phy_mem_cohere_decomm: &ComputationDecommitment,
-    phy_mem_cohere_gens: &SNARKGens,
-
     total_num_vir_mem_accesses: usize,
-    vir_mem_cohere_inst: &Instance,
-    vir_mem_cohere_comm: &ComputationCommitment,
-    vir_mem_cohere_decomm: &ComputationDecommitment,
-    vir_mem_cohere_gens: &SNARKGens,
+    pairwise_check_inst: &mut Instance,
+    pairwise_check_comm: &ComputationCommitment,
+    pairwise_check_decomm: &ComputationDecommitment,
+    pairwise_check_gens: &SNARKGens,
 
     block_vars_mat: Vec<Vec<VarsAssignment>>,
     block_inputs_mat: Vec<Vec<InputsAssignment>>,
@@ -754,6 +725,11 @@ impl SNARK {
     addr_phy_mems_list: Vec<MemsAssignment>,
     addr_vir_mems_list: Vec<MemsAssignment>,
     addr_ts_bits_list: Vec<MemsAssignment>,
+
+    perm_root_inst: &Instance,
+    perm_root_comm: &ComputationCommitment,
+    perm_root_decomm: &ComputationDecommitment,
+    perm_root_gens: &SNARKGens,
 
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
@@ -824,10 +800,8 @@ impl SNARK {
 
       // append a commitment to the computation to the transcript
       block_comm.comm.append_to_transcript(b"block_comm", transcript);
-      consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      pairwise_check_comm.comm.append_to_transcript(b"pairwise_comm", transcript);
       perm_root_comm.comm.append_to_transcript(b"perm_comm", transcript);
-      phy_mem_cohere_comm.comm.append_to_transcript(b"mem_comm", transcript);
-      vir_mem_cohere_comm.comm.append_to_transcript(b"mem_comm", transcript);
 
       // Commit io
       input_block_num.append_to_transcript(b"input_block_num", transcript);
@@ -864,6 +838,24 @@ impl SNARK {
     block_inst.sort(block_num_instances, &index);
     let block_num_phy_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_phy_ops[index[i]]).collect();
     let block_num_vir_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_vir_ops[index[i]]).collect();
+
+    // --
+    // PAIRWISE SORT
+    // --
+    // Sort the pairwise instances: CONSIS_CHECK, PHY_MEM_COHERE
+    let mut inst_sorter = Vec::new();
+    inst_sorter.push(InstanceSortHelper::new(consis_num_proofs, 0));
+    inst_sorter.push(InstanceSortHelper::new(total_num_phy_mem_accesses, 0));
+    inst_sorter.push(InstanceSortHelper::new(total_num_vir_mem_accesses, 0));
+    // Sort from high -> low
+    inst_sorter.sort_by(|a, b| b.cmp(a));
+
+    let pairwise_num_instances = 1 + if total_num_phy_mem_accesses > 0 { 1 } else { 0 } + if total_num_vir_mem_accesses > 0 { 1 } else { 0 };
+    let inst_sorter = &inst_sorter[..pairwise_num_instances];
+    // index[i] = j => the original jth entry should now be at the ith position
+    let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
+    let pairwise_check_inst_unsorted = pairwise_check_inst.clone();
+    pairwise_check_inst.sort(pairwise_num_instances, &index);
 
     // --
     // PADDING
@@ -2014,19 +2006,25 @@ impl SNARK {
     timer_proof.stop();
 
     // --
-    // CONSIS_CHECK
+    // PAIRWISE_CHECK
     // --
-
-    let timer_proof = Timer::new("Consis Check");
-    let (consis_check_r1cs_sat_proof, consis_check_challenges) = {
-      let (proof, consis_check_challenges) = {
+    let timer_proof = Timer::new("Pairwise Check");
+    let pairwise_size = max(max(consis_num_proofs, total_num_phy_mem_accesses), total_num_vir_mem_accesses);
+    let (pairwise_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &addr_phy_mems_prover, &addr_vir_mems_prover]);
+    let (pairwise_shifted_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_prover, &addr_phy_mems_shifted_prover, &addr_vir_mems_shifted_prover]);
+    let (addr_ts_bits_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &addr_phy_mems_prover, &addr_ts_bits_prover]);
+    let pairwise_num_instances = pairwise_prover.w_mat.len();
+    let mut pairwise_num_proofs: Vec<usize> = pairwise_prover.w_mat.iter().map(|i| i.len()).collect();
+    pairwise_num_proofs.extend(vec![1; pairwise_num_instances.next_power_of_two() - pairwise_num_instances]);
+    let (pairwise_check_r1cs_sat_proof, pairwise_check_challenges) = {
+      let (proof, pairwise_check_challenges) = {
         R1CSProof::prove(
-          1,
-          consis_num_proofs,
-          &vec![consis_num_proofs],
-          8,
-          vec![&perm_exec_w3_prover, &perm_exec_w3_shifted_prover],
-          &consis_check_inst.inst,
+          pairwise_num_instances,
+          pairwise_size,
+          &pairwise_num_proofs,
+          max(8, mem_addr_ts_bits_size),
+          vec![&pairwise_prover, &pairwise_shifted_prover, &addr_ts_bits_prover],
+          &pairwise_check_inst.inst,
           &vars_gens,
           transcript,
           &mut random_tape,
@@ -2036,30 +2034,36 @@ impl SNARK {
       let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
       Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
 
-      (proof, consis_check_challenges)
+      (proof, pairwise_check_challenges)
     };
 
-    // Final evaluation on CONSIS_CHECK
-    let (consis_check_inst_evals, consis_check_r1cs_eval_proof) = {
-      let [_, _, rx, ry] = &consis_check_challenges;
-      let inst = consis_check_inst;
+    // Final evaluation on PAIRWISE_CHECK
+    let (pairwise_check_inst_evals_bound_rp, pairwise_check_inst_evals_list, pairwise_check_r1cs_eval_proof) = {
+      let [rp, _, rx, ry] = pairwise_check_challenges;
       let timer_eval = Timer::new("eval_sparse_polys");
-      let inst_evals = {
-        let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-        Ar.append_to_transcript(b"Ar_claim", transcript);
-        Br.append_to_transcript(b"Br_claim", transcript);
-        Cr.append_to_transcript(b"Cr_claim", transcript);
-        [Ar, Br, Cr]
-      };
+
+      // Per instance evaluation is unsorted
+      let inst_evals_list = pairwise_check_inst_unsorted.inst.multi_evaluate(&rx, &ry);
+      // RP-bound evaluation is sorted
+      let (_, inst_evals_bound_rp) = pairwise_check_inst.inst.multi_evaluate_bound_rp(&rp, &rx, &ry);
       timer_eval.stop();
 
+      for r in &inst_evals_list {
+        r.append_to_transcript(b"ABCr_claim", transcript);
+      }
+      // Sample random combinations of A, B, C for inst_evals_bound_rp check in the Verifier
+      // The random values are not used by the prover, but need to be appended to the transcript
+      let _ = transcript.challenge_scalar(b"challenge_c0");
+      let _ = transcript.challenge_scalar(b"challenge_c1");
+      let _ = transcript.challenge_scalar(b"challenge_c2");
+      
       let r1cs_eval_proof = {
         let proof = R1CSEvalProof::prove(
-          &consis_check_decomm.decomm,
+          &pairwise_check_decomm.decomm,
           &rx,
           &ry,
-          &inst_evals,
-          &consis_check_gens.gens_r1cs_eval,
+          &inst_evals_list,
+          &pairwise_check_gens.gens_r1cs_eval,
           transcript,
           &mut random_tape,
         );
@@ -2069,171 +2073,16 @@ impl SNARK {
         proof
       };
 
-      
-      (inst_evals, r1cs_eval_proof)
+      ([inst_evals_bound_rp.0, inst_evals_bound_rp.1, inst_evals_bound_rp.2], inst_evals_list, r1cs_eval_proof)
     };
-
-    // Correctness of the shift will be handled in PERM_MEM_POLY
+    // Correctness of the shift will be handled in SHIFT_PROOFS
     timer_proof.stop();
-
-    // --
-    // PHY_MEM_ADDR
-    // --
-
-    let phy_mem_addr_proofs = {
-      if total_num_phy_mem_accesses > 0 {
-        // --
-        // PHY_MEM_COHERE
-        // --
-        let timer_proof = Timer::new("Phy Mem Cohere");
-        let (phy_mem_cohere_r1cs_sat_proof, phy_mem_cohere_challenges) = {
-          let (proof, phy_mem_cohere_challenges) = {
-            R1CSProof::prove(
-              1,
-              total_num_phy_mem_accesses,
-              &vec![total_num_phy_mem_accesses],
-              4,
-              vec![&addr_phy_mems_prover, &addr_phy_mems_shifted_prover],
-              &phy_mem_cohere_inst.inst,
-              &vars_gens,
-              transcript,
-              &mut random_tape,
-            )
-          };
-    
-          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-    
-          (proof, phy_mem_cohere_challenges)
-        };
-    
-        // Final evaluation on PHY_MEM_COHERE
-        let (phy_mem_cohere_inst_evals, phy_mem_cohere_r1cs_eval_proof) = {
-          let [_, _, rx, ry] = &phy_mem_cohere_challenges;
-          let inst = phy_mem_cohere_inst;
-          let timer_eval = Timer::new("eval_sparse_polys");
-          let inst_evals = {
-            let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-            Ar.append_to_transcript(b"Ar_claim", transcript);
-            Br.append_to_transcript(b"Br_claim", transcript);
-            Cr.append_to_transcript(b"Cr_claim", transcript);
-            [Ar, Br, Cr]
-          };
-          timer_eval.stop();
-    
-          let r1cs_eval_proof = {
-            let proof = R1CSEvalProof::prove(
-              &phy_mem_cohere_decomm.decomm,
-              &rx,
-              &ry,
-              &inst_evals,
-              &phy_mem_cohere_gens.gens_r1cs_eval,
-              transcript,
-              &mut random_tape,
-            );
-    
-            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-            proof
-          };
-    
-          
-          (inst_evals, r1cs_eval_proof)
-        };
-        timer_proof.stop();
-
-        Some(MemAddrProofs {
-          mem_cohere_r1cs_sat_proof: phy_mem_cohere_r1cs_sat_proof,
-          mem_cohere_inst_evals: phy_mem_cohere_inst_evals,
-          mem_cohere_r1cs_eval_proof: phy_mem_cohere_r1cs_eval_proof,
-        })
-      } else {
-        None
-      }
-    };
-
-    // --
-    // VIR_MEM_ADDR
-    // --
-
-    let vir_mem_addr_proofs = {
-      if total_num_vir_mem_accesses > 0 {
-        // --
-        // VIR_MEM_COHERE
-        // --
-        let timer_proof = Timer::new("Vir Mem Cohere");
-        let (vir_mem_cohere_r1cs_sat_proof, vir_mem_cohere_challenges) = {
-          let (proof, vir_mem_cohere_challenges) = {
-            R1CSProof::prove(
-              1,
-              total_num_vir_mem_accesses,
-              &vec![total_num_vir_mem_accesses],
-              max(8, mem_addr_ts_bits_size),
-              vec![&addr_vir_mems_prover, &addr_vir_mems_shifted_prover, &addr_ts_bits_prover],
-              &vir_mem_cohere_inst.inst,
-              &vars_gens,
-              transcript,
-              &mut random_tape,
-            )
-          };
-    
-          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-          Timer::print(&format!("len_r1cs_sat_proof {:?}", proof_encoded.len()));
-    
-          (proof, vir_mem_cohere_challenges)
-        };
-    
-        // Final evaluation on VIR_MEM_COHERE
-        let (vir_mem_cohere_inst_evals, vir_mem_cohere_r1cs_eval_proof) = {
-          let [_, _, rx, ry] = &vir_mem_cohere_challenges;
-          let inst = vir_mem_cohere_inst;
-          let timer_eval = Timer::new("eval_sparse_polys");
-          let inst_evals = {
-            let (Ar, Br, Cr) = inst.inst.evaluate(rx, ry);
-            Ar.append_to_transcript(b"Ar_claim", transcript);
-            Br.append_to_transcript(b"Br_claim", transcript);
-            Cr.append_to_transcript(b"Cr_claim", transcript);
-            [Ar, Br, Cr]
-          };
-          timer_eval.stop();
-    
-          let r1cs_eval_proof = {
-            let proof = R1CSEvalProof::prove(
-              &vir_mem_cohere_decomm.decomm,
-              &rx,
-              &ry,
-              &inst_evals,
-              &vir_mem_cohere_gens.gens_r1cs_eval,
-              transcript,
-              &mut random_tape,
-            );
-    
-            let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-            Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-            proof
-          };
-    
-          
-          (inst_evals, r1cs_eval_proof)
-        };
-        timer_proof.stop();
-
-        Some(MemAddrProofs {
-          mem_cohere_r1cs_sat_proof: vir_mem_cohere_r1cs_sat_proof,
-          mem_cohere_inst_evals: vir_mem_cohere_inst_evals,
-          mem_cohere_r1cs_eval_proof: vir_mem_cohere_r1cs_eval_proof,
-        })
-      } else {
-        None
-      }
-    };
 
     // --
     // PERM_BLOCK_ROOT, PERM_EXEC_ROOT, MEM_ADDR_ROOT
     // --
-    let perm_size = max(max(consis_num_proofs, total_num_phy_mem_accesses), total_num_vir_mem_accesses);
-
     let timer_proof = Timer::new("Perm Root");
+    let perm_size = max(max(consis_num_proofs, total_num_phy_mem_accesses), total_num_vir_mem_accesses);
     let (perm_root_w1_prover, _) = ProverWitnessSecInfo::merge(vec![&exec_inputs_prover, &block_inputs_prover, &addr_phy_mems_prover, &addr_vir_mems_prover]);
     let (perm_root_w2_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w2_prover, &perm_block_w2_prover, &phy_mem_addr_w2_prover, &vir_mem_addr_w2_prover]);
     let (perm_root_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &perm_block_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover]);
@@ -2444,16 +2293,14 @@ impl SNARK {
       block_inst_evals_list,
       block_r1cs_eval_proof,
 
-      consis_check_r1cs_sat_proof,
-      consis_check_inst_evals,
-      consis_check_r1cs_eval_proof,
+      pairwise_check_r1cs_sat_proof,
+      pairwise_check_inst_evals_bound_rp,
+      pairwise_check_inst_evals_list,
+      pairwise_check_r1cs_eval_proof,
 
       perm_root_r1cs_sat_proof,
       perm_root_inst_evals,
       perm_root_r1cs_eval_proof,
-      
-      phy_mem_addr_proofs,
-      vir_mem_addr_proofs,
 
       perm_poly_poly_list,
       proof_eval_perm_poly_prod_list,
@@ -2495,23 +2342,15 @@ impl SNARK {
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
-    consis_check_num_cons: usize,
-    consis_check_comm: &ComputationCommitment,
-    consis_check_gens: &SNARKGens,
+    total_num_phy_mem_accesses: usize,
+    total_num_vir_mem_accesses: usize,
+    pairwise_check_num_cons: usize,
+    pairwise_check_comm: &ComputationCommitment,
+    pairwise_check_gens: &SNARKGens,
 
     perm_root_num_cons: usize,
     perm_root_comm: &ComputationCommitment,
     perm_root_gens: &SNARKGens,
-
-    total_num_phy_mem_accesses: usize,
-    phy_mem_cohere_num_cons: usize,
-    phy_mem_cohere_comm: &ComputationCommitment,
-    phy_mem_cohere_gens: &SNARKGens,
-
-    total_num_vir_mem_accesses: usize,
-    vir_mem_cohere_num_cons: usize,
-    vir_mem_cohere_comm: &ComputationCommitment,
-    vir_mem_cohere_gens: &SNARKGens,
 
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
@@ -2567,10 +2406,8 @@ impl SNARK {
 
       // append a commitment to the computation to the transcript
       block_comm.comm.append_to_transcript(b"block_comm", transcript);
-      consis_check_comm.comm.append_to_transcript(b"consis_comm", transcript);
+      pairwise_check_comm.comm.append_to_transcript(b"pairwise_comm", transcript);
       perm_root_comm.comm.append_to_transcript(b"perm_comm", transcript);
-      phy_mem_cohere_comm.comm.append_to_transcript(b"mem_comm", transcript);
-      vir_mem_cohere_comm.comm.append_to_transcript(b"mem_comm", transcript);
 
       // Commit io
       input_block_num.append_to_transcript(b"input_block_num", transcript);
@@ -2602,10 +2439,26 @@ impl SNARK {
     let inst_sorter = &inst_sorter[..block_num_instances];
     let mut block_num_proofs: Vec<usize> = inst_sorter.iter().map(|i| i.num_exec).collect();
     // index[i] = j => the original jth entry should now be at the ith position
-    let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
-    let block_num_vars: Vec<usize> = (0..block_num_instances).map(|i| block_num_vars[index[i]]).collect();
-    let block_num_phy_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_phy_ops[index[i]]).collect();
-    let block_num_vir_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_vir_ops[index[i]]).collect();
+    let block_index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
+    let block_num_vars: Vec<usize> = (0..block_num_instances).map(|i| block_num_vars[block_index[i]]).collect();
+    let block_num_phy_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_phy_ops[block_index[i]]).collect();
+    let block_num_vir_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_vir_ops[block_index[i]]).collect();
+
+    // --
+    // PAIRWISE SORT
+    // --
+    // Sort the pairwise instances: CONSIS_CHECK, PHY_MEM_COHERE
+    let mut inst_sorter = Vec::new();
+    inst_sorter.push(InstanceSortHelper::new(consis_num_proofs, 0));
+    inst_sorter.push(InstanceSortHelper::new(total_num_phy_mem_accesses, 0));
+    inst_sorter.push(InstanceSortHelper::new(total_num_vir_mem_accesses, 0));
+    // Sort from high -> low
+    inst_sorter.sort_by(|a, b| b.cmp(a));
+
+    let pairwise_num_instances = 1 + if total_num_phy_mem_accesses > 0 { 1 } else { 0 } + if total_num_vir_mem_accesses > 0 { 1 } else { 0 };
+    let inst_sorter = &inst_sorter[..pairwise_num_instances];
+    // index[i] = j => the original jth entry should now be at the ith position
+    let pairwise_index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
 
     // --
     // PADDING
@@ -2885,7 +2738,7 @@ impl SNARK {
         transcript,
       )?;
       // Permute block_inst_evals_list to the correct order for RP evaluation
-      let ABC_evals: Vec<Scalar> = (0..block_num_instances).map(|i| ABC_evals[index[i]]).collect();
+      let ABC_evals: Vec<Scalar> = (0..block_num_instances).map(|i| ABC_evals[block_index[i]]).collect();
       // Verify that block_inst_evals_bound_rp is block_inst_evals_list bind rp
       assert_eq!(DensePolynomial::new(ABC_evals).evaluate(&rp), 
         c0 * self.block_inst_evals_bound_rp[0] + c1 * self.block_inst_evals_bound_rp[1] + c2 * self.block_inst_evals_bound_rp[2]
@@ -2894,128 +2747,65 @@ impl SNARK {
     }
 
     // --
-    // CONSIS_CHECK
+    // PAIRWISE_CHECK
     // --
     {
-      let timer_sat_proof = Timer::new("Consis Check Sat");
-      let consis_check_challenges = self.consis_check_r1cs_sat_proof.verify(
-        1,
-        consis_num_proofs,
-        &vec![consis_num_proofs],
-        8,
-        vec![&perm_exec_w3_verifier, &perm_exec_w3_shifted_verifier],
-        consis_check_num_cons,
+      let timer_sat_proof = Timer::new("Pairwise Check Sat");
+
+      let pairwise_size = max(max(consis_num_proofs, total_num_phy_mem_accesses), total_num_vir_mem_accesses);
+      let (pairwise_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_verifier, &addr_phy_mems_verifier, &addr_vir_mems_verifier]);
+      let (pairwise_shifted_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_verifier, &addr_phy_mems_shifted_verifier, &addr_vir_mems_shifted_verifier]);
+      let (addr_ts_bits_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_verifier, &addr_phy_mems_verifier, &addr_ts_bits_verifier]);
+      let pairwise_num_instances = pairwise_verifier.num_proofs.len();
+      let mut pairwise_num_proofs: Vec<usize> = pairwise_verifier.num_proofs.clone();
+      pairwise_num_proofs.extend(vec![1; pairwise_num_instances.next_power_of_two() - pairwise_num_instances]);
+
+      let pairwise_check_challenges = self.pairwise_check_r1cs_sat_proof.verify(
+        pairwise_num_instances,
+        pairwise_size,
+        &pairwise_num_proofs,
+        max(8, mem_addr_ts_bits_size),
+        vec![&pairwise_verifier, &pairwise_shifted_verifier, &addr_ts_bits_verifier],
+        pairwise_check_num_cons,
         &vars_gens,
-        &self.consis_check_inst_evals,
+        &self.pairwise_check_inst_evals_bound_rp,
         transcript,
       )?;
       timer_sat_proof.stop();
 
       let timer_eval_proof = Timer::new("Consis Check Eval");
       // Verify Evaluation on CONSIS_CHECK
-      let [Ar, Br, Cr] = &self.consis_check_inst_evals;
-      Ar.append_to_transcript(b"Ar_claim", transcript);
-      Br.append_to_transcript(b"Br_claim", transcript);
-      Cr.append_to_transcript(b"Cr_claim", transcript);
-      let [_, _, rx, ry] = &consis_check_challenges;
-      self.consis_check_r1cs_eval_proof.verify(
-        &consis_check_comm.comm,
-        rx,
-        ry,
-        &self.consis_check_inst_evals,
-        &consis_check_gens.gens_r1cs_eval,
+      let [rp, _, rx, ry] = pairwise_check_challenges;
+      
+      for r in &self.pairwise_check_inst_evals_list {
+        r.append_to_transcript(b"ABCr_claim", transcript);
+      }
+      // Sample random combinations of A, B, C for inst_evals_bound_rp check
+      let c0 = transcript.challenge_scalar(b"challenge_c0");
+      let c1 = transcript.challenge_scalar(b"challenge_c1");
+      let c2 = transcript.challenge_scalar(b"challenge_c2");
+
+      let ABC_evals: Vec<Scalar> = (0..3).map(|i| 
+        c0 * self.pairwise_check_inst_evals_list[3 * i] + c1 * self.pairwise_check_inst_evals_list[3 * i + 1] + c2 * self.pairwise_check_inst_evals_list[3 * i + 2]
+      ).collect();
+
+      self.pairwise_check_r1cs_eval_proof.verify(
+        &pairwise_check_comm.comm,
+        &rx,
+        &ry,
+        &self.pairwise_check_inst_evals_list,
+        &pairwise_check_gens.gens_r1cs_eval,
         transcript,
       )?;
-
-      // Correctness of the shift will be handled in PERM_MEM_POLY
+      // Permute pairwise_check_inst_evals_list to the correct order for RP evaluation
+      let ABC_evals: Vec<Scalar> = (0..pairwise_num_instances).map(|i| ABC_evals[pairwise_index[i]]).collect();
+      // Verify that pairwise_check_inst_evals_bound_rp is pairwise_check_inst_evals_list bind rp
+      assert_eq!(DensePolynomial::new(ABC_evals).evaluate(&rp), 
+        c0 * self.pairwise_check_inst_evals_bound_rp[0] + c1 * self.pairwise_check_inst_evals_bound_rp[1] + c2 * self.pairwise_check_inst_evals_bound_rp[2]
+      );
+      // Correctness of the shift will be handled in SHIFT_PROOFS
       timer_eval_proof.stop();
     };
-
-    // --
-    // PHY_MEM_ADDR
-    // --
-    if total_num_phy_mem_accesses > 0 {
-      let phy_mem_addr_proofs = self.phy_mem_addr_proofs.as_ref().unwrap();
-
-      // --
-      // PHY_MEM_COHERE
-      // --
-      {
-        let timer_sat_proof = Timer::new("Phy Mem Cohere Sat");
-        let phy_mem_cohere_challenges = phy_mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify(
-          1,
-          total_num_phy_mem_accesses,
-          &vec![total_num_phy_mem_accesses],
-          4,
-          vec![&addr_phy_mems_verifier, &addr_phy_mems_shifted_verifier],
-          phy_mem_cohere_num_cons,
-          &vars_gens,
-          &phy_mem_addr_proofs.mem_cohere_inst_evals,
-          transcript,
-        )?;
-        timer_sat_proof.stop();
-
-        let timer_eval_proof = Timer::new("Phy Mem Cohere Eval");
-        // Verify Evaluation on PHY_MEM_COHERE
-        let [Ar, Br, Cr] = &phy_mem_addr_proofs.mem_cohere_inst_evals;
-        Ar.append_to_transcript(b"Ar_claim", transcript);
-        Br.append_to_transcript(b"Br_claim", transcript);
-        Cr.append_to_transcript(b"Cr_claim", transcript);
-        let [_, _, rx, ry] = &phy_mem_cohere_challenges;
-        phy_mem_addr_proofs.mem_cohere_r1cs_eval_proof.verify(
-          &phy_mem_cohere_comm.comm,
-          rx,
-          ry,
-          &phy_mem_addr_proofs.mem_cohere_inst_evals,
-          &phy_mem_cohere_gens.gens_r1cs_eval,
-          transcript,
-        )?;
-        timer_eval_proof.stop();
-      };
-    }
-
-    // --
-    // VIR_MEM_ADDR
-    // --
-    if total_num_vir_mem_accesses > 0 {
-      let vir_mem_addr_proofs = self.vir_mem_addr_proofs.as_ref().unwrap();
-
-      // --
-      // VIR_MEM_COHERE
-      // --
-      {
-        let timer_sat_proof = Timer::new("Vir Mem Cohere Sat");
-        let vir_mem_cohere_challenges = vir_mem_addr_proofs.mem_cohere_r1cs_sat_proof.verify(
-          1,
-          total_num_vir_mem_accesses,
-          &vec![total_num_vir_mem_accesses],
-          max(8, mem_addr_ts_bits_size),
-          vec![&addr_vir_mems_verifier, &addr_vir_mems_shifted_verifier, &addr_ts_bits_verifier],
-          vir_mem_cohere_num_cons,
-          &vars_gens,
-          &vir_mem_addr_proofs.mem_cohere_inst_evals,
-          transcript,
-        )?;
-        timer_sat_proof.stop();
-
-        let timer_eval_proof = Timer::new("Vir Mem Cohere Eval");
-        // Verify Evaluation on PHY_MEM_COHERE
-        let [Ar, Br, Cr] = &vir_mem_addr_proofs.mem_cohere_inst_evals;
-        Ar.append_to_transcript(b"Ar_claim", transcript);
-        Br.append_to_transcript(b"Br_claim", transcript);
-        Cr.append_to_transcript(b"Cr_claim", transcript);
-        let [_, _, rx, ry] = &vir_mem_cohere_challenges;
-        vir_mem_addr_proofs.mem_cohere_r1cs_eval_proof.verify(
-          &vir_mem_cohere_comm.comm,
-          rx,
-          ry,
-          &vir_mem_addr_proofs.mem_cohere_inst_evals,
-          &vir_mem_cohere_gens.gens_r1cs_eval,
-          transcript,
-        )?;
-        timer_eval_proof.stop();
-      };
-    }
 
     // --
     // PERM_BLOCK_ROOT, PERM_EXEC_ROOT, MEM_ADDR_ROOT
