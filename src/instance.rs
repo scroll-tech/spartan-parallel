@@ -208,9 +208,10 @@ impl Instance {
   /// Verify the correctness of each block execution, as well as extracting all memory operations
   /// 
   /// Input composition: (if every segment exists)
-  ///    INPUT                     VAR                 Challenges           INPUT_W2              INPUT_W3      INPUT_W3_SHIFTED       PHY_W2            PHY_W3        PHY_W3_SHIFTED         VIR_W2                    VIR_W3        VIR_W3_SHIFTED
-  ///  0   1   2  |   0   1   2   3   4   5   6   |  0   1   2   3   |  0   1   2   3   4   |  0   1   2   3  |  0   1   2   3  |  0   1   2   3  |  0   1   2   3  |  0   1   2   3  |  0   1   2   3   4       |  0   1   2   3  |  0   1   2   3  |
-  ///  v  i0  ... |   w  PA0 PD0 ... VA0 VD0 ...  |  tau r  r^2 ...  |  _   _  ZO r*i1 ...  |  v   x  pi   D  |  v   x  pi   D  |  MR  MC  MR ... |  v   x  pi   D  |  v   x  pi   D  | MR1 MR2 MR3 MC  MR1 ...  |  v   x  pi   D  |  v   x  pi   D  |
+  ///    INPUT                     VAR                 Challenges           INPUT_W2               PHY_W2            VIR_W2                                    BLOCK_W3                                       BLOCK_W3_SHIFTED
+  ///  0   1   2  |   0   1   2   3   4   5   6   |  0   1   2   3   |  0   1   2   3   4   |  0   1   2   3  |  0   1   2   3   4       |  0   1   2   3   4   5   6   7   8   9  10  11   |  0   1   2   3   4   5   6   7   8   9  10  11
+  ///  v  i0  ... |   w  PA0 PD0 ... VA0 VD0 ...  |  tau r  r^2 ...  |  _   _  ZO r*i1 ...  |  MR  MC  MR ... | MR1 MR2 MR3 MC  MR1 ...  |  v   x  pi   D   v   x  pi   D   v   x  pi   D   |  v   x  pi   D   v   x  pi   D   v   x  pi   D
+  ///                                                                                                                                           INPUT            PHY             VIR               INPUT            PHY             VIR
   /// 
   /// VAR:
   /// We assume that the witnesses are of the following format:
@@ -274,41 +275,37 @@ impl Instance {
     // in INPUT_W2
     let V_input_dot_prod = |i: usize| if i == 0 { V_input(0) } else { 3 * num_vars + 2 + i };
     let V_output_dot_prod = |i: usize| 3 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
-    // in INPUT_W3
-    let V_v = 4 * num_vars;
-    let V_x = 4 * num_vars + 1;
-    let V_pi = 4 * num_vars + 2;
-    let V_d = 4 * num_vars + 3;
-    // in INPUT_W3_SHIFTED
-    let V_sv = 5 * num_vars;
-    let V_spi = 5 * num_vars + 2;
     // in PHY_W2
-    let V_PMR = |i: usize| 6 * num_vars + 2 * i;
-    let V_PMC = |i: usize| 6 * num_vars + 2 * i + 1;
-    // in PHY_W3
-    let V_Pv = 7 * num_vars;
-    let V_Px = 7 * num_vars + 1;
-    let V_Pp = 7 * num_vars + 2;
-    let V_Pd = 7 * num_vars + 3;
-    // in PHY_W3_SHIFTED
-    let V_Psv = 8 * num_vars;
-    let V_Psp = 8 * num_vars + 2;
+    let V_PMR = |i: usize| 4 * num_vars + 2 * i;
+    let V_PMC = |i: usize| 4 * num_vars + 2 * i + 1;
     // in VIR_W2
-    let VIR_W2_OFFSET = if has_phy_ops { 9 * num_vars } else { 6 * num_vars };
+    let VIR_W2_OFFSET = 4 * num_vars + if has_phy_ops { num_vars } else { 0 };
     let V_VMR1 = |i: usize| VIR_W2_OFFSET + 4 * i;
     let V_VMR2 = |i: usize| VIR_W2_OFFSET + 4 * i + 1;
     let V_VMR3 = |i: usize| VIR_W2_OFFSET + 4 * i + 2;
     let V_VMC = |i: usize| VIR_W2_OFFSET + 4 * i + 3;
-    // in VIR_W3
-    let VIR_W3_OFFSET = if has_phy_ops { 10 * num_vars } else { 7 * num_vars };
-    let V_Vv = VIR_W3_OFFSET;
-    let V_Vx = VIR_W3_OFFSET + 1;
-    let V_Vp = VIR_W3_OFFSET + 2;
-    let V_Vd = VIR_W3_OFFSET + 3;
-    // in VIR_W3_SHIFTED
-    let VIR_W3_SHIFTED_OFFSET = if has_phy_ops { 11 * num_vars } else { 8 * num_vars };
-    let V_Vsv = VIR_W3_SHIFTED_OFFSET;
-    let V_Vsp = VIR_W3_SHIFTED_OFFSET + 2;
+    // in BLOCK_W3
+    let BLOCK_W3_OFFSET = 4 * num_vars + if has_phy_ops { num_vars } else { 0 } + if has_vir_ops { num_vars } else { 0 };
+    let V_v = BLOCK_W3_OFFSET;
+    let V_x = BLOCK_W3_OFFSET + 1;
+    let V_pi = BLOCK_W3_OFFSET + 2;
+    let V_d = BLOCK_W3_OFFSET + 3;
+    let V_Pv = BLOCK_W3_OFFSET + 4;
+    let V_Px = BLOCK_W3_OFFSET + 5;
+    let V_Pp = BLOCK_W3_OFFSET + 6;
+    let V_Pd = BLOCK_W3_OFFSET + 7;
+    let V_Vv = BLOCK_W3_OFFSET + 8;
+    let V_Vx = BLOCK_W3_OFFSET + 9;
+    let V_Vp = BLOCK_W3_OFFSET + 10;
+    let V_Vd = BLOCK_W3_OFFSET + 11;
+    // in BLOCK_W3_SHIFTED
+    let BLOCK_W3_SHIFTED_OFFSET = 5 * num_vars + if has_phy_ops { num_vars } else { 0 } + if has_vir_ops { num_vars } else { 0 };
+    let V_sv = BLOCK_W3_SHIFTED_OFFSET;
+    let V_spi = BLOCK_W3_SHIFTED_OFFSET + 2;
+    let V_Psv = BLOCK_W3_SHIFTED_OFFSET + 4;
+    let V_Psp = BLOCK_W3_SHIFTED_OFFSET + 6;
+    let V_Vsv = BLOCK_W3_SHIFTED_OFFSET + 8;
+    let V_Vsp = BLOCK_W3_SHIFTED_OFFSET + 10;
 
     for b in 0..num_instances {
       let arg = &args[b];
@@ -489,12 +486,7 @@ impl Instance {
     }
     block_num_cons = block_num_cons.next_power_of_two();
     
-    let block_num_vars = match (has_phy_ops, has_vir_ops) {
-      (false, false) => 8 * num_vars,
-      (false, true) => 16 * num_vars,
-      (true, false) => 16 * num_vars,
-      (true, true) => 16 * num_vars,
-    };
+    let block_num_vars = 8 * num_vars;
 
     let block_inst = Instance::new(num_instances, block_num_cons, block_num_vars, &A_list, &B_list, &C_list).unwrap();
     (block_num_vars, block_num_cons, block_num_non_zero_entries, block_inst)
