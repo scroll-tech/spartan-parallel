@@ -380,13 +380,8 @@ impl ShiftProofs {
 // Information regarding one witness sec
 #[derive(Clone)]
 struct ProverWitnessSecInfo {
-  // Does it have just one copy across all blocks?
-  is_single: bool,
-  // Does it have only one copy per block? A single witness sect must also be short
-  is_short: bool,
   // Number of inputs per block
   num_inputs: Vec<usize>,
-
   // num_instances x num_proofs x num_inputs hypermatrix for all values
   w_mat: Vec<Vec<Vec<Scalar>>>,
   // One dense polynomial per instance
@@ -395,10 +390,7 @@ struct ProverWitnessSecInfo {
 
 impl ProverWitnessSecInfo {
   fn new(w_mat: Vec<Vec<Vec<Scalar>>>, poly_w: Vec<DensePolynomial>) -> ProverWitnessSecInfo {
-    let is_short = w_mat.iter().fold(true, |a, b| a && b.len() == 1);
     ProverWitnessSecInfo {
-      is_single: w_mat.len() == 1 && is_short,
-      is_short,
       num_inputs: w_mat.iter().map(|i| i[0].len()).collect(),
       w_mat,
       poly_w,
@@ -407,26 +399,36 @@ impl ProverWitnessSecInfo {
 
   fn dummy() -> ProverWitnessSecInfo {
     ProverWitnessSecInfo {
-      is_single: false,
-      is_short: false,
       num_inputs: Vec::new(),
       w_mat: Vec::new(),
       poly_w: Vec::new(),
     }
   }
 
+  // Concatenate the components in the given order to a new prover witness sec
+  fn concat(components: Vec<&ProverWitnessSecInfo>) -> ProverWitnessSecInfo {
+    let mut num_inputs = Vec::new();
+    let mut w_mat = Vec::new();
+    let mut poly_w = Vec::new();
+
+    for c in components {
+      num_inputs.extend(c.num_inputs.clone());
+      w_mat.extend(c.w_mat.clone());
+      poly_w.extend(c.poly_w.clone());
+    }
+
+    ProverWitnessSecInfo {
+      num_inputs,
+      w_mat,
+      poly_w,
+    }
+  }
+
   // Merge multiple ProverWitnessSec, sort them by decreasing number of proofs
   // Assume all components are sorted
   // Returns: 1. the merged ProverWitnessSec, 
-  //          2. for each instance in the merged ProverWitnessSec, the component it orignally belong to
+  //          2. for each instance in the merged ProverWitnessSec, the component it orignally belongs to
   fn merge(components: Vec<&ProverWitnessSecInfo>) -> (ProverWitnessSecInfo, Vec<usize>) {
-    // No component should be single
-    let is_single = false;
-    for i in 0..components.len() {
-      assert_eq!(components[i].is_single, is_single);
-    }
-    // Unless all components are short, the merged section is not short
-    let is_short = components.iter().fold(true, |s, i| s && i.is_short);
     // Merge algorithm with pointer on each component
     let mut pointers = vec![0; components.len()];
     let merged_size = components.iter().fold(0, |a, b| a + b.num_inputs.len());
@@ -458,8 +460,6 @@ impl ProverWitnessSecInfo {
 
     (
       ProverWitnessSecInfo {
-        is_single,
-        is_short,
         num_inputs: merged_num_inputs,
         w_mat: merged_w_mat,
         poly_w: merged_poly_w,
@@ -472,13 +472,8 @@ impl ProverWitnessSecInfo {
 // Information regarding one witness sec
 #[derive(Clone)]
 struct VerifierWitnessSecInfo {
-  // Does it have just one copy across all blocks?
-  is_single: bool,
-  // Does it have only one copy per block? A single witness sect must also be short
-  is_short: bool,
   // Number of inputs per block
   num_inputs: Vec<usize>,
-
   // Number of proofs per block, used by merge
   num_proofs: Vec<usize>,
   // One commitment per instance
@@ -487,11 +482,9 @@ struct VerifierWitnessSecInfo {
 
 impl VerifierWitnessSecInfo {
   // Unfortunately, cannot obtain all metadata from the commitment
-  fn new(is_short: bool, num_inputs: Vec<usize>, num_proofs: &Vec<usize>, comm_w: &Vec<PolyCommitment>) -> VerifierWitnessSecInfo {
+  fn new(num_inputs: Vec<usize>, num_proofs: &Vec<usize>, comm_w: &Vec<PolyCommitment>) -> VerifierWitnessSecInfo {
     assert!(comm_w.len() == 0 || (num_inputs.len() == comm_w.len() && num_proofs.len() >= comm_w.len()));
     VerifierWitnessSecInfo {
-      is_single: comm_w.len() == 1 && is_short,
-      is_short,
       num_inputs,
       num_proofs: num_proofs[..comm_w.len()].to_vec(),
       comm_w: comm_w.clone(),
@@ -500,11 +493,28 @@ impl VerifierWitnessSecInfo {
 
   fn dummy() -> VerifierWitnessSecInfo {
     VerifierWitnessSecInfo {
-      is_single: false,
-      is_short: false,
       num_inputs: Vec::new(),
       num_proofs: Vec::new(),
       comm_w: Vec::new(),
+    }
+  }
+
+  // Concatenate the components in the given order to a new verifier witness sec
+  fn concat(components: Vec<&VerifierWitnessSecInfo>) -> VerifierWitnessSecInfo {
+    let mut num_inputs = Vec::new();
+    let mut num_proofs = Vec::new();
+    let mut comm_w = Vec::new();
+
+    for c in components {
+      num_inputs.extend(c.num_inputs.clone());
+      num_proofs.extend(c.num_proofs.clone());
+      comm_w.extend(c.comm_w.clone());
+    }
+
+    VerifierWitnessSecInfo {
+      num_inputs,
+      num_proofs,
+      comm_w,
     }
   }
 
@@ -513,13 +523,6 @@ impl VerifierWitnessSecInfo {
   // Returns: 1. the merged VerifierWitnessSec, 
   //          2. for each instance in the merged VerifierWitnessSec, the component it orignally belong to
   fn merge(components: Vec<&VerifierWitnessSecInfo>) -> (VerifierWitnessSecInfo, Vec<usize>) {
-    // No component should be single
-    let is_single = false;
-    for i in 0..components.len() {
-      assert_eq!(components[i].is_single, is_single);
-    }
-    // Unless all components are short, the merged section is not short
-    let is_short = components.iter().fold(true, |s, i| s && i.is_short);
     // Merge algorithm with pointer on each component
     let mut pointers = vec![0; components.len()];
     let merged_size = components.iter().fold(0, |a, b| a + b.num_inputs.len());
@@ -551,8 +554,6 @@ impl VerifierWitnessSecInfo {
 
     (
       VerifierWitnessSecInfo {
-        is_single,
-        is_short,
         num_inputs: merged_num_inputs,
         num_proofs: merged_num_proofs,
         comm_w: merged_comm_w,
@@ -1927,9 +1928,17 @@ impl SNARK {
     // --
     let timer_proof = Timer::new("Pairwise Check");
     let pairwise_size = max(max(consis_num_proofs, total_num_phy_mem_accesses), total_num_vir_mem_accesses);
-    let (pairwise_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &addr_phy_mems_prover, &addr_vir_mems_prover]);
+    let (pairwise_prover, inst_map) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &addr_phy_mems_prover, &addr_vir_mems_prover]);
     let (pairwise_shifted_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_prover, &addr_phy_mems_shifted_prover, &addr_vir_mems_shifted_prover]);
-    let (addr_ts_bits_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &addr_phy_mems_prover, &addr_ts_bits_prover]);
+    let addr_ts_bits_prover = {
+      let mut components = vec![&perm_w0_prover; inst_map.len()];
+      for i in 0..inst_map.len() {
+        if inst_map[i] == 2 {
+          components[i] = &addr_ts_bits_prover;
+        }
+      }
+      ProverWitnessSecInfo::concat(components)
+    };
     let pairwise_num_instances = pairwise_prover.w_mat.len();
     let mut pairwise_num_proofs: Vec<usize> = pairwise_prover.w_mat.iter().map(|i| i.len()).collect();
     pairwise_num_proofs.extend(vec![1; pairwise_num_instances.next_power_of_two() - pairwise_num_instances]);
@@ -2069,19 +2078,30 @@ impl SNARK {
     let timer_proof = Timer::new("Perm Product");
     // Record the prod of exec, blocks, mem_block, & mem_addr
     let (perm_poly_poly_list, proof_eval_perm_poly_prod_list) = {
-      //                                                                                                                   INPUT_EXEC           INPUT_BLOCK       PHY_MEM_BLOCK     VIR_MEM_BLOCK     PHY_MEM_ADDR             VIR_MEM_ADDR
-      let (perm_poly_w3_prover, inst_map) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &block_w3_prover, &block_w3_prover, &block_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover]);
+      let (perm_poly_w3_prover, inst_map) = {
+        //                                                    INPUT_EXEC           PHY_MEM_ADDR             VIR_MEM_ADDR             INPUT_BLOCK
+        let mut components = vec![&perm_exec_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover, &block_w3_prover];
+        if max_block_num_phy_ops > 0 {
+          components.push(&block_w3_prover);
+        }
+        if max_block_num_vir_ops > 0 {
+          components.push(&block_w3_prover);
+        }
+        ProverWitnessSecInfo::merge(components)
+      };
+      let pm_bl_id = 4;
+      let vm_bl_id = if max_block_num_phy_ops > 0 { 5 } else { 4 };
       // PHY_MEM_BLOCK takes r = 6, VIR_MEM_BLOCK takes r = 10, everything else takes r = 2
       let perm_poly_poly_list: Vec<Scalar> = (0..inst_map.len()).map(|i| {
           let p = &perm_poly_w3_prover.poly_w[i];
           let i = inst_map[i];
-          if i == 2 { p[6] } else if i == 3 { p[10] } else { p[2] }
+          if i == vm_bl_id { p[10] } else if i == pm_bl_id { p[6] } else { p[2] }
         }
       ).collect();
       let two_b = vec![ONE, ZERO];
       let six_b = vec![ONE, ONE, ZERO];
       let ten_b = vec![ONE, ZERO, ONE, ZERO];
-      let r_list: Vec<&Vec<Scalar>> = inst_map.iter().map(|i| if *i == 2 { &six_b } else if *i == 3 { &ten_b } else { &two_b }).collect();
+      let r_list: Vec<&Vec<Scalar>> = inst_map.iter().map(|i| if *i == vm_bl_id { &ten_b } else if *i == pm_bl_id { &six_b } else { &two_b }).collect();
       let proof_eval_perm_poly_prod_list = PolyEvalProof::prove_batched_instances(
         &perm_poly_w3_prover.poly_w,
         None,
@@ -2410,9 +2430,9 @@ impl SNARK {
       }
       self.exec_comm_inputs[0].append_to_transcript(b"poly_commitment", transcript);
       (
-        VerifierWitnessSecInfo::new(false, block_num_vars, &block_num_proofs, &self.block_comm_vars_list),
-        VerifierWitnessSecInfo::new(false, vec![num_ios; block_num_instances], &block_num_proofs, &self.block_comm_inputs_list),
-        VerifierWitnessSecInfo::new(false, vec![num_ios], &vec![consis_num_proofs], &self.exec_comm_inputs),
+        VerifierWitnessSecInfo::new(block_num_vars, &block_num_proofs, &self.block_comm_vars_list),
+        VerifierWitnessSecInfo::new(vec![num_ios; block_num_instances], &block_num_proofs, &self.block_comm_inputs_list),
+        VerifierWitnessSecInfo::new(vec![num_ios], &vec![consis_num_proofs], &self.exec_comm_inputs),
       )
     };
 
@@ -2424,8 +2444,8 @@ impl SNARK {
         self.addr_comm_phy_mems[0].append_to_transcript(b"poly_commitment", transcript);
         self.addr_comm_phy_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         (
-          VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_phy_mem_accesses], &self.addr_comm_phy_mems),
-          VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_phy_mem_accesses], &self.addr_comm_phy_mems_shifted)
+          VerifierWitnessSecInfo::new(vec![4], &vec![total_num_phy_mem_accesses], &self.addr_comm_phy_mems),
+          VerifierWitnessSecInfo::new(vec![4], &vec![total_num_phy_mem_accesses], &self.addr_comm_phy_mems_shifted)
         )
       } else {
         (
@@ -2445,9 +2465,9 @@ impl SNARK {
         self.addr_comm_vir_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         self.addr_comm_ts_bits[0].append_to_transcript(b"poly_commitment", transcript);
         (
-          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems),
-          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems_shifted),
-          VerifierWitnessSecInfo::new(false, vec![mem_addr_ts_bits_size], &vec![total_num_vir_mem_accesses], &self.addr_comm_ts_bits)
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems),
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems_shifted),
+          VerifierWitnessSecInfo::new(vec![mem_addr_ts_bits_size], &vec![total_num_vir_mem_accesses], &self.addr_comm_ts_bits)
         )
       } else {
         (
@@ -2503,7 +2523,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           self.phy_mem_block_comm_w2_list[p].append_to_transcript(b"poly_commitment", transcript);
         }
-        VerifierWitnessSecInfo::new(false, phy_mem_block_w2_size_list, &block_num_proofs, &self.phy_mem_block_comm_w2_list)
+        VerifierWitnessSecInfo::new(phy_mem_block_w2_size_list, &block_num_proofs, &self.phy_mem_block_comm_w2_list)
       } else {
         VerifierWitnessSecInfo::dummy()
       };
@@ -2513,7 +2533,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           self.vir_mem_block_comm_w2_list[p].append_to_transcript(b"poly_commitment", transcript);
         }
-        VerifierWitnessSecInfo::new(false, vir_mem_block_w2_size_list, &block_num_proofs, &self.vir_mem_block_comm_w2_list)
+        VerifierWitnessSecInfo::new(vir_mem_block_w2_size_list, &block_num_proofs, &self.vir_mem_block_comm_w2_list)
       } else {
         VerifierWitnessSecInfo::dummy()
       };
@@ -2523,15 +2543,15 @@ impl SNARK {
         self.block_comm_w3_list_shifted[p].append_to_transcript(b"poly_commitment", transcript);
       }
       (
-        VerifierWitnessSecInfo::new(true, vec![num_ios], &vec![1], &vec![perm_comm_w0]),
-        VerifierWitnessSecInfo::new(false, vec![num_ios], &vec![consis_num_proofs], &self.perm_exec_comm_w2_list),
-        VerifierWitnessSecInfo::new(false, vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_list),
-        VerifierWitnessSecInfo::new(false, vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_shifted),
-        VerifierWitnessSecInfo::new(false, vec![num_ios; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w2_list),
+        VerifierWitnessSecInfo::new(vec![num_ios], &vec![1], &vec![perm_comm_w0]),
+        VerifierWitnessSecInfo::new(vec![num_ios], &vec![consis_num_proofs], &self.perm_exec_comm_w2_list),
+        VerifierWitnessSecInfo::new(vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_list),
+        VerifierWitnessSecInfo::new(vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_shifted),
+        VerifierWitnessSecInfo::new(vec![num_ios; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w2_list),
         phy_mem_block_w2_verifier,
         vir_mem_block_w2_verifier,
-        VerifierWitnessSecInfo::new(false, vec![16; block_num_instances], &block_num_proofs.clone(), &self.block_comm_w3_list),
-        VerifierWitnessSecInfo::new(false, vec![16; block_num_instances], &block_num_proofs.clone(), &self.block_comm_w3_list_shifted),
+        VerifierWitnessSecInfo::new(vec![16; block_num_instances], &block_num_proofs.clone(), &self.block_comm_w3_list),
+        VerifierWitnessSecInfo::new(vec![16; block_num_instances], &block_num_proofs.clone(), &self.block_comm_w3_list_shifted),
       )
     };
 
@@ -2545,9 +2565,9 @@ impl SNARK {
         self.phy_mem_addr_comm_w3[0].append_to_transcript(b"poly_commitment", transcript);
         self.phy_mem_addr_comm_w3_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         (
-          VerifierWitnessSecInfo::new(false, vec![4], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w2),
-          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w3),
-          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w3_shifted),
+          VerifierWitnessSecInfo::new(vec![4], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w2),
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w3),
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w3_shifted),
         )
       } else {
         (
@@ -2568,9 +2588,9 @@ impl SNARK {
         self.vir_mem_addr_comm_w3[0].append_to_transcript(b"poly_commitment", transcript);
         self.vir_mem_addr_comm_w3_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         (
-          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w2),
-          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w3),
-          VerifierWitnessSecInfo::new(false, vec![8], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w3_shifted),
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w2),
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w3),
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w3_shifted),
         )
       } else {
         (
@@ -2644,9 +2664,17 @@ impl SNARK {
       let timer_sat_proof = Timer::new("Pairwise Check Sat");
 
       let pairwise_size = max(max(consis_num_proofs, total_num_phy_mem_accesses), total_num_vir_mem_accesses);
-      let (pairwise_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_verifier, &addr_phy_mems_verifier, &addr_vir_mems_verifier]);
+      let (pairwise_verifier, inst_map) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_verifier, &addr_phy_mems_verifier, &addr_vir_mems_verifier]);
       let (pairwise_shifted_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_verifier, &addr_phy_mems_shifted_verifier, &addr_vir_mems_shifted_verifier]);
-      let (addr_ts_bits_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_verifier, &addr_phy_mems_verifier, &addr_ts_bits_verifier]);
+      let addr_ts_bits_verifier = {
+        let mut components = vec![&perm_w0_verifier; inst_map.len()];
+        for i in 0..inst_map.len() {
+          if inst_map[i] == 2 {
+            components[i] = &addr_ts_bits_verifier;
+          }
+        }
+        VerifierWitnessSecInfo::concat(components)
+      };
       let pairwise_num_instances = pairwise_verifier.num_proofs.len();
       let mut pairwise_num_proofs: Vec<usize> = pairwise_verifier.num_proofs.clone();
       pairwise_num_proofs.extend(vec![1; pairwise_num_instances.next_power_of_two() - pairwise_num_instances]);
@@ -2748,20 +2776,31 @@ impl SNARK {
     {
       let timer_eval_opening = Timer::new("Perm Product");
       // Verify prod of exec, blocks, mem_block, & mem_addr
-      let (perm_poly_w3_verifier, inst_map) = VerifierWitnessSecInfo::merge(
-        vec![&perm_exec_w3_verifier, &block_w3_verifier, &block_w3_verifier, &block_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier]
-      );
+      let (perm_poly_w3_verifier, inst_map) = {
+        //                                                      INPUT_EXEC              PHY_MEM_ADDR               VIR_MEM_ADDR               INPUT_BLOCK
+        let mut components = vec![&perm_exec_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier, &block_w3_verifier];
+        if max_block_num_phy_ops > 0 {
+          components.push(&block_w3_verifier);
+        }
+        if max_block_num_vir_ops > 0 {
+          components.push(&block_w3_verifier);
+        }
+        VerifierWitnessSecInfo::merge(components)
+      };
+      let pm_bl_id = 4;
+      let vm_bl_id = if max_block_num_phy_ops > 0 { 5 } else { 4 };
+
       let perm_poly_num_instances = perm_poly_w3_verifier.num_proofs.len();
       let mut perm_poly_num_proofs: Vec<usize> = perm_poly_w3_verifier.num_proofs.clone();
       perm_poly_num_proofs.extend(vec![1; perm_poly_num_instances.next_power_of_two() - perm_poly_num_instances]);
-      let perm_poly_num_inputs: Vec<usize> = inst_map.iter().map(|i| if *i >= 1 && *i <= 3 { 16 } else { 8 }).collect();
+      let perm_poly_num_inputs: Vec<usize> = inst_map.iter().map(|i| if *i >= 3 { 16 } else { 8 }).collect();
 
       // Commitment Opening
       let num_vars_list = (0..perm_poly_num_instances).map(|i| (perm_poly_num_proofs[i] * perm_poly_num_inputs[i]).log_2()).collect();
       let two_b = vec![ONE, ZERO];
       let six_b = vec![ONE, ONE, ZERO];
       let ten_b = vec![ONE, ZERO, ONE, ZERO];
-      let r_list: Vec<&Vec<Scalar>> = inst_map.iter().map(|i| if *i == 2 { &six_b } else if *i == 3 { &ten_b } else { &two_b }).collect();
+      let r_list: Vec<&Vec<Scalar>> = inst_map.iter().map(|i| if *i == vm_bl_id { &ten_b } else if *i == pm_bl_id { &six_b } else { &two_b }).collect();
       PolyEvalProof::verify_plain_batched_instances(
         &self.proof_eval_perm_poly_prod_list,
         &vars_gens.gens_pc,
@@ -2783,26 +2822,26 @@ impl SNARK {
       for p in 0..perm_poly_num_instances {
         match inst_map[p] {
           0 => {
-              perm_exec_poly_bound_tau *= self.perm_poly_poly_list[p]; 
+            perm_exec_poly_bound_tau *= self.perm_poly_poly_list[p]; 
           },
           1 => {
-            perm_block_poly_bound_tau *= self.perm_poly_poly_list[p]; 
+            phy_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
           },
           2 => {
-            if max_block_num_phy_ops > 0 {
-              phy_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
-            }
+            vir_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
           },
           3 => {
-            if max_block_num_vir_ops > 0 {
+            perm_block_poly_bound_tau *= self.perm_poly_poly_list[p]; 
+          },
+          4 => {
+            if max_block_num_phy_ops > 0 {
+              phy_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
+            } else {
               vir_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
             }
           },
-          4 => {
-            phy_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
-          },
           5 => {
-            vir_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
+            vir_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
           },
           _ => {}
         }

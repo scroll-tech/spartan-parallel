@@ -235,12 +235,10 @@ impl R1CSProof {
     // Assert num_witness_secs is valid
     assert!(num_witness_secs >= 1 && num_witness_secs <= 16);
     for w in &witness_secs {
-      // If a witness_sec is single, it is also short
-      assert!(!w.is_single || w.is_short);
       // assert size of w_mat
-      assert!(w.is_single && w.w_mat.len() == 1 || !w.is_single && w.w_mat.len() == num_instances);
+      assert!(w.w_mat.len() == 1 || w.w_mat.len() == num_instances);
       for p in 0..w.w_mat.len() {
-        assert!(w.is_short && w.w_mat[p].len() == 1 || !w.is_short && w.w_mat[p].len() == num_proofs[p]);
+        assert!(w.w_mat[p].len() == 1 || w.w_mat[p].len() == num_proofs[p]);
         for q in 0..w.w_mat[p].len() {
           assert_eq!(w.w_mat[p][q].len(), w.num_inputs[p]);
         }
@@ -260,8 +258,8 @@ impl R1CSProof {
       for q in 0..num_proofs[p] {
         z_mat[p].push(Vec::new());
         for w in &witness_secs {
-          let p_w = if w.is_single { 0 } else { p };
-          let q_w = if w.is_short { 0 } else { q };
+          let p_w = if w.w_mat.len() == 1 { 0 } else { p };
+          let q_w = if w.w_mat[p_w].len() == 1 { 0 } else { q };
           // Only append the first num_inputs_entries of w_mat[p][q]
           for i in 0..num_inputs {
             if i < w.w_mat[p_w][q_w].len() {
@@ -461,12 +459,12 @@ impl R1CSProof {
     let mut comm_vars_at_ry_list = vec![Vec::new(); num_witness_secs];
     for i in 0..num_witness_secs {
       let w = witness_secs[i];
-      let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
+      let wit_sec_num_instance = w.w_mat.len();
       eval_vars_at_ry_list.push(Vec::new());
       comm_vars_at_ry_list.push(Vec::new());
       for p in 0..wit_sec_num_instance {
         poly_list.push(&w.poly_w[p]);
-        num_proofs_list.push(if w.is_short { 1 } else { num_proofs[p] });
+        num_proofs_list.push(w.w_mat[p].len());
         num_inputs_list.push(w.num_inputs[p]);
         // Depending on w.num_inputs[p], ry_short can be two different values
         let ry_short = {
@@ -513,7 +511,7 @@ impl R1CSProof {
     // So we need to multiply each entry by (1 - rq0)(1 - rq1)
     let mut eval_vars_comb_list = Vec::new();
     for p in 0..num_instances {
-      let wit_sec_p = |i: usize| if witness_secs[i].is_single { 0 } else { p };
+      let wit_sec_p = |i: usize| if witness_secs[i].w_mat.len() == 1 { 0 } else { p };
       let e = |i: usize| eval_vars_at_ry_list[i][wit_sec_p(i)];
       let prefix_list = match num_witness_secs.next_power_of_two() {
         1 => { vec![ONE] }
@@ -633,10 +631,6 @@ impl R1CSProof {
 
     // Assert num_witness_secs is valid
     assert!(num_witness_secs >= 1 && num_witness_secs <= 16);
-    for w in &witness_secs {
-      // If a witness_sec is single, it is also short
-      assert!(!w.is_single || w.is_short);
-    }
 
     let z_len = if num_witness_secs == 3 { num_inputs * 4 } else { num_inputs * num_witness_secs };
     let (num_rounds_x, num_rounds_p, num_rounds_q, num_rounds_y) = (num_cons.log_2(), num_instances.next_power_of_two().log_2(), max_num_proofs.log_2(), z_len.log_2());
@@ -765,10 +759,10 @@ impl R1CSProof {
     let mut comm_Zr_list = Vec::new();
     for i in 0..num_witness_secs {
       let w = witness_secs[i];
-      let wit_sec_num_instance = if w.is_single { 1 } else { num_instances };
+      let wit_sec_num_instance = w.num_proofs.len();
       for p in 0..wit_sec_num_instance {
         comm_list.push(&w.comm_w[p]);
-        num_proofs_list.push(if w.is_short { 1 } else { num_proofs[p] });
+        num_proofs_list.push(w.num_proofs[p]);
         num_inputs_list.push(w.num_inputs[p]);
         comm_Zr_list.push(self.comm_vars_at_ry_list[i][p].decompress().unwrap());
       }
@@ -789,7 +783,7 @@ impl R1CSProof {
     // Then on rp
     let mut expected_comm_vars_list = Vec::new();
     for p in 0..num_instances {
-      let wit_sec_p = |i: usize| if witness_secs[i].is_single { 0 } else { p };
+      let wit_sec_p = |i: usize| if witness_secs[i].num_proofs.len() == 1 { 0 } else { p };
       let c = |i: usize| 
         if witness_secs[i].num_inputs[wit_sec_p(i)] >= num_inputs {
           self.comm_vars_at_ry_list[i][wit_sec_p(i)].decompress().unwrap()
