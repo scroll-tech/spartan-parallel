@@ -210,7 +210,7 @@ impl Instance {
   /// Input composition: (if every segment exists)
   ///             INPUT + VAR                      Challenges           INPUT_W2               PHY_W2            VIR_W2                                    BLOCK_W3                                       BLOCK_W3_SHIFTED
   ///  0   1   2  IOW  +1  +2  +3  +4  +5  +6  |  0   1   2   3   |  0   1   2   3   4   |  0   1   2   3  |  0   1   2   3   4       |  0   1   2   3   4   5   6   7   8   9  10  11   |  0   1   2   3   4   5   6   7   8   9  10  11
-  ///  v  i0  ...  w  PA0 PD0 ... VA0 VD0 ...  |  tau r  r^2 ...  |  _   _  ZO r*i1 ...  |  MR  MC  MR ... | MR1 MR2 MR3 MC  MR1 ...  |  v   x  pi   D   v   x  pi   D   v   x  pi   D   |  v   x  pi   D   v   x  pi   D   v   x  pi   D
+  ///  v  i0  ... PA0 PD0 ... VA0 VD0 ...  |  tau r  r^2 ...  |  _   _  ZO r*i1 ...  |  MR  MC  MR ... | MR1 MR2 MR3 MC  MR1 ...  |  v   x  pi   D   v   x  pi   D   v   x  pi   D   |  v   x  pi   D   v   x  pi   D   v   x  pi   D
   ///                                                                                                                                           INPUT            PHY             VIR               INPUT            PHY             VIR
   /// 
   /// VAR:
@@ -264,12 +264,12 @@ impl Instance {
     let V_input = |i: usize| 2 + i;
     let V_output = |i: usize| 2 + (num_inputs_unpadded - 1) + i;
     // in VAR
-    let V_PA = |i: usize| io_width + 1 + 2 * i;
-    let V_PD = |i: usize| io_width + 1 + 2 * i + 1;
-    let V_VA = |b: usize, i: usize| io_width + 1 + 2 * num_phy_mems_accesses[b] + 4 * i;
-    let V_VD = |b: usize, i: usize| io_width + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 1;
-    let V_VL = |b: usize, i: usize| io_width + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 2;
-    let V_VT = |b: usize, i: usize| io_width + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 3;
+    let V_PA = |i: usize| io_width + 2 * i;
+    let V_PD = |i: usize| io_width + 2 * i + 1;
+    let V_VA = |b: usize, i: usize| io_width + 2 * num_phy_mems_accesses[b] + 4 * i;
+    let V_VD = |b: usize, i: usize| io_width + 2 * num_phy_mems_accesses[b] + 4 * i + 1;
+    let V_VL = |b: usize, i: usize| io_width + 2 * num_phy_mems_accesses[b] + 4 * i + 2;
+    let V_VT = |b: usize, i: usize| io_width + 2 * num_phy_mems_accesses[b] + 4 * i + 3;
     // in CHALLENGES, not used if !has_phy_ops && !has_vir_ops
     let V_tau = num_vars;
     let V_r = |i: usize| num_vars + i;

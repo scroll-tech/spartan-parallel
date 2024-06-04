@@ -1303,14 +1303,14 @@ impl SNARK {
         let mut phy_mem_block_w2 = Vec::new();
         let phy_mem_block_w2_size_list: Vec<usize> = block_num_phy_ops.iter().map(|i| (2 * i).next_power_of_two()).collect();
 
-        let V_PA = |i: usize| 1 + 2 * i;
-        let V_PD = |i: usize| 1 + 2 * i + 1;
+        let V_PA = |i: usize| 2 * i;
+        let V_PD = |i: usize| 2 * i + 1;
         let V_PMR = |i: usize| 2 * i;
         let V_PMC = |i: usize| 2 * i + 1;
         for p in 0..block_num_instances {
           phy_mem_block_w2.push(vec![Vec::new(); block_num_proofs[p]]);
           for q in (0..block_num_proofs[p]).rev() {
-            let V_CNST = block_vars_mat[p][q][io_width];
+            let V_CNST = block_vars_mat[p][q][0];
 
             phy_mem_block_w2[p][q] = vec![ZERO; phy_mem_block_w2_size_list[p]];
             // Compute PMR, PMC
@@ -1322,7 +1322,7 @@ impl SNARK {
               phy_mem_block_w2[p][q][V_PMC(i)] = t * (comb_tau - block_vars_mat[p][q][io_width + V_PA(i)] - phy_mem_block_w2[p][q][V_PMR(i)]);
             }
             // V
-            block_w3[p][q][4] = block_vars_mat[p][q][io_width];
+            block_w3[p][q][4] = V_CNST;
             // Compute x
             block_w3[p][q][5] = if block_num_phy_ops[p] == 0 { V_CNST } else { phy_mem_block_w2[p][q][V_PMC(block_num_phy_ops[p] - 1)] };
             // Compute D and pi
@@ -1375,10 +1375,10 @@ impl SNARK {
         let mut vir_mem_block_w2 = Vec::new();
         let vir_mem_block_w2_size_list: Vec<usize> = block_num_vir_ops.iter().map(|i| (4 * i).next_power_of_two()).collect();
 
-        let V_VA = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i;
-        let V_VD = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i + 1;
-        let V_VL = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i + 2;
-        let V_VT = |b: usize, i: usize| 1 + 2 * block_num_phy_ops[b] + 4 * i + 3;
+        let V_VA = |b: usize, i: usize| 2 * block_num_phy_ops[b] + 4 * i;
+        let V_VD = |b: usize, i: usize| 2 * block_num_phy_ops[b] + 4 * i + 1;
+        let V_VL = |b: usize, i: usize| 2 * block_num_phy_ops[b] + 4 * i + 2;
+        let V_VT = |b: usize, i: usize| 2 * block_num_phy_ops[b] + 4 * i + 3;
         let V_VMR1 = |i: usize| 4 * i;
         let V_VMR2 = |i: usize| 4 * i + 1;
         let V_VMR3 = |i: usize| 4 * i + 2;
@@ -1386,7 +1386,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           vir_mem_block_w2.push(vec![Vec::new(); block_num_proofs[p]]);
           for q in (0..block_num_proofs[p]).rev() {
-            let V_CNST = block_vars_mat[p][q][io_width];
+            let V_CNST = block_vars_mat[p][q][0];
 
             vir_mem_block_w2[p][q] = vec![ZERO; vir_mem_block_w2_size_list[p]];
             // Compute VMR1, VMR2, VMR3, VMC
@@ -1408,7 +1408,7 @@ impl SNARK {
               );
             }
             // V
-            block_w3[p][q][8] = block_vars_mat[p][q][io_width];
+            block_w3[p][q][8] = V_CNST;
             // Compute x
             block_w3[p][q][9] = if block_num_vir_ops[p] == 0 { V_CNST } else { vir_mem_block_w2[p][q][V_VMC(block_num_vir_ops[p] - 1)] };
             // Compute D and pi
