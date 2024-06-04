@@ -208,9 +208,9 @@ impl Instance {
   /// Verify the correctness of each block execution, as well as extracting all memory operations
   /// 
   /// Input composition: (if every segment exists)
-  ///    INPUT                     VAR                 Challenges           INPUT_W2               PHY_W2            VIR_W2                                    BLOCK_W3                                       BLOCK_W3_SHIFTED
-  ///  0   1   2  |   0   1   2   3   4   5   6   |  0   1   2   3   |  0   1   2   3   4   |  0   1   2   3  |  0   1   2   3   4       |  0   1   2   3   4   5   6   7   8   9  10  11   |  0   1   2   3   4   5   6   7   8   9  10  11
-  ///  v  i0  ... |   w  PA0 PD0 ... VA0 VD0 ...  |  tau r  r^2 ...  |  _   _  ZO r*i1 ...  |  MR  MC  MR ... | MR1 MR2 MR3 MC  MR1 ...  |  v   x  pi   D   v   x  pi   D   v   x  pi   D   |  v   x  pi   D   v   x  pi   D   v   x  pi   D
+  ///             INPUT + VAR                      Challenges           INPUT_W2               PHY_W2            VIR_W2                                    BLOCK_W3                                       BLOCK_W3_SHIFTED
+  ///  0   1   2  IOW  +1  +2  +3  +4  +5  +6  |  0   1   2   3   |  0   1   2   3   4   |  0   1   2   3  |  0   1   2   3   4       |  0   1   2   3   4   5   6   7   8   9  10  11   |  0   1   2   3   4   5   6   7   8   9  10  11
+  ///  v  i0  ...  w  PA0 PD0 ... VA0 VD0 ...  |  tau r  r^2 ...  |  _   _  ZO r*i1 ...  |  MR  MC  MR ... | MR1 MR2 MR3 MC  MR1 ...  |  v   x  pi   D   v   x  pi   D   v   x  pi   D   |  v   x  pi   D   v   x  pi   D   v   x  pi   D
   ///                                                                                                                                           INPUT            PHY             VIR               INPUT            PHY             VIR
   /// 
   /// VAR:
@@ -258,34 +258,35 @@ impl Instance {
     let mut C_list = Vec::new();
 
     // in INPUT
+    let io_width = 2 * num_inputs_unpadded;
     let V_valid = 0;
     let V_cnst = 0;
     let V_input = |i: usize| 2 + i;
     let V_output = |i: usize| 2 + (num_inputs_unpadded - 1) + i;
     // in VAR
-    let V_PA = |i: usize| num_vars + 1 + 2 * i;
-    let V_PD = |i: usize| num_vars + 1 + 2 * i + 1;
-    let V_VA = |b: usize, i: usize| num_vars + 1 + 2 * num_phy_mems_accesses[b] + 4 * i;
-    let V_VD = |b: usize, i: usize| num_vars + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 1;
-    let V_VL = |b: usize, i: usize| num_vars + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 2;
-    let V_VT = |b: usize, i: usize| num_vars + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 3;
+    let V_PA = |i: usize| io_width + 1 + 2 * i;
+    let V_PD = |i: usize| io_width + 1 + 2 * i + 1;
+    let V_VA = |b: usize, i: usize| io_width + 1 + 2 * num_phy_mems_accesses[b] + 4 * i;
+    let V_VD = |b: usize, i: usize| io_width + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 1;
+    let V_VL = |b: usize, i: usize| io_width + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 2;
+    let V_VT = |b: usize, i: usize| io_width + 1 + 2 * num_phy_mems_accesses[b] + 4 * i + 3;
     // in CHALLENGES, not used if !has_phy_ops && !has_vir_ops
-    let V_tau = 2 * num_vars;
-    let V_r = |i: usize| 2 * num_vars + i;
+    let V_tau = num_vars;
+    let V_r = |i: usize| num_vars + i;
     // in INPUT_W2
-    let V_input_dot_prod = |i: usize| if i == 0 { V_input(0) } else { 3 * num_vars + 2 + i };
-    let V_output_dot_prod = |i: usize| 3 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
+    let V_input_dot_prod = |i: usize| if i == 0 { V_input(0) } else { 2 * num_vars + 2 + i };
+    let V_output_dot_prod = |i: usize| 2 * num_vars + 2 + (num_inputs_unpadded - 1) + i;
     // in PHY_W2
-    let V_PMR = |i: usize| 4 * num_vars + 2 * i;
-    let V_PMC = |i: usize| 4 * num_vars + 2 * i + 1;
+    let V_PMR = |i: usize| 3 * num_vars + 2 * i;
+    let V_PMC = |i: usize| 3 * num_vars + 2 * i + 1;
     // in VIR_W2
-    let VIR_W2_OFFSET = 4 * num_vars + if has_phy_ops { num_vars } else { 0 };
+    let VIR_W2_OFFSET = 3 * num_vars + if has_phy_ops { num_vars } else { 0 };
     let V_VMR1 = |i: usize| VIR_W2_OFFSET + 4 * i;
     let V_VMR2 = |i: usize| VIR_W2_OFFSET + 4 * i + 1;
     let V_VMR3 = |i: usize| VIR_W2_OFFSET + 4 * i + 2;
     let V_VMC = |i: usize| VIR_W2_OFFSET + 4 * i + 3;
     // in BLOCK_W3
-    let BLOCK_W3_OFFSET = 4 * num_vars + if has_phy_ops { num_vars } else { 0 } + if has_vir_ops { num_vars } else { 0 };
+    let BLOCK_W3_OFFSET = 3 * num_vars + if has_phy_ops { num_vars } else { 0 } + if has_vir_ops { num_vars } else { 0 };
     let V_v = BLOCK_W3_OFFSET;
     let V_x = BLOCK_W3_OFFSET + 1;
     let V_pi = BLOCK_W3_OFFSET + 2;
@@ -299,7 +300,7 @@ impl Instance {
     let V_Vp = BLOCK_W3_OFFSET + 10;
     let V_Vd = BLOCK_W3_OFFSET + 11;
     // in BLOCK_W3_SHIFTED
-    let BLOCK_W3_SHIFTED_OFFSET = 5 * num_vars + if has_phy_ops { num_vars } else { 0 } + if has_vir_ops { num_vars } else { 0 };
+    let BLOCK_W3_SHIFTED_OFFSET = 4 * num_vars + if has_phy_ops { num_vars } else { 0 } + if has_vir_ops { num_vars } else { 0 };
     let V_sv = BLOCK_W3_SHIFTED_OFFSET;
     let V_spi = BLOCK_W3_SHIFTED_OFFSET + 2;
     let V_Psv = BLOCK_W3_SHIFTED_OFFSET + 4;
@@ -349,7 +350,7 @@ impl Instance {
           // x[k]
           (A, B, C) = Instance::gen_constr(A, B, C, counter,
               [vec![(V_tau, 1)], (0..2 * num_inputs_unpadded - 2).map(|i| (V_input_dot_prod(i), -1)).collect()].concat(), 
-              vec![(num_vars, 1)], 
+              vec![(V_cnst, 1)], 
               vec![(V_x, 1)]);
           counter += 1;
           // D[k] = x[k] * (pi[k + 1] + (1 - v[k + 1]))

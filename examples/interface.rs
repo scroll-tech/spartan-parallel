@@ -178,7 +178,6 @@ struct RunTimeKnowledge {
   total_num_vir_mem_accesses: usize,
 
   block_vars_matrix: Vec<Vec<VarsAssignment>>,
-  block_inputs_matrix: Vec<Vec<InputsAssignment>>,
   exec_inputs: Vec<InputsAssignment>,
   addr_phy_mems_list: Vec<MemsAssignment>,
   addr_vir_mems_list: Vec<MemsAssignment>,
@@ -227,7 +226,7 @@ impl RunTimeKnowledge {
       let mut exec_counter = 0;
       buffer.clear();
       reader.read_line(&mut buffer)?;
-      while buffer != "BLOCK_INPUTS\n".to_string() {
+      while buffer != "EXEC_INPUTS\n".to_string() {
         if buffer == format!("BLOCK {}\n", block_counter + 1) {
           block_counter += 1;
           exec_counter = 0;
@@ -244,35 +243,6 @@ impl RunTimeKnowledge {
         reader.read_line(&mut buffer)?;
       }
       block_vars_matrix.iter().map(|i| i.iter().map(|j| VarsAssignment::new(j).unwrap()).collect()).collect()
-    };
-
-    let block_inputs_matrix: Vec<Vec<InputsAssignment>> = {
-      let mut block_inputs_matrix = vec![Vec::new()];
-      buffer.clear();
-      reader.read_line(&mut buffer)?;
-      assert_eq!(buffer, "BLOCK 0\n".to_string());
-
-      let mut block_counter = 0;
-      let mut exec_counter = 0;
-      buffer.clear();
-      reader.read_line(&mut buffer)?;
-      while buffer != "EXEC_INPUTS\n".to_string() {
-        if buffer == format!("BLOCK {}\n", block_counter + 1) {
-          block_counter += 1;
-          exec_counter = 0;
-          block_inputs_matrix.push(Vec::new());
-        } else if buffer == format!("EXEC 0\n") {
-          block_inputs_matrix[block_counter].push(Vec::new());
-        } else if buffer == format!("EXEC {}\n", exec_counter + 1) {
-          block_inputs_matrix[block_counter].push(Vec::new());
-          exec_counter += 1;
-        } else {
-          block_inputs_matrix[block_counter][exec_counter].push(string_to_bytes(buffer.clone()));
-        }
-        buffer.clear();
-        reader.read_line(&mut buffer)?;
-      }
-      block_inputs_matrix.iter().map(|i| i.iter().map(|j| InputsAssignment::new(j).unwrap()).collect()).collect()
     };
 
     let exec_inputs: Vec<InputsAssignment> = {
@@ -394,7 +364,6 @@ impl RunTimeKnowledge {
       total_num_vir_mem_accesses,
     
       block_vars_matrix,
-      block_inputs_matrix,
       exec_inputs,
       addr_phy_mems_list,
       addr_vir_mems_list,
@@ -486,14 +455,9 @@ fn main() {
   // --
   let block_num_proofs = rtk.block_num_proofs;
   let block_vars_matrix = rtk.block_vars_matrix;
-  let block_inputs_matrix = rtk.block_inputs_matrix;
 
   assert!(block_num_proofs.len() <= block_num_instances_bound);
   assert!(block_vars_matrix.len() <= block_num_instances_bound);
-  assert!(block_inputs_matrix.len() <= block_num_instances_bound);
-  for p in 0..block_vars_matrix.len() {
-    assert_eq!(block_vars_matrix[p].len(), block_inputs_matrix[p].len());
-  }
   let preprocess_time = preprocess_start.elapsed();
   println!("Preprocess time: {}ms", preprocess_time.as_millis());
 
@@ -537,7 +501,6 @@ fn main() {
     &pairwise_check_gens,
 
     block_vars_matrix,
-    block_inputs_matrix,
     rtk.exec_inputs,
     rtk.addr_phy_mems_list,
     rtk.addr_vir_mems_list,
