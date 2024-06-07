@@ -346,15 +346,15 @@ impl R1CSInstance {
   pub fn multiply_vec_block(
     &self,
     num_instances: usize,
-    num_proofs: &Vec<usize>,
+    num_proofs: Vec<usize>,
     max_num_proofs: usize,
-    num_rows: usize,
-    num_cols: usize,
+    num_inputs: Vec<usize>,
+    _max_num_inputs: usize,
+    num_cons: usize,
     z_mat: &Vec<Vec<Vec<Scalar>>>
   ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
     assert!(self.num_instances == 1 || self.num_instances == num_instances);
-    assert_eq!(num_rows, self.num_cons);
-    assert_eq!(num_cols, self.num_vars);
+    assert_eq!(num_cons, self.num_cons);
     let mut Az = Vec::new();
     let mut Bz = Vec::new();
     let mut Cz = Vec::new();
@@ -370,21 +370,22 @@ impl R1CSInstance {
       Cz.push(Vec::new());
       for q in 0..num_proofs[p] {
         let z = &z_list[q];
-        assert_eq!(z.len(), num_cols);
+        assert_eq!(z.len(), num_inputs[p]);
 
-        Az[p].push(self.A_list[p_inst].multiply_vec(num_rows, num_cols, z));
-        Bz[p].push(self.B_list[p_inst].multiply_vec(num_rows, num_cols, z));
-        Cz[p].push(self.C_list[p_inst].multiply_vec(num_rows, num_cols, z));
+        Az[p].push(self.A_list[p_inst].multiply_vec(num_cons, num_inputs[p], z));
+        Bz[p].push(self.B_list[p_inst].multiply_vec(num_cons, num_inputs[p], z));
+        Cz[p].push(self.C_list[p_inst].multiply_vec(num_cons, num_inputs[p], z));
       }
     }
     
     (
-      DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
-      DensePolynomialPqx::new_rev(&Bz, num_proofs, max_num_proofs),
-      DensePolynomialPqx::new_rev(&Cz, num_proofs, max_num_proofs)
+      DensePolynomialPqx::new_rev(&Az, num_proofs.clone(), max_num_proofs, vec![num_cons; num_instances.next_power_of_two()], num_cons),
+      DensePolynomialPqx::new_rev(&Bz, num_proofs.clone(), max_num_proofs, vec![num_cons; num_instances.next_power_of_two()], num_cons),
+      DensePolynomialPqx::new_rev(&Cz, num_proofs, max_num_proofs, vec![num_cons; num_instances.next_power_of_two()], num_cons)
     )
   }
 
+  /*
   // Multiply one instance by a list of inputs
   // Length of each input might be smaller than the length of the instance,
   // in that case need to append the result by 0
@@ -422,6 +423,7 @@ impl R1CSInstance {
       DensePolynomialPqx::new_rev(&Cz, num_proofs, max_num_proofs)
     )
   }
+  */
 
   pub fn compute_eval_table_sparse(
     &self,
@@ -466,6 +468,7 @@ impl R1CSInstance {
     (evals_A_list, evals_B_list, evals_C_list)
   }
 
+  /*
   // Only compute the first max_num_proofs / max_num_proofs_bound entries
   // num_cols is already num_vars * max_num_proofs / max_num_proofs_bound
   pub fn compute_eval_table_sparse_single(
@@ -513,6 +516,7 @@ impl R1CSInstance {
 
     (evals_A_list, evals_B_list, evals_C_list)
   }
+  */
 
   pub fn multi_evaluate(&self, rx: &[Scalar], ry: &[Scalar]) -> Vec<Scalar> {
     let mut eval_list = Vec::new();

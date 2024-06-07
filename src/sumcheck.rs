@@ -801,10 +801,11 @@ impl ZKSumcheckInstanceProof {
     claim: &Scalar,
     blind_claim: &Scalar,
     num_rounds: usize,
-    num_rounds_x: usize,
+    num_rounds_x_max: usize,
     num_rounds_q_max: usize,
     num_rounds_p: usize,
     mut num_proofs: Vec<usize>,
+    mut num_cons: Vec<usize>,
     poly_Ap: &mut DensePolynomial,
     poly_Aq: &mut DensePolynomial,
     poly_Ax: &mut DensePolynomial,
@@ -824,7 +825,7 @@ impl ZKSumcheckInstanceProof {
     // poly_A is the EQ polynomial of size P * Q_max * X
     // poly_BCD are the AzBzCz polynomials, with size Q_sum * X
     // Thus, we need to separate the rounds into rounds for X, Q_rev, and P
-    assert_eq!(num_rounds, num_rounds_x + num_rounds_q_max + num_rounds_p);
+    assert_eq!(num_rounds, num_rounds_x_max + num_rounds_q_max + num_rounds_p);
 
     let (blinds_poly, blinds_evals) = (
       random_tape.random_vector(b"blinds_poly", num_rounds),
@@ -839,7 +840,7 @@ impl ZKSumcheckInstanceProof {
     let mut comm_evals: Vec<CompressedGroup> = Vec::new();
     let mut proofs: Vec<DotProductProof> = Vec::new();
 
-    let cons_space = num_rounds_x.pow2();
+    let cons_space = num_rounds_x_max.pow2();
     let proof_space = num_rounds_q_max.pow2();
     let instance_space: usize = num_rounds_p.pow2();
 
@@ -873,7 +874,7 @@ impl ZKSumcheckInstanceProof {
       // Mode = 1 ==> p
       // Mode = 2 ==> q
       // Mode = 3 ==> x
-      let mode = if j < num_rounds_x { 3 } else if j < num_rounds_x + num_rounds_q_max { 2 } else { 1 };
+      let mode = if j < num_rounds_x_max { 3 } else if j < num_rounds_x_max + num_rounds_q_max { 2 } else { 1 };
 
       if cons_len > 1 { cons_len /= 2 }
       else if proof_len > 1 { proof_len /= 2 }
@@ -885,19 +886,21 @@ impl ZKSumcheckInstanceProof {
         let mut eval_point_3 = Scalar::zero();
 
         for p in 0..instance_len {
+          if mode == 3 && num_cons[p] > 1 { num_cons[p] /= 2; }
           // If q > num_proofs[p], the polynomials always evaluate to 0
           if mode == 2 && num_proofs[p] > 1 { num_proofs[p] /= 2; }
           for q in 0..num_proofs[p] {
-            let step = proof_len / num_proofs[p];
-            for x in 0..cons_len {
+            let step_q = proof_len / num_proofs[p];
+            let step_x = cons_len / num_cons[p];
+            for x in 0..num_cons[p] {
               // evaluate Ap, Aq, Ax on p, q, x
-              let poly_A_index_p_q_x = poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x];
+              let poly_A_index_p_q_x = poly_Ap[p] * poly_Aq[q * step_q] * poly_Ax[x * step_x];
 
               // evaluate Ap, Aq, Ax on p_high, q_high, x_high
               let poly_A_index_high_p_q_x = match mode {
-                1 => poly_Ap[p + instance_len] * poly_Aq[q * step] * poly_Ax[x],
-                2 => poly_Ap[p] * poly_Aq[q * step + proof_len] * poly_Ax[x],
-                3 => poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x + cons_len],
+                1 => poly_Ap[p + instance_len] * poly_Aq[q * step_q] * poly_Ax[x * step_x],
+                2 => poly_Ap[p] * poly_Aq[q * step_q + proof_len] * poly_Ax[x * step_x],
+                3 => poly_Ap[p] * poly_Aq[q * step_q] * poly_Ax[x * step_x + cons_len],
                 _ => { panic!("DensePolynomialPqx bound failed: unrecognized mode {}!", mode); }
               };
 

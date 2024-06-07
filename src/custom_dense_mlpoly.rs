@@ -1,17 +1,16 @@
 #![allow(clippy::too_many_arguments)]
 use crate::dense_mlpoly::DensePolynomial;
 
-use super::group::CompressedGroup;
 use super::math::Math;
 use super::scalar::Scalar;
-use super::transcript::{AppendToTranscript, ProofTranscript};
-use merlin::Transcript;
-use serde::{Deserialize, Serialize};
+
+const ZERO: Scalar = Scalar::zero();
+const ONE: Scalar = Scalar::one();
 
 // Customized Dense ML Polynomials for Data-Parallelism
-// These Dense ML Polys are aimed for space-efficiency by removing the 0s for invalid (p, q) pair
+// These Dense ML Polys are aimed for space-efficiency by removing the 0s for invalid (p, q, x) triple
 
-// Dense polynomial with variable order: p, q_rev, x
+// Dense polynomial with variable order: p, q_rev, x_rev
 // Used by Z_poly in r1csproof
 #[derive(Debug, Clone)]
 pub struct DensePolynomialPqx {
@@ -21,99 +20,105 @@ pub struct DensePolynomialPqx {
   num_instances: usize,
   num_proofs: Vec<usize>,
   max_num_proofs: usize,
-  num_inputs: usize,
+  num_inputs: Vec<usize>,
+  max_num_inputs: usize,
   Z: Vec<Vec<Vec<Scalar>>>, // Evaluations of the polynomial in all the 2^num_vars Boolean inputs of order (p, q_rev, x)
                             // Let Q_max = max_num_proofs, assume that for a given P, num_proofs[P] = Q_i, then let STEP = Q_max / Q_i,
                             // Z(P, y, .) is only non-zero if y is a multiple of STEP, so Z[P][j][.] actually stores Z(P, j*STEP, .)
+                            // The same applies to X
 }
 
-// Reverse the bits in q
+// Reverse the bits in q (or x)
 fn rev_bits(q: usize, max_num_proofs: usize) -> usize {
     (0..max_num_proofs.log_2()).rev().map(|i| q / (i.pow2()) % 2 * (max_num_proofs / i.pow2() / 2)).fold(0, |a, b| a + b)
 }
 
 impl DensePolynomialPqx {
   // Assume z_mat is of form (p, q_rev, x), construct DensePoly
-  pub fn new(z_mat: &Vec<Vec<Vec<Scalar>>>, num_proofs: &Vec<usize>, max_num_proofs: usize) -> Self {
+  pub fn new(z_mat: &Vec<Vec<Vec<Scalar>>>, num_proofs: Vec<usize>, max_num_proofs: usize, num_inputs: Vec<usize>, max_num_inputs: usize) -> Self {
       let num_instances = z_mat.len().next_power_of_two();
-      let num_inputs = z_mat[0][0].len();
       // If num_instances is not a power of 2, append z_mat with 0
       let mut z_mat = z_mat.clone();
-      let zero = Scalar::zero();
-      z_mat.extend(vec![vec![vec![zero; num_inputs]]; num_instances - z_mat.len()]);
+      z_mat.extend(vec![vec![vec![ZERO; max_num_inputs]]; num_instances - z_mat.len()]);
       DensePolynomialPqx {
         num_vars_q: max_num_proofs.log_2(),
         num_vars_p: num_instances.log_2(),
-        num_vars_x: num_inputs.log_2(),
+        num_vars_x: max_num_inputs.log_2(),
         num_instances,
-        num_proofs: num_proofs.clone(),
+        num_proofs,
         max_num_proofs,
         num_inputs,
+        max_num_inputs,
         Z: z_mat
       }
     }
 
   // Assume z_mat is in its standard form of (p, q, x)
-  // Reverse q and convert it to (p, q_rev, x)
-  pub fn new_rev(z_mat: &Vec<Vec<Vec<Scalar>>>, num_proofs: &Vec<usize>, max_num_proofs: usize) -> Self {
+  // Reverse q and x and convert it to (p, q_rev, x_rev)
+  pub fn new_rev(z_mat: &Vec<Vec<Vec<Scalar>>>, num_proofs: Vec<usize>, max_num_proofs: usize, num_inputs: Vec<usize>, max_num_inputs: usize) -> Self {
     let mut Z = Vec::new();
     let num_instances = z_mat.len();
-    let num_inputs = z_mat[0][0].len();
     for p in 0..num_instances {
-      Z.push(vec![Vec::new(); num_proofs[p]]);
-      let step = max_num_proofs / num_proofs[p];
+      Z.push(vec![vec![ZERO; num_inputs[p]]; num_proofs[p]]);
 
+      let step_q = max_num_proofs / num_proofs[p];
+      let step_x = max_num_inputs / num_inputs[p];
       for q in 0..num_proofs[p] {
-          // Reverse the bits of q. q_rev is a multiple of step
-          let q_rev = rev_bits(q, max_num_proofs);
-          // Now q_rev is between 0 to num_proofs[p]
-          let q_rev = q_rev / step;
-          for x in 0..num_inputs {
-              Z[p][q_rev].push(z_mat[p][q][x].clone());
-          }
+        // Reverse the bits of q. q_rev is a multiple of step_q
+        let q_rev = rev_bits(q, max_num_proofs);
+        // Now q_rev is between 0 to num_proofs[p]
+        let q_rev = q_rev / step_q;
+
+        for x in 0..num_inputs[p] {
+          // Reverse the bits of x. x_rev is a multiple of step_x
+          let x_rev = rev_bits(x, max_num_inputs);
+          // Now x_rev is between 0 to num_inputs[p]
+          let x_rev = x_rev / step_x;
+          Z[p][q_rev][x_rev] = z_mat[p][q][x].clone();
+        }
       }
     }
     // If num_instances is not a power of 2, append Z with 0
     let num_instances = num_instances.next_power_of_two();
-    let zero = Scalar::zero();
     for _ in z_mat.len()..num_instances {
-      Z.push(vec![vec![zero; num_inputs]]);
+      Z.push(vec![vec![ZERO; max_num_inputs]]);
     }
     DensePolynomialPqx {
       num_vars_q: max_num_proofs.log_2(),
       num_vars_p: num_instances.log_2(),
-      num_vars_x: num_inputs.log_2(),
+      num_vars_x: max_num_inputs.log_2(),
       num_instances,
-      num_proofs: num_proofs.clone(),
+      num_proofs,
       max_num_proofs,
       num_inputs,
+      max_num_inputs,
       Z
     }
   }
 
   pub fn len(&self) -> usize {
-      return self.num_instances * self.max_num_proofs * self.num_inputs;
+      return self.num_instances * self.max_num_proofs * self.max_num_inputs;
   }
 
   pub fn get_num_vars(&self) -> usize {
       return self.num_vars_p + self.num_vars_q + self.num_vars_x;
   }
 
-  // Given (p, q_rev, x) return Z[p][q_rev][x]
-  pub fn index(&mut self, p: usize, q_rev: usize, x: usize) -> Scalar {
-      return self.Z[p][q_rev][x];
+  // Given (p, q_rev, x_rev) return Z[p][q_rev][x_rev]
+  pub fn index(&mut self, p: usize, q_rev: usize, x_rev: usize) -> Scalar {
+      return self.Z[p][q_rev][x_rev];
   }
 
-  // Given (p, q_rev, x) and a mode, return Z[p*][q_rev*][x*]
+  // Given (p, q_rev, x_rev) and a mode, return Z[p*][q_rev*][x_rev*]
   // Mode = 1 ==> p* is p with first bit set to 1
   // Mode = 2 ==> q_rev* is q_rev with first bit set to 1
-  // Mode = 3 ==> x* is x with first bit set to 1
+  // Mode = 3 ==> x_rev* is x_rev with first bit set to 1
   // Assume that first bit of the corresponding index is 0, otherwise throw out of bound exception
-  pub fn index_high(&mut self, p: usize, q_rev: usize, x: usize, mode: usize) -> Scalar {
+  pub fn index_high(&mut self, p: usize, q_rev: usize, x_rev: usize, mode: usize) -> Scalar {
       match mode {
-          1 => { return self.Z[p + self.num_instances / 2][q_rev][x]; }
-          2 => { return if self.num_proofs[p] == 1 { Scalar::zero() } else { self.Z[p][q_rev + self.num_proofs[p] / 2][x] }; }
-          3 => { return self.Z[p][q_rev][x + self.num_inputs / 2]; }
+          1 => { return self.Z[p + self.num_instances / 2][q_rev][x_rev]; }
+          2 => { return if self.num_proofs[p] == 1 { ZERO } else { self.Z[p][q_rev + self.num_proofs[p] / 2][x_rev] }; }
+          3 => { return if self.num_inputs[p] == 1 { ZERO } else { self.Z[p][q_rev][x_rev + self.num_inputs[p] / 2] }; }
           _ => { panic!("DensePolynomialPqx bound failed: unrecognized mode {}!", mode); }
       }
   }
@@ -132,14 +137,13 @@ impl DensePolynomialPqx {
   }
 
   // Bound the first variable of "p" section to r
-  // We are only allowed to bound "p" if we have bounded the entire q section
+  // We are only allowed to bound "p" if we have bounded the entire q and x section
   pub fn bound_poly_p(&mut self, r: &Scalar) {
-      // assert_eq!(self.max_num_proofs, 1);
+      assert_eq!(self.max_num_proofs, 1);
+      assert_eq!(self.max_num_inputs, 1);
       self.num_instances /= 2;
       for p in 0..self.num_instances {
-          for x in 0..self.num_inputs {
-              self.Z[p][0][x] = self.Z[p][0][x] + r * (self.Z[p + self.num_instances][0][x] - self.Z[p][0][x]);
-          }
+          self.Z[p][0][0] = self.Z[p][0][0] + r * (self.Z[p + self.num_instances][0][0] - self.Z[p][0][0]);
       }
       self.num_vars_p -= 1;
   }
@@ -151,15 +155,15 @@ impl DensePolynomialPqx {
       for p in 0..self.num_instances {
         if self.num_proofs[p] == 1 {
           // q = 0
-          for x in 0..self.num_inputs {
-            self.Z[p][0][x] = (Scalar::one() - r) * self.Z[p][0][x];
+          for x in 0..self.num_inputs[p] {
+            self.Z[p][0][x] = (ONE - r) * self.Z[p][0][x];
           }
         } else {
           self.num_proofs[p] /= 2;
           for q in 0..self.num_proofs[p] {
-              for x in 0..self.num_inputs {
-                  self.Z[p][q][x] = self.Z[p][q][x] + r * (self.Z[p][q + self.num_proofs[p]][x] - self.Z[p][q][x]);
-              }
+            for x in 0..self.num_inputs[p] {
+              self.Z[p][q][x] = self.Z[p][q][x] + r * (self.Z[p][q + self.num_proofs[p]][x] - self.Z[p][q][x]);
+            }
           }
         }
       }
@@ -168,14 +172,22 @@ impl DensePolynomialPqx {
 
   // Bound the first variable of "x" section to r
   pub fn bound_poly_x(&mut self, r: &Scalar) {
-      self.num_inputs /= 2;
+      self.max_num_inputs /= 2;
 
       for p in 0..self.num_instances {
+        if self.num_inputs[p] == 1 {
+          // x = 0
           for q in 0..self.num_proofs[p] {
-              for x in 0..self.num_inputs {
-                  self.Z[p][q][x] = self.Z[p][q][x] + r * (self.Z[p][q][x + self.num_inputs] - self.Z[p][q][x]);
-              }
+            self.Z[p][q][0] = (ONE - r) * self.Z[p][q][0];
           }
+        } else {
+          self.num_inputs[p] /= 2;
+          for q in 0..self.num_proofs[p] {
+            for x in 0..self.num_inputs[p] {
+                self.Z[p][q][x] = self.Z[p][q][x] + r * (self.Z[p][q][x + self.num_inputs[p]] - self.Z[p][q][x]);
+            }
+          }
+        }
       }
       self.num_vars_x -= 1;
   }
@@ -199,7 +211,7 @@ impl DensePolynomialPqx {
     }
   }
 
-  // Bound the entire "x" section to r_x
+  // Bound the entire "x_rev" section to r_x
   pub fn bound_poly_vars_rx(&mut self, 
     r_x: &Vec<Scalar>,
   ) {
@@ -220,34 +232,20 @@ impl DensePolynomialPqx {
     return cl.index(0, 0, 0);
   }
 
-  // Convert to a (p, q_rev, x) regular dense poly
+  // Convert to a (p, q_rev, x_rev) regular dense poly of form (p, q, x)
   pub fn to_dense_poly(&self) -> DensePolynomial {
-      let mut Z_poly = vec![Scalar::zero(); self.num_instances * self.max_num_proofs * self.num_inputs];
+      let mut Z_poly = vec![ZERO; self.num_instances * self.max_num_proofs * self.max_num_inputs];
       for p in 0..self.num_instances {
-        let step = self.max_num_proofs / self.num_proofs[p];
-        for q in 0..self.num_proofs[p] {
-          for x in 0..self.num_inputs {
-              Z_poly[p * self.max_num_proofs * self.num_inputs + q * step * self.num_inputs + x] = self.Z[p][q][x];
+        let step_q = self.max_num_proofs / self.num_proofs[p];
+        let step_x = self.max_num_inputs / self.num_inputs[p];
+        for q_rev in 0..self.num_proofs[p] {
+          let q = rev_bits(q_rev * step_q, self.max_num_proofs);
+          for x_rev in 0..self.num_inputs[p] {
+              let x = rev_bits(x_rev * step_x, self.max_num_inputs);
+              Z_poly[p * self.max_num_proofs * self.max_num_inputs + q * self.max_num_inputs + x] = self.Z[p][q_rev][x_rev];
           }
         }
       }
       DensePolynomial::new(Z_poly)
   }
 }
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PolyCommitmentPqx {
-    C: Vec<Vec<CompressedGroup>>,
-}
-
-impl AppendToTranscript for PolyCommitmentPqx {
-    fn append_to_transcript(&self, label: &'static [u8], transcript: &mut Transcript) {
-      transcript.append_message(label, b"poly_commitment_begin");
-      for p in 0..self.C.len() {
-        for q in 0..self.C[p].len() {
-            transcript.append_point(b"poly_commitment_share", &self.C[p][q]);
-        }
-      }
-      transcript.append_message(label, b"poly_commitment_end");
-    }
-  }
