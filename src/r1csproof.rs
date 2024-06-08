@@ -483,8 +483,8 @@ impl R1CSProof {
     let (ry_rev, rw) = ry.split_at(num_rounds_y);
     let (rw, rp) = rw.split_at(num_rounds_w);
     let rp = rp.to_vec();
-    let ry: Vec<Scalar> = [rw.to_vec(), ry_rev.iter().copied().rev().collect()].concat();
-    let num_rounds_y = num_rounds_w + num_rounds_y;
+    let rw = rw.to_vec();
+    let ry: Vec<Scalar> = ry_rev.iter().copied().rev().collect();
 
     assert_eq!(Z_poly.len(), 1);
     assert_eq!(ABC_poly.len(), 1);
@@ -496,14 +496,11 @@ impl R1CSProof {
     let timer_polyeval = Timer::new("polyeval");
 
     // For every possible wit_sec.num_inputs, compute ry_factor = prodX(1 - ryX)...
-    // If there are 2 witness secs, then ry_factors[0] = 1, ry_factors[1] = 1, ry_factors[2] = 1 - ry1, ry_factors[3] = (1 - ry1)(1 - ry2), etc.
     let mut ry_factors = vec![ONE; num_rounds_y + 1];
-    for i in num_witness_secs.next_power_of_two().log_2()..num_rounds_y {
-      ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
+    for i in 0..num_rounds_y {
+      ry_factors[i + 1] = ry_factors[i] * (ONE - ry[i]);
     }
 
-    // If w.num_inputs[p] == num_inputs, evaluate ry_baseline on the witness sec
-    let ry_baseline = ry[num_rounds_y - max_num_inputs.log_2()..].to_vec();
     let mut poly_list = Vec::new();
     let mut num_proofs_list = Vec::new();
     let mut num_inputs_list = Vec::new();
@@ -526,10 +523,10 @@ impl R1CSProof {
           // if w.num_inputs[p] >= num_inputs, need to pad 0's to the front of ry
           if w.num_inputs[p] >= max_num_inputs {
             let ry_pad = vec![ZERO; w.num_inputs[p].log_2() - max_num_inputs.log_2()];
-            [ry_pad, ry_baseline.clone()].concat()
+            [ry_pad, ry.clone()].concat()
           }
           // Else ry_short is the last w.num_inputs[p].log_2() entries of ry
-          // thus, to obtain the actual ry, need to multiply by (1 - ry2)(1 - ry3)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
+          // thus, to obtain the actual ry, need to multiply by (1 - ry0)(1 - ry1)..., which is ry_factors[num_rounds_y - w.num_inputs[p]]
           else {
             ry[num_rounds_y - w.num_inputs[p].log_2()..].to_vec()
           }
@@ -552,7 +549,7 @@ impl R1CSProof {
       &num_inputs_list,
       None,
       &rq,
-      &ry_baseline,
+      &ry,
       &Zr_list,
       None,
       &gens.gens_pc,
@@ -570,35 +567,17 @@ impl R1CSProof {
       let e = |i: usize| eval_vars_at_ry_list[i][wit_sec_p(i)];
       let prefix_list = match num_witness_secs.next_power_of_two() {
         1 => { vec![ONE] }
-        2 => { vec![(ONE - ry[0]), ry[0]] }
-        4 => { vec![(ONE - ry[0]) * (ONE - ry[1]), (ONE - ry[0]) * ry[1], ry[0] * (ONE - ry[1]), ry[0] * ry[1]] }
+        2 => { vec![(ONE - rw[0]), rw[0]] }
+        4 => { vec![(ONE - rw[0]) * (ONE - rw[1]), (ONE - rw[0]) * rw[1], rw[0] * (ONE - rw[1]), rw[0] * rw[1]] }
         8 => { vec![
-          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]),
-          (ONE - ry[0]) * (ONE - ry[1]) * ry[2],
-          (ONE - ry[0]) * ry[1] * (ONE - ry[2]),
-          (ONE - ry[0]) * ry[1] * ry[2],
-          ry[0] * (ONE - ry[1]) * (ONE - ry[2]),
-          ry[0] * (ONE - ry[1]) * ry[2],
-          ry[0] * ry[1] * (ONE - ry[2]),
-          ry[0] * ry[1] * ry[2],
-        ] }
-        16 => { vec![
-          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]) * (ONE - ry[3]),
-          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]) * ry[3],
-          (ONE - ry[0]) * (ONE - ry[1]) * ry[2] * (ONE - ry[3]),
-          (ONE - ry[0]) * (ONE - ry[1]) * ry[2] * ry[3],
-          (ONE - ry[0]) * ry[1] * (ONE - ry[2]) * (ONE - ry[3]),
-          (ONE - ry[0]) * ry[1] * (ONE - ry[2]) * ry[3],
-          (ONE - ry[0]) * ry[1] * ry[2] * (ONE - ry[3]),
-          (ONE - ry[0]) * ry[1] * ry[2] * ry[3],
-          ry[0] * (ONE - ry[1]) * (ONE - ry[2]) * (ONE - ry[3]),
-          ry[0] * (ONE - ry[1]) * (ONE - ry[2]) * ry[3],
-          ry[0] * (ONE - ry[1]) * ry[2] * (ONE - ry[3]),
-          ry[0] * (ONE - ry[1]) * ry[2] * ry[3],
-          ry[0] * ry[1] * (ONE - ry[2]) * (ONE - ry[3]),
-          ry[0] * ry[1] * (ONE - ry[2]) * ry[3],
-          ry[0] * ry[1] * ry[2] * (ONE - ry[3]),
-          ry[0] * ry[1] * ry[2] * ry[3],
+          (ONE - rw[0]) * (ONE - rw[1]) * (ONE - rw[2]),
+          (ONE - rw[0]) * (ONE - rw[1]) * rw[2],
+          (ONE - rw[0]) * rw[1] * (ONE - rw[2]),
+          (ONE - rw[0]) * rw[1] * rw[2],
+          rw[0] * (ONE - rw[1]) * (ONE - rw[2]),
+          rw[0] * (ONE - rw[1]) * rw[2],
+          rw[0] * rw[1] * (ONE - rw[2]),
+          rw[0] * rw[1] * rw[2],
         ] }
         _ => { panic!("Unsupported num_witness_secs: {}", num_witness_secs); }
       };
@@ -652,7 +631,7 @@ impl R1CSProof {
         proof_eval_vars_at_ry_list,
         proof_eq_sc_phase2
       },
-      [rp, rq_rev, rx, ry]
+      [rp, rq_rev, rx, [rw, ry].concat()]
     )
   }
 
@@ -790,8 +769,8 @@ impl R1CSProof {
     let (ry_rev, rw) = ry.split_at(num_rounds_y);
     let (rw, rp) = rw.split_at(num_rounds_w);
     let rp = rp.to_vec();
-    let ry: Vec<Scalar> = [rw.to_vec(), ry_rev.iter().copied().rev().collect()].concat();
-    let num_rounds_y = num_rounds_w + num_rounds_y;
+    let rw = rw.to_vec();
+    let ry: Vec<Scalar> = ry_rev.iter().copied().rev().collect();
 
     // An Eq function to match p with rp
     let p_rp_poly_bound_ry: Scalar = (0..rp.len())
@@ -803,14 +782,12 @@ impl R1CSProof {
     // For every possible wit_sec.num_inputs, compute ry_factor = prodX(1 - ryX)...
     // If there are 2 witness secs, then ry_factors[0] = 1, ry_factors[1] = 1, ry_factors[2] = 1 - ry1, ry_factors[3] = (1 - ry1)(1 - ry2), etc.
     let mut ry_factors = vec![ONE; num_rounds_y + 1];
-    for i in num_witness_secs.next_power_of_two().log_2()..num_rounds_y {
+    for i in 0..num_rounds_y {
       ry_factors[i + 1] = (ry_factors[i]) * (ONE - ry[i]);
     }
 
     // POLY COMMIT
     let timer_commit_opening = Timer::new("verify_sc_commitment_opening");
-    // If w.num_inputs[p] == num_inputs, evaluate ry_baseline on the witness sec
-    let ry_baseline = &ry[num_rounds_y - max_num_inputs.log_2()..].to_vec();
     let mut comm_list = Vec::new();
     let mut num_proofs_list = Vec::new();
     let mut num_inputs_list = Vec::new();
@@ -832,7 +809,7 @@ impl R1CSProof {
       &gens.gens_pc,
       transcript,
       &rq,
-      &ry_baseline,
+      &ry,
       &comm_Zr_list,
       &comm_list,
     )?;
@@ -849,35 +826,17 @@ impl R1CSProof {
         };
       let prefix_list = match num_witness_secs.next_power_of_two() {
         1 => { vec![ONE] }
-        2 => { vec![(ONE - ry[0]), ry[0]] }
-        4 => { vec![(ONE - ry[0]) * (ONE - ry[1]), (ONE - ry[0]) * ry[1], ry[0] * (ONE - ry[1]), ry[0] * ry[1]] }
+        2 => { vec![(ONE - rw[0]), rw[0]] }
+        4 => { vec![(ONE - rw[0]) * (ONE - rw[1]), (ONE - rw[0]) * rw[1], rw[0] * (ONE - rw[1]), rw[0] * rw[1]] }
         8 => { vec![
-          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]),
-          (ONE - ry[0]) * (ONE - ry[1]) * ry[2],
-          (ONE - ry[0]) * ry[1] * (ONE - ry[2]),
-          (ONE - ry[0]) * ry[1] * ry[2],
-          ry[0] * (ONE - ry[1]) * (ONE - ry[2]),
-          ry[0] * (ONE - ry[1]) * ry[2],
-          ry[0] * ry[1] * (ONE - ry[2]),
-          ry[0] * ry[1] * ry[2],
-        ] }
-        16 => { vec![
-          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]) * (ONE - ry[3]),
-          (ONE - ry[0]) * (ONE - ry[1]) * (ONE - ry[2]) * ry[3],
-          (ONE - ry[0]) * (ONE - ry[1]) * ry[2] * (ONE - ry[3]),
-          (ONE - ry[0]) * (ONE - ry[1]) * ry[2] * ry[3],
-          (ONE - ry[0]) * ry[1] * (ONE - ry[2]) * (ONE - ry[3]),
-          (ONE - ry[0]) * ry[1] * (ONE - ry[2]) * ry[3],
-          (ONE - ry[0]) * ry[1] * ry[2] * (ONE - ry[3]),
-          (ONE - ry[0]) * ry[1] * ry[2] * ry[3],
-          ry[0] * (ONE - ry[1]) * (ONE - ry[2]) * (ONE - ry[3]),
-          ry[0] * (ONE - ry[1]) * (ONE - ry[2]) * ry[3],
-          ry[0] * (ONE - ry[1]) * ry[2] * (ONE - ry[3]),
-          ry[0] * (ONE - ry[1]) * ry[2] * ry[3],
-          ry[0] * ry[1] * (ONE - ry[2]) * (ONE - ry[3]),
-          ry[0] * ry[1] * (ONE - ry[2]) * ry[3],
-          ry[0] * ry[1] * ry[2] * (ONE - ry[3]),
-          ry[0] * ry[1] * ry[2] * ry[3],
+          (ONE - rw[0]) * (ONE - rw[1]) * (ONE - rw[2]),
+          (ONE - rw[0]) * (ONE - rw[1]) * rw[2],
+          (ONE - rw[0]) * rw[1] * (ONE - rw[2]),
+          (ONE - rw[0]) * rw[1] * rw[2],
+          rw[0] * (ONE - rw[1]) * (ONE - rw[2]),
+          rw[0] * (ONE - rw[1]) * rw[2],
+          rw[0] * rw[1] * (ONE - rw[2]),
+          rw[0] * rw[1] * rw[2],
         ] }
         _ => { panic!("Unsupported num_witness_secs: {}", num_witness_secs); }
       };
@@ -909,7 +868,7 @@ impl R1CSProof {
       &comm_claim_post_phase2,
     )?;
 
-    Ok([rp, rq_rev, rx, ry])
+    Ok([rp, rq_rev, rx, [rw, ry].concat()])
   }
 
   /*
