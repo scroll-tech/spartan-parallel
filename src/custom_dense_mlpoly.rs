@@ -1,4 +1,6 @@
 #![allow(clippy::too_many_arguments)]
+use std::cmp::min;
+
 use crate::dense_mlpoly::DensePolynomial;
 
 use super::math::Math;
@@ -17,19 +19,19 @@ pub struct DensePolynomialPqx {
   num_vars_p: usize,
   num_vars_q: usize,
   num_vars_x: usize,
-  num_instances: usize,
+  num_instances: usize, // num_instances is a power of 2 and num_instances / 2 < Z.len() <= num_instances
   num_proofs: Vec<usize>,
   max_num_proofs: usize,
   num_inputs: Vec<usize>,
   max_num_inputs: usize,
-  Z: Vec<Vec<Vec<Scalar>>>, // Evaluations of the polynomial in all the 2^num_vars Boolean inputs of order (p, q_rev, x)
+  pub Z: Vec<Vec<Vec<Scalar>>>, // Evaluations of the polynomial in all the 2^num_vars Boolean inputs of order (p, q_rev, x)
                             // Let Q_max = max_num_proofs, assume that for a given P, num_proofs[P] = Q_i, then let STEP = Q_max / Q_i,
                             // Z(P, y, .) is only non-zero if y is a multiple of STEP, so Z[P][j][.] actually stores Z(P, j*STEP, .)
                             // The same applies to X
 }
 
 // Reverse the bits in q (or x)
-fn rev_bits(q: usize, max_num_proofs: usize) -> usize {
+pub fn rev_bits(q: usize, max_num_proofs: usize) -> usize {
     (0..max_num_proofs.log_2()).rev().map(|i| q / (i.pow2()) % 2 * (max_num_proofs / i.pow2() / 2)).fold(0, |a, b| a + b)
 }
 
@@ -37,9 +39,6 @@ impl DensePolynomialPqx {
   // Assume z_mat is of form (p, q_rev, x), construct DensePoly
   pub fn new(z_mat: &Vec<Vec<Vec<Scalar>>>, num_proofs: Vec<usize>, max_num_proofs: usize, num_inputs: Vec<usize>, max_num_inputs: usize) -> Self {
       let num_instances = z_mat.len().next_power_of_two();
-      // If num_instances is not a power of 2, append z_mat with 0
-      let mut z_mat = z_mat.clone();
-      z_mat.extend(vec![vec![vec![ZERO; max_num_inputs]]; num_instances - z_mat.len()]);
       DensePolynomialPqx {
         num_vars_q: max_num_proofs.log_2(),
         num_vars_p: num_instances.log_2(),
@@ -49,7 +48,7 @@ impl DensePolynomialPqx {
         max_num_proofs,
         num_inputs,
         max_num_inputs,
-        Z: z_mat
+        Z: z_mat.clone()
       }
     }
 
@@ -78,16 +77,11 @@ impl DensePolynomialPqx {
         }
       }
     }
-    // If num_instances is not a power of 2, append Z with 0
-    let num_instances = num_instances.next_power_of_two();
-    for _ in z_mat.len()..num_instances {
-      Z.push(vec![vec![ZERO; max_num_inputs]]);
-    }
     DensePolynomialPqx {
       num_vars_q: max_num_proofs.log_2(),
       num_vars_p: num_instances.log_2(),
       num_vars_x: max_num_inputs.log_2(),
-      num_instances,
+      num_instances: num_instances.next_power_of_two(),
       num_proofs,
       max_num_proofs,
       num_inputs,
@@ -106,7 +100,11 @@ impl DensePolynomialPqx {
 
   // Given (p, q_rev, x_rev) return Z[p][q_rev][x_rev]
   pub fn index(&mut self, p: usize, q_rev: usize, x_rev: usize) -> Scalar {
-      return self.Z[p][q_rev][x_rev];
+      if p < self.Z.len() {
+        return self.Z[p][q_rev][x_rev];
+      } else {
+        return ZERO;
+      }
   }
 
   // Given (p, q_rev, x_rev) and a mode, return Z[p*][q_rev*][x_rev*]
@@ -116,7 +114,7 @@ impl DensePolynomialPqx {
   // Assume that first bit of the corresponding index is 0, otherwise throw out of bound exception
   pub fn index_high(&mut self, p: usize, q_rev: usize, x_rev: usize, mode: usize) -> Scalar {
       match mode {
-          1 => { return self.Z[p + self.num_instances / 2][q_rev][x_rev]; }
+          1 => { if p + self.num_instances / 2 < self.Z.len() { return self.Z[p + self.num_instances / 2][q_rev][x_rev] } else { return ZERO; } }
           2 => { return if self.num_proofs[p] == 1 { ZERO } else { self.Z[p][q_rev + self.num_proofs[p] / 2][x_rev] }; }
           3 => { return if self.num_inputs[p] == 1 { ZERO } else { self.Z[p][q_rev][x_rev + self.num_inputs[p] / 2] }; }
           _ => { panic!("DensePolynomialPqx bound failed: unrecognized mode {}!", mode); }
@@ -143,7 +141,8 @@ impl DensePolynomialPqx {
       assert_eq!(self.max_num_inputs, 1);
       self.num_instances /= 2;
       for p in 0..self.num_instances {
-          self.Z[p][0][0] = self.Z[p][0][0] + r * (self.Z[p + self.num_instances][0][0] - self.Z[p][0][0]);
+          let Z_high = if p + self.num_instances < self.Z.len() { self.Z[p + self.num_instances][0][0] } else { ZERO };
+            self.Z[p][0][0] = self.Z[p][0][0] + r * (Z_high - self.Z[p][0][0]);
       }
       self.num_vars_p -= 1;
   }
@@ -152,7 +151,7 @@ impl DensePolynomialPqx {
   pub fn bound_poly_q(&mut self, r: &Scalar) {
       self.max_num_proofs /= 2;
 
-      for p in 0..self.num_instances {
+      for p in 0..min(self.num_instances, self.Z.len()) {
         if self.num_proofs[p] == 1 {
           // q = 0
           for x in 0..self.num_inputs[p] {
@@ -174,7 +173,7 @@ impl DensePolynomialPqx {
   pub fn bound_poly_x(&mut self, r: &Scalar) {
       self.max_num_inputs /= 2;
 
-      for p in 0..self.num_instances {
+      for p in 0..min(self.num_instances, self.Z.len()) {
         if self.num_inputs[p] == 1 {
           // x = 0
           for q in 0..self.num_proofs[p] {
@@ -235,7 +234,7 @@ impl DensePolynomialPqx {
   // Convert to a (p, q_rev, x_rev) regular dense poly of form (p, q, x)
   pub fn to_dense_poly(&self) -> DensePolynomial {
       let mut Z_poly = vec![ZERO; self.num_instances * self.max_num_proofs * self.max_num_inputs];
-      for p in 0..self.num_instances {
+      for p in 0..min(self.num_instances, self.Z.len()) {
         let step_q = self.max_num_proofs / self.num_proofs[p];
         let step_x = self.max_num_inputs / self.num_inputs[p];
         for q_rev in 0..self.num_proofs[p] {

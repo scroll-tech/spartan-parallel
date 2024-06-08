@@ -461,6 +461,7 @@ impl SparseMatPolynomial {
         let row = self.M[i].row;
         let col = self.M[i].col;
         let val = &self.M[i].val;
+        assert!(col < num_cols);
         (row, val * z[col])
       })
       .fold(vec![Scalar::zero(); num_rows], |mut Mz, (r, v)| {
@@ -469,6 +470,7 @@ impl SparseMatPolynomial {
       })
   }
 
+  /*
   // Trailing zeros in Z are not recorded
   // So trailing zeros in MZ should also not be recorded
   // Return a num_proofs * base_num_rows matrix
@@ -498,6 +500,7 @@ impl SparseMatPolynomial {
     }
     Mz_list
   }
+  */
 
   pub fn compute_eval_table_sparse(
     &self,
@@ -516,6 +519,7 @@ impl SparseMatPolynomial {
     M_evals
   }
 
+  /*
   // Only compute the first max_num_proofs / max_num_proofs_bound entries
   // num_cols is already num_vars * max_num_proofs / max_num_proofs_bound
   pub fn compute_eval_table_sparse_single(
@@ -537,6 +541,7 @@ impl SparseMatPolynomial {
     }
     M_evals
   }
+  */
 
   pub fn multi_commit(
     sparse_polys: &[&SparseMatPolynomial],

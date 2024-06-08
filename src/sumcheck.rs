@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
-use crate::custom_dense_mlpoly::DensePolynomialPqx;
+use crate::custom_dense_mlpoly::{rev_bits, DensePolynomialPqx};
 use crate::math::Math;
 
 use super::commitments::{Commitments, MultiCommitGens};
@@ -13,9 +13,12 @@ use super::scalar::Scalar;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use super::unipoly::{CompressedUniPoly, UniPoly};
 use core::iter;
+use std::cmp::min;
 use itertools::izip;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
+
+const ZERO: Scalar = Scalar::zero();
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SumcheckInstanceProof {
@@ -200,9 +203,9 @@ impl SumcheckInstanceProof {
     let mut r: Vec<Scalar> = Vec::new();
     let mut cubic_polys: Vec<CompressedUniPoly> = Vec::new();
     for _j in 0..num_rounds {
-      let mut eval_point_0 = Scalar::zero();
-      let mut eval_point_2 = Scalar::zero();
-      let mut eval_point_3 = Scalar::zero();
+      let mut eval_point_0 = ZERO;
+      let mut eval_point_2 = ZERO;
+      let mut eval_point_3 = ZERO;
 
       let len = poly_A.len() / 2;
       for i in 0..len {
@@ -292,9 +295,9 @@ impl SumcheckInstanceProof {
       let mut evals: Vec<(Scalar, Scalar, Scalar)> = Vec::new();
 
       for (poly_A, poly_B) in poly_A_vec_par.iter().zip(poly_B_vec_par.iter()) {
-        let mut eval_point_0 = Scalar::zero();
-        let mut eval_point_2 = Scalar::zero();
-        let mut eval_point_3 = Scalar::zero();
+        let mut eval_point_0 = ZERO;
+        let mut eval_point_2 = ZERO;
+        let mut eval_point_3 = ZERO;
 
         let len = poly_A.len() / 2;
         for i in 0..len {
@@ -331,9 +334,9 @@ impl SumcheckInstanceProof {
         poly_B_vec_seq.iter(),
         poly_C_vec_seq.iter()
       ) {
-        let mut eval_point_0 = Scalar::zero();
-        let mut eval_point_2 = Scalar::zero();
-        let mut eval_point_3 = Scalar::zero();
+        let mut eval_point_0 = ZERO;
+        let mut eval_point_2 = ZERO;
+        let mut eval_point_3 = ZERO;
         let len = poly_A.len() / 2;
         for i in 0..len {
           // eval 0: bound_func is A(low)
@@ -447,7 +450,7 @@ impl ZKSumcheckInstanceProof {
     /* For debugging only */
     /* If the value is not 0, the instance / input is wrong */
     /*
-    let mut expected = Scalar::zero();
+    let mut expected = ZERO;
     for i in 0..poly_A.len() {
       expected += poly_A[i] * poly_B[i];
     }
@@ -469,8 +472,8 @@ impl ZKSumcheckInstanceProof {
 
     for j in 0..num_rounds {
       let (poly, comm_poly) = {
-        let mut eval_point_0 = Scalar::zero();
-        let mut eval_point_2 = Scalar::zero();
+        let mut eval_point_0 = ZERO;
+        let mut eval_point_2 = ZERO;
 
         let len = poly_A.len() / 2;
         for i in 0..len {
@@ -619,7 +622,7 @@ impl ZKSumcheckInstanceProof {
     /* For debugging only */
     /* If the value is not 0, the instance / input is wrong */
     /*
-    let mut expected = Scalar::zero();
+    let mut expected = ZERO;
     for i in 0..poly_A.len() {
       expected += poly_A[i] * poly_B[i] * poly_C[i];
     }
@@ -643,9 +646,9 @@ impl ZKSumcheckInstanceProof {
     for j in 0..num_rounds {
 
       let (poly, comm_poly) = {
-        let mut eval_point_0 = Scalar::zero();
-        let mut eval_point_2 = Scalar::zero();
-        let mut eval_point_3 = Scalar::zero();
+        let mut eval_point_0 = ZERO;
+        let mut eval_point_2 = ZERO;
+        let mut eval_point_3 = ZERO;
 
         let len = poly_A.len() / 2; // 2 ^ (num of remaining rounds - 1)
         for i in 0..len {
@@ -840,13 +843,9 @@ impl ZKSumcheckInstanceProof {
     let mut comm_evals: Vec<CompressedGroup> = Vec::new();
     let mut proofs: Vec<DotProductProof> = Vec::new();
 
-    let cons_space = num_rounds_x_max.pow2();
-    let proof_space = num_rounds_q_max.pow2();
-    let instance_space: usize = num_rounds_p.pow2();
-
-    let mut cons_len = cons_space;
-    let mut proof_len = proof_space;
-    let mut instance_len = instance_space;
+    let mut cons_len = num_rounds_x_max.pow2();
+    let mut proof_len = num_rounds_q_max.pow2();
+    let mut instance_len: usize = num_rounds_p.pow2();
 
     for j in 0..num_rounds {
       /* For debugging only */
@@ -854,13 +853,16 @@ impl ZKSumcheckInstanceProof {
       /*
       if j == 0 {
         println!("\nNEW INSTANCE");
-        let mut expected = Scalar::zero();
-        for p in 0..instance_len {
-          let step = proof_len / num_proofs[p];
-          for q in 0..num_proofs[p] {
-            for x in 0..cons_len {
-              let val = poly_Ap[p] * poly_Aq[q * step] * poly_Ax[x] * (poly_B.index(p, q, x) * poly_C.index(p, q, x) - poly_D.index(p, q, x));
-              if val != Scalar::zero() { println!("p: {}, q: {}, x: {}, val: {:?}", p, q, x, val); }
+        let mut expected = ZERO;
+        for p in 0..min(instance_len, num_proofs.len()) {
+          let step_q = proof_len / num_proofs[p];
+          let step_x = cons_len / num_cons[p];
+          for q_rev in 0..num_proofs[p] {
+            for x_rev in 0..cons_len {
+              let val = poly_Ap[p] * poly_Aq[q_rev * step_q] * poly_Ax[x_rev * step_x] * (poly_B.index(p, q_rev, x_rev) * poly_C.index(p, q_rev, x_rev) - poly_D.index(p, q_rev, x_rev));
+              let q = rev_bits(q_rev * step_q, proof_len);
+              let x = rev_bits(x_rev * step_x, cons_len);
+              if val != ZERO { println!("p: {}, q: {}, x: {}, val: {:?}", p, q, x, val); }
               expected += val;
             }
           }
@@ -881,11 +883,13 @@ impl ZKSumcheckInstanceProof {
       else { instance_len /= 2 };
 
       let (poly, comm_poly) = {
-        let mut eval_point_0 = Scalar::zero();
-        let mut eval_point_2 = Scalar::zero();
-        let mut eval_point_3 = Scalar::zero();
+        let mut eval_point_0 = ZERO;
+        let mut eval_point_2 = ZERO;
+        let mut eval_point_3 = ZERO;
 
-        for p in 0..instance_len {
+        // We are guaranteed initially instance_len < num_proofs.len() < instance_len x 2
+        // So min(instance_len, num_proofs.len()) suffices
+        for p in 0..min(instance_len, num_proofs.len()) {
           if mode == 3 && num_cons[p] > 1 { num_cons[p] /= 2; }
           // If q > num_proofs[p], the polynomials always evaluate to 0
           if mode == 2 && num_proofs[p] > 1 { num_proofs[p] /= 2; }

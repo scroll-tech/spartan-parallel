@@ -20,13 +20,14 @@ impl Instance {
   /// Constructs a new `Instance` and an associated satisfying assignment
   pub fn new(
     num_instances: usize,
-    num_cons: usize,
+    max_num_cons: usize,
+    num_cons: Vec<usize>,
     num_vars: usize,
     A: &Vec<Vec<(usize, usize, [u8; 32])>>,
     B: &Vec<Vec<(usize, usize, [u8; 32])>>,
     C: &Vec<Vec<(usize, usize, [u8; 32])>>,
   ) -> Result<Instance, R1CSError> {
-    let (num_vars_padded, num_cons_padded) = {
+    let (num_vars_padded, max_num_cons_padded, num_cons_padded) = {
       let num_vars_padded = {
         let mut num_vars_padded = num_vars;
 
@@ -37,31 +38,40 @@ impl Instance {
         num_vars_padded
       };
 
-      let num_cons_padded = {
-        let mut num_cons_padded = num_cons;
+      let max_num_cons_padded = {
+        let mut max_num_cons_padded = max_num_cons;
 
         // ensure that num_cons_padded is at least 2
-        if num_cons_padded == 0 || num_cons_padded == 1 {
-          num_cons_padded = 2;
+        if max_num_cons_padded == 0 || max_num_cons_padded == 1 {
+          max_num_cons_padded = 2;
         }
 
         // ensure that num_cons_padded is power of 2
-        if num_cons.next_power_of_two() != num_cons {
-          num_cons_padded = num_cons.next_power_of_two();
+        if max_num_cons.next_power_of_two() != max_num_cons {
+          max_num_cons_padded = max_num_cons.next_power_of_two();
         }
-        num_cons_padded
+        max_num_cons_padded
       };
 
-      (num_vars_padded, num_cons_padded)
+      let mut num_cons_padded = Vec::new();
+      for i in 0..num_cons.len() {
+        if num_cons[i] == 0 || num_cons[i] == 1 {
+          num_cons_padded.push(2);
+        } else {
+          num_cons_padded.push(num_cons[i].next_power_of_two());
+        }
+      }
+
+      (num_vars_padded, max_num_cons_padded, num_cons_padded)
     };
 
     let bytes_to_scalar =
-      |tups: &[(usize, usize, [u8; 32])]| -> Result<Vec<(usize, usize, Scalar)>, R1CSError> {
+      |b: usize, tups: &[(usize, usize, [u8; 32])]| -> Result<Vec<(usize, usize, Scalar)>, R1CSError> {
         let mut mat: Vec<(usize, usize, Scalar)> = Vec::new();
         for &(row, col, val_bytes) in tups {
           // row must be smaller than num_cons
-          if row >= num_cons {
-            println!("ROW: {}, NUM_CONS: {}", row, num_cons);
+          if row >= num_cons[b] {
+            println!("ROW: {}, NUM_CONS: {}", row, num_cons[b]);
             return Err(R1CSError::InvalidIndex);
           }
 
@@ -87,8 +97,8 @@ impl Instance {
 
         // pad with additional constraints up until num_cons_padded if the original constraints were 0 or 1
         // we do not need to pad otherwise because the dummy constraints are implicit in the sum-check protocol
-        if num_cons == 0 || num_cons == 1 {
-          for i in tups.len()..num_cons_padded {
+        if num_cons[b] == 0 || num_cons[b] == 1 {
+          for i in tups.len()..num_cons_padded[b] {
             mat.push((i, num_vars, Scalar::zero()));
           }
         }
@@ -101,19 +111,19 @@ impl Instance {
     let mut C_scalar_list = Vec::new();
 
     for i in 0..num_instances {
-      let A_scalar = bytes_to_scalar(&A[i]);
+      let A_scalar = bytes_to_scalar(i, &A[i]);
       if A_scalar.is_err() {
         return Err(A_scalar.err().unwrap());
       }
       A_scalar_list.push(A_scalar.unwrap());
 
-      let B_scalar = bytes_to_scalar(&B[i]);
+      let B_scalar = bytes_to_scalar(i, &B[i]);
       if B_scalar.is_err() {
         return Err(B_scalar.err().unwrap());
       }
       B_scalar_list.push(B_scalar.unwrap());
 
-      let C_scalar = bytes_to_scalar(&C[i]);
+      let C_scalar = bytes_to_scalar(i, &C[i]);
       if C_scalar.is_err() {
         return Err(C_scalar.err().unwrap());
       }
@@ -122,6 +132,7 @@ impl Instance {
 
     let inst = R1CSInstance::new(
       num_instances,
+      max_num_cons_padded,
       num_cons_padded,
       num_vars_padded,
       &A_scalar_list,
@@ -250,7 +261,8 @@ impl Instance {
   ) -> (usize, usize, usize, Instance) {
     assert_eq!(num_instances, args.len());
 
-    let mut block_num_cons = 0;
+    let mut block_max_num_cons = 0;
+    let mut block_num_cons = Vec::new();
     let mut block_num_non_zero_entries = 0;
 
     let mut A_list = Vec::new();
@@ -450,7 +462,8 @@ impl Instance {
       };
 
       // Check if num_cons > block_num_cons
-      block_num_cons = max(block_num_cons, counter);
+      block_max_num_cons = max(block_max_num_cons, counter);
+      block_num_cons.push(counter);
 
       // Recalculate num_non_zero_entries
       block_num_non_zero_entries = max(max(max(block_num_non_zero_entries, tmp_nnz_A), tmp_nnz_B), tmp_nnz_C);
@@ -458,12 +471,11 @@ impl Instance {
       B_list.push(B);
       C_list.push(C);
     }
-    block_num_cons = block_num_cons.next_power_of_two();
     
     let block_num_vars = 8 * num_vars;
 
-    let block_inst = Instance::new(num_instances, block_num_cons, block_num_vars, &A_list, &B_list, &C_list).unwrap();
-    (block_num_vars, block_num_cons, block_num_non_zero_entries, block_inst)
+    let block_inst = Instance::new(num_instances, block_max_num_cons, block_num_cons, block_num_vars, &A_list, &B_list, &C_list).unwrap();
+    (block_num_vars, block_max_num_cons, block_num_non_zero_entries, block_inst)
   }
 
   /// PAIRWISE_CHECK is consisted of two parts:
@@ -511,7 +523,8 @@ impl Instance {
   /// v  D1   a   d  ls  ts   _   _  |  v  D1   a   d  ls  ts   _   _  | D2  EQ  B0  B1  ...
   pub fn gen_pairwise_check_inst(max_ts_width: usize, mem_addr_ts_bits_size: usize) -> (usize, usize, usize, Instance) {
     let pairwise_check_num_vars = max(8, mem_addr_ts_bits_size);
-    let pairwise_check_num_cons = 8 + max_ts_width;
+    let pairwise_check_max_num_cons = 8 + max_ts_width;
+    let pairwise_check_num_cons = vec![2, 4, 8 + max_ts_width];
     let pairwise_check_num_non_zero_entries = max(13 + max_ts_width, 5 + 2 * max_ts_width);
   
     let pairwise_check_inst = {
@@ -645,11 +658,11 @@ impl Instance {
       B_list.push(B);
       C_list.push(C);
 
-      let pairwise_check_inst = Instance::new(3, pairwise_check_num_cons, 4 * pairwise_check_num_vars, &A_list, &B_list, &C_list).unwrap();
+      let pairwise_check_inst = Instance::new(3, pairwise_check_max_num_cons, pairwise_check_num_cons, 4 * pairwise_check_num_vars, &A_list, &B_list, &C_list).unwrap();
       
       pairwise_check_inst
     };
-    (pairwise_check_num_vars, pairwise_check_num_cons, pairwise_check_num_non_zero_entries, pairwise_check_inst)
+    (pairwise_check_num_vars, pairwise_check_max_num_cons, pairwise_check_num_non_zero_entries, pairwise_check_inst)
   }
 
   /// Generates PERM_ROOT instance based on parameters
@@ -669,7 +682,6 @@ impl Instance {
   /// D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
   /// Note: Only process the first num_inputs_unpadded inputs since the rest are unused
   pub fn gen_perm_root_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
-
     let perm_root_num_cons = 2 * num_inputs_unpadded + 4;
     let perm_root_num_non_zero_entries = 4 * num_inputs_unpadded + 5;
     let perm_root_inst = {
@@ -768,7 +780,7 @@ impl Instance {
       let B_list = vec![B.clone()];
       let C_list = vec![C.clone()];
   
-      let perm_root_inst = Instance::new(1, perm_root_num_cons, 8 * num_vars, &A_list, &B_list, &C_list).unwrap();
+      let perm_root_inst = Instance::new(1, perm_root_num_cons, vec![perm_root_num_cons], 8 * num_vars, &A_list, &B_list, &C_list).unwrap();
       
       perm_root_inst
     };

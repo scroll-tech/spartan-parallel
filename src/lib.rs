@@ -884,8 +884,6 @@ impl SNARK {
     }
     let total_num_vir_mem_accesses = if total_num_vir_mem_accesses == 0 { 0 } else { total_num_vir_mem_accesses.next_power_of_two() };
 
-    // Pad num_proofs with 1 until the next power of 2
-    block_num_proofs.extend(vec![1; block_num_instances.next_power_of_two() - block_num_instances]);
     let block_num_proofs = &block_num_proofs;
     timer_sort.stop();
 
@@ -1839,7 +1837,7 @@ impl SNARK {
           block_max_num_proofs,
           block_num_proofs,
           num_vars,
-          &vec![num_vars; block_num_instances.next_power_of_two()],
+          &vec![num_vars; block_num_instances],
           block_wit_secs,
           &block_inst.inst,
           &vars_gens,
@@ -1911,8 +1909,7 @@ impl SNARK {
       ProverWitnessSecInfo::concat(components)
     };
     let pairwise_num_instances = pairwise_prover.w_mat.len();
-    let mut pairwise_num_proofs: Vec<usize> = pairwise_prover.w_mat.iter().map(|i| i.len()).collect();
-    pairwise_num_proofs.extend(vec![1; pairwise_num_instances.next_power_of_two() - pairwise_num_instances]);
+    let pairwise_num_proofs: Vec<usize> = pairwise_prover.w_mat.iter().map(|i| i.len()).collect();
     let (pairwise_check_r1cs_sat_proof, pairwise_check_challenges) = {
       let (proof, pairwise_check_challenges) = {
         R1CSProof::prove(
@@ -1920,7 +1917,7 @@ impl SNARK {
           pairwise_size,
           &pairwise_num_proofs,
           max(8, mem_addr_ts_bits_size),
-          &vec![max(8, mem_addr_ts_bits_size); pairwise_num_instances.next_power_of_two()],
+          &vec![max(8, mem_addr_ts_bits_size); pairwise_num_instances],
           vec![&pairwise_prover, &pairwise_shifted_prover, &addr_ts_bits_prover],
           &pairwise_check_inst.inst,
           &vars_gens,
@@ -1986,8 +1983,7 @@ impl SNARK {
     let (perm_root_w3_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover]);
     let (perm_root_w3_shifted_prover, _) = ProverWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_prover, &phy_mem_addr_w3_shifted_prover, &vir_mem_addr_w3_shifted_prover]);
     let perm_root_num_instances = perm_root_w1_prover.w_mat.len();
-    let mut perm_root_num_proofs: Vec<usize> = perm_root_w1_prover.w_mat.iter().map(|i| i.len()).collect();
-    perm_root_num_proofs.extend(vec![1; perm_root_num_instances.next_power_of_two() - perm_root_num_instances]);
+    let perm_root_num_proofs: Vec<usize> = perm_root_w1_prover.w_mat.iter().map(|i| i.len()).collect();
     let (perm_root_r1cs_sat_proof, perm_root_challenges) = {
       let (proof, perm_root_challenges) = {
         R1CSProof::prove(
@@ -1995,7 +1991,7 @@ impl SNARK {
           perm_size,
           &perm_root_num_proofs,
           num_ios,
-          &vec![num_ios; perm_root_num_instances.next_power_of_two()],
+          &vec![num_ios; perm_root_num_instances],
           vec![&perm_w0_prover, &perm_root_w1_prover, &perm_root_w2_prover, &perm_root_w3_prover, &perm_root_w3_shifted_prover],
           &perm_root_inst.inst,
           &vars_gens,
@@ -2645,8 +2641,7 @@ impl SNARK {
         VerifierWitnessSecInfo::concat(components)
       };
       let pairwise_num_instances = pairwise_verifier.num_proofs.len();
-      let mut pairwise_num_proofs: Vec<usize> = pairwise_verifier.num_proofs.clone();
-      pairwise_num_proofs.extend(vec![1; pairwise_num_instances.next_power_of_two() - pairwise_num_instances]);
+      let pairwise_num_proofs: Vec<usize> = pairwise_verifier.num_proofs.clone();
 
       let pairwise_check_challenges = self.pairwise_check_r1cs_sat_proof.verify(
         pairwise_num_instances,
@@ -2706,8 +2701,7 @@ impl SNARK {
       let (perm_root_w3_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier]);
       let (perm_root_w3_shifted_verifier, _) = VerifierWitnessSecInfo::merge(vec![&perm_exec_w3_shifted_verifier, &phy_mem_addr_w3_shifted_verifier, &vir_mem_addr_w3_shifted_verifier]);
       let perm_root_num_instances = perm_root_w1_verifier.num_proofs.len();
-      let mut perm_root_num_proofs: Vec<usize> = perm_root_w1_verifier.num_proofs.clone();
-      perm_root_num_proofs.extend(vec![1; perm_root_num_instances.next_power_of_two() - perm_root_num_instances]);
+      let perm_root_num_proofs: Vec<usize> = perm_root_w1_verifier.num_proofs.clone();
       let perm_block_root_challenges = self.perm_root_r1cs_sat_proof.verify(
         perm_root_num_instances,
         perm_size,
