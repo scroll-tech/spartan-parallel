@@ -137,6 +137,7 @@ impl R1CSProof {
     num_rounds_y_max: usize,
     num_rounds_w: usize,
     num_rounds_p: usize,
+    single_inst: bool,
     num_witness_secs: usize,
     num_inputs: Vec<usize>,
     claim: &Scalar,
@@ -157,6 +158,7 @@ impl R1CSProof {
       num_rounds_y_max,
       num_rounds_w,
       num_rounds_p,
+      single_inst,
       num_witness_secs,
       num_inputs,
       evals_eq,
@@ -432,7 +434,7 @@ impl R1CSProof {
       );
 
       let mut evals_ABC = Vec::new();
-      for p in 0..num_instances {
+      for p in 0..inst.get_num_instances() {
         evals_ABC.push(vec![Vec::new()]);
         for w in 0..num_witness_secs {
           evals_ABC[p][0].push(Vec::new());
@@ -463,6 +465,7 @@ impl R1CSProof {
       num_rounds_y,
       num_rounds_w,
       num_rounds_p,
+      inst.get_num_instances() == 1,
       num_witness_secs,
       num_inputs.clone(),
       &claim_phase2,

@@ -499,23 +499,14 @@ impl R1CSInstance {
     let mut evals_A_list = Vec::new();
     let mut evals_B_list = Vec::new();
     let mut evals_C_list = Vec::new();
-    // If num_instances is 1, copy it for num_instances.next_power_of_two()
-    if self.num_instances == 1 {
-      let evals_A = self.A_list[0].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[0], num_segs, max_num_cols, num_cols[0]);
-      let evals_B = self.B_list[0].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[0], num_segs, max_num_cols, num_cols[0]);
-      let evals_C = self.C_list[0].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[0], num_segs, max_num_cols, num_cols[0]);
-      evals_A_list = vec![vec![evals_A]; num_instances];
-      evals_B_list = vec![vec![evals_B]; num_instances];
-      evals_C_list = vec![vec![evals_C]; num_instances];
-    } else {
-      for p in 0..num_instances {
-        let evals_A = self.A_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
-        let evals_B = self.B_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
-        let evals_C = self.C_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
-        evals_A_list.push(vec![evals_A]);
-        evals_B_list.push(vec![evals_B]);
-        evals_C_list.push(vec![evals_C]);
-      }
+    // Length of output follows self.num_instances NOT num_instances!!!
+    for p in 0..self.num_instances {
+      let evals_A = self.A_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
+      let evals_B = self.B_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
+      let evals_C = self.C_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
+      evals_A_list.push(vec![evals_A]);
+      evals_B_list.push(vec![evals_B]);
+      evals_C_list.push(vec![evals_C]);
     }
 
     (evals_A_list, evals_B_list, evals_C_list)

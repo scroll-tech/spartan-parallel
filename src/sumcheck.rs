@@ -436,6 +436,7 @@ impl SumcheckInstanceProof {
 }
 
 impl ZKSumcheckInstanceProof {
+  /*
   pub fn prove_quad<F>(
     claim: &Scalar,
     blind_claim: &Scalar,
@@ -803,6 +804,7 @@ impl ZKSumcheckInstanceProof {
       blinds_evals[num_rounds - 1],
     )
   }
+  */
 
   pub fn prove_cubic_disjoint_rounds<F>(
     claim: &Scalar,
@@ -811,6 +813,7 @@ impl ZKSumcheckInstanceProof {
     num_rounds_y_max: usize,
     num_rounds_w: usize,
     num_rounds_p: usize,
+    single_inst: bool, // indicates whether poly_B only has one instance
     num_witness_secs: usize,
     mut num_inputs: Vec<usize>,
     poly_A: &mut DensePolynomial,
@@ -825,7 +828,8 @@ impl ZKSumcheckInstanceProof {
   where
     F: Fn(&Scalar, &Scalar, &Scalar) -> Scalar,
   {
-    // Note: num_proofs must be 1!
+    // NOTE: if single_inst, number of instances in poly_B is 1, might not match with instance_len!
+    // NOTE: num_proofs must be 1!
     // We perform sumcheck in y -> w -> p order, but all polynomials have parameters (p, w, y)
     // poly_A is the EQ polynomial of size P * W * Y_max
     assert_eq!(num_rounds, num_rounds_y_max + num_rounds_w + num_rounds_p);
@@ -855,9 +859,10 @@ impl ZKSumcheckInstanceProof {
         println!("\nNEW INSTANCE");
         let mut expected = ZERO;
         for p in 0..min(instance_len, num_inputs.len()) {
+          let p_inst = if single_inst { 0 } else { p };
           for w in 0..min(witness_secs_len, num_witness_secs) {
             for y_rev in 0..inputs_len {
-              let val = poly_A[p] * poly_B.index(p, 0, w, y_rev) * poly_C.index(p, 0, w, y_rev);
+              let val = poly_A[p] * poly_B.index(p_inst, 0, w, y_rev) * poly_C.index(p, 0, w, y_rev);
               expected += val;
             }
           }
@@ -885,6 +890,7 @@ impl ZKSumcheckInstanceProof {
         // We are guaranteed initially instance_len < num_inputs.len() < instance_len x 2
         // So min(instance_len, num_proofs.len()) suffices
         for p in 0..min(instance_len, num_inputs.len()) {
+          let p_inst = if single_inst { 0 } else { p };
           if mode == MODE_X && num_inputs[p] > 1 { num_inputs[p] /= 2; }
           for w in 0..min(witness_secs_len, num_witness_secs) {
             for y in 0..num_inputs[p] {
@@ -900,11 +906,11 @@ impl ZKSumcheckInstanceProof {
               };
 
               // eval 0: bound_func is A(low)
-              eval_point_0 += comb_func(&poly_A_index_p_w_y, &poly_B.index(p, 0, w, y), &poly_C.index(p, 0, w, y)); // Az[0, x, x, x, ...]
+              eval_point_0 += comb_func(&poly_A_index_p_w_y, &poly_B.index(p_inst, 0, w, y), &poly_C.index(p, 0, w, y)); // Az[0, x, x, x, ...]
 
               // eval 2: bound_func is -A(low) + 2*A(high)
               let poly_A_bound_point = poly_A_index_high_p_w_y + poly_A_index_high_p_w_y - poly_A_index_p_w_y;
-              let poly_B_bound_point = poly_B.index_high(p, 0, w, y, mode) + poly_B.index_high(p, 0, w, y, mode) - poly_B.index(p, 0, w, y); // Az[2, x, x, ...]
+              let poly_B_bound_point = poly_B.index_high(p_inst, 0, w, y, mode) + poly_B.index_high(p_inst, 0, w, y, mode) - poly_B.index(p_inst, 0, w, y); // Az[2, x, x, ...]
               let poly_C_bound_point = poly_C.index_high(p, 0, w, y, mode) + poly_C.index_high(p, 0, w, y, mode) - poly_C.index(p, 0, w, y);
               eval_point_2 += comb_func(
                 &poly_A_bound_point,
@@ -914,7 +920,7 @@ impl ZKSumcheckInstanceProof {
 
               // eval 3: bound_func is -2A(low) + 3A(high); computed incrementally with bound_func applied to eval(2)
               let poly_A_bound_point = poly_A_bound_point + poly_A_index_high_p_w_y - poly_A_index_p_w_y;
-              let poly_B_bound_point = poly_B_bound_point + poly_B.index_high(p, 0, w, y, mode) - poly_B.index(p, 0, w, y); // Az[3, x, x, ...]
+              let poly_B_bound_point = poly_B_bound_point + poly_B.index_high(p_inst, 0, w, y, mode) - poly_B.index(p_inst, 0, w, y); // Az[3, x, x, ...]
               let poly_C_bound_point = poly_C_bound_point + poly_C.index_high(p, 0, w, y, mode) - poly_C.index(p, 0, w, y);
               eval_point_3 += comb_func(
                 &poly_A_bound_point,
@@ -947,7 +953,9 @@ impl ZKSumcheckInstanceProof {
       if mode == MODE_P {
         poly_A.bound_poly_var_top(&r_j);
       }
-      poly_B.bound_poly(&r_j, mode);
+      if mode != MODE_P || !single_inst {
+        poly_B.bound_poly(&r_j, mode);
+      }
       poly_C.bound_poly(&r_j, mode);
 
       // produce a proof of sum-check and of evaluation
