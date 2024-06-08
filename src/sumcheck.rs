@@ -804,17 +804,15 @@ impl ZKSumcheckInstanceProof {
     )
   }
 
-  /*
   pub fn prove_cubic_disjoint_rounds<F>(
     claim: &Scalar,
     blind_claim: &Scalar,
     num_rounds: usize,
-    num_rounds_x_max: usize,
-    num_rounds_q_max: usize,
+    num_rounds_y_max: usize,
+    num_rounds_w: usize,
     num_rounds_p: usize,
-    // num_proofs = num_witness_secs
-    mut num_proofs: Vec<usize>,
-    mut num_cons: Vec<usize>,
+    num_witness_secs: usize,
+    mut num_inputs: Vec<usize>,
     poly_A: &mut DensePolynomial,
     poly_B: &mut DensePolynomialPqx,
     poly_C: &mut DensePolynomialPqx,
@@ -827,11 +825,10 @@ impl ZKSumcheckInstanceProof {
   where
     F: Fn(&Scalar, &Scalar, &Scalar) -> Scalar,
   {
-    // Note: We perform sumcheck in x -> q_rev -> p order, but all polynomials have parameters (p, q, x)
-    // poly_A is the EQ polynomial of size P * Q_max * X
-    // poly_BCD are the AzBzCz polynomials, with size Q_sum * X
-    // Thus, we need to separate the rounds into rounds for X, Q_rev, and P
-    assert_eq!(num_rounds, num_rounds_x_max + num_rounds_q_max + num_rounds_p);
+    // Note: num_proofs must be 1!
+    // We perform sumcheck in y -> w -> p order, but all polynomials have parameters (p, w, y)
+    // poly_A is the EQ polynomial of size P * W * Y_max
+    assert_eq!(num_rounds, num_rounds_y_max + num_rounds_w + num_rounds_p);
 
     let (blinds_poly, blinds_evals) = (
       random_tape.random_vector(b"blinds_poly", num_rounds),
@@ -846,8 +843,8 @@ impl ZKSumcheckInstanceProof {
     let mut comm_evals: Vec<CompressedGroup> = Vec::new();
     let mut proofs: Vec<DotProductProof> = Vec::new();
 
-    let mut cons_len = num_rounds_x_max.pow2();
-    let mut proof_len = num_rounds_q_max.pow2();
+    let mut inputs_len = num_rounds_y_max.pow2();
+    let mut witness_secs_len = num_rounds_w.pow2();
     let mut instance_len: usize = num_rounds_p.pow2();
 
     for j in 0..num_rounds {
@@ -857,15 +854,10 @@ impl ZKSumcheckInstanceProof {
       if j == 0 {
         println!("\nNEW INSTANCE");
         let mut expected = ZERO;
-        for p in 0..min(instance_len, num_proofs.len()) {
-          let step_q = proof_len / num_proofs[p];
-          let step_x = cons_len / num_cons[p];
-          for q_rev in 0..num_proofs[p] {
-            for x_rev in 0..cons_len {
-              let val = poly_Ap[p] * poly_Aq[q_rev * step_q] * poly_Ax[x_rev * step_x] * poly_B.index(p, q_rev, x_rev) * poly_C.index(p, q_rev, x_rev);
-              let q = rev_bits(q_rev * step_q, proof_len);
-              let x = rev_bits(x_rev * step_x, cons_len);
-              if val != ZERO { println!("p: {}, q: {}, x: {}, val: {:?}", p, q, x, val); }
+        for p in 0..min(instance_len, num_inputs.len()) {
+          for w in 0..min(witness_secs_len, num_witness_secs) {
+            for y_rev in 0..inputs_len {
+              let val = poly_A[p] * poly_B.index(p, 0, w, y_rev) * poly_C.index(p, 0, w, y_rev);
               expected += val;
             }
           }
@@ -877,12 +869,12 @@ impl ZKSumcheckInstanceProof {
 
       // Use mode to decide which variable we are working with
       // Mode = 1 ==> p
-      // Mode = 2 ==> q
-      // Mode = 3 ==> x
-      let mode = if j < num_rounds_x_max { 3 } else if j < num_rounds_x_max + num_rounds_q_max { 2 } else { 1 };
+      // Mode = 3 ==> w
+      // Mode = 4 ==> x (y)
+      let mode = if j < num_rounds_y_max { MODE_X } else if j < num_rounds_y_max + num_rounds_w { MODE_W } else { MODE_P };
 
-      if cons_len > 1 { cons_len /= 2 }
-      else if proof_len > 1 { proof_len /= 2 }
+      if inputs_len > 1 { inputs_len /= 2 }
+      else if witness_secs_len > 1 { witness_secs_len /= 2 }
       else { instance_len /= 2 };
 
       let (poly, comm_poly) = {
@@ -890,34 +882,30 @@ impl ZKSumcheckInstanceProof {
         let mut eval_point_2 = ZERO;
         let mut eval_point_3 = ZERO;
 
-        // We are guaranteed initially instance_len < num_proofs.len() < instance_len x 2
+        // We are guaranteed initially instance_len < num_inputs.len() < instance_len x 2
         // So min(instance_len, num_proofs.len()) suffices
-        for p in 0..min(instance_len, num_proofs.len()) {
-          if mode == 3 && num_cons[p] > 1 { num_cons[p] /= 2; }
-          // If q > num_proofs[p], the polynomials always evaluate to 0
-          if mode == 2 && num_proofs[p] > 1 { num_proofs[p] /= 2; }
-          for q in 0..num_proofs[p] {
-            let step_q = proof_len / num_proofs[p];
-            let step_x = cons_len / num_cons[p];
-            for x in 0..num_cons[p] {
-              // evaluate A on p, q, x
-              let poly_A_index_p_q_x = poly_A[p * 2 * proof_len * 2 * cons_len + q * step_q * 2 * cons_len + x * step_x];
+        for p in 0..min(instance_len, num_inputs.len()) {
+          if mode == MODE_X && num_inputs[p] > 1 { num_inputs[p] /= 2; }
+          for w in 0..min(witness_secs_len, num_witness_secs) {
+            for y in 0..num_inputs[p] {
+              // evaluate A on p, w, y
+              let poly_A_index_p_w_y = poly_A[p];
 
               // evaluate A on p_high, q_high, x_high
-              let poly_A_index_high_p_q_x = match mode {
-                1 => poly_A[(p + instance_len) * 2 * proof_len * 2 * cons_len + q * step_q * 2 * cons_len + x * step_x],
-                2 => poly_A[p * 2 * proof_len * 2 * cons_len + (q * step_q + proof_len) * 2 * cons_len + x * step_x],
-                3 => poly_A[p * 2 * proof_len * 2 * cons_len + q * step_q * 2 * cons_len + (x * step_x + cons_len)],
+              let poly_A_index_high_p_w_y = match mode {
+                MODE_P => poly_A[p + instance_len],
+                MODE_W => poly_A[p],
+                MODE_X => poly_A[p],
                 _ => { panic!("DensePolynomialPqx bound failed: unrecognized mode {}!", mode); }
               };
 
               // eval 0: bound_func is A(low)
-              eval_point_0 += comb_func(&poly_A_index_p_q_x, &poly_B.index(p, q, x), &poly_C.index(p, q, x)); // Az[0, x, x, x, ...]
+              eval_point_0 += comb_func(&poly_A_index_p_w_y, &poly_B.index(p, 0, w, y), &poly_C.index(p, 0, w, y)); // Az[0, x, x, x, ...]
 
               // eval 2: bound_func is -A(low) + 2*A(high)
-              let poly_A_bound_point = poly_A_index_high_p_q_x + poly_A_index_high_p_q_x - poly_A_index_p_q_x;
-              let poly_B_bound_point = poly_B.index_high(p, q, x, mode) + poly_B.index_high(p, q, x, mode) - poly_B.index(p, q, x); // Az[2, x, x, ...]
-              let poly_C_bound_point = poly_C.index_high(p, q, x, mode) + poly_C.index_high(p, q, x, mode) - poly_C.index(p, q, x);
+              let poly_A_bound_point = poly_A_index_high_p_w_y + poly_A_index_high_p_w_y - poly_A_index_p_w_y;
+              let poly_B_bound_point = poly_B.index_high(p, 0, w, y, mode) + poly_B.index_high(p, 0, w, y, mode) - poly_B.index(p, 0, w, y); // Az[2, x, x, ...]
+              let poly_C_bound_point = poly_C.index_high(p, 0, w, y, mode) + poly_C.index_high(p, 0, w, y, mode) - poly_C.index(p, 0, w, y);
               eval_point_2 += comb_func(
                 &poly_A_bound_point,
                 &poly_B_bound_point,
@@ -925,9 +913,9 @@ impl ZKSumcheckInstanceProof {
               );
 
               // eval 3: bound_func is -2A(low) + 3A(high); computed incrementally with bound_func applied to eval(2)
-              let poly_A_bound_point = poly_A_bound_point + poly_A_index_high_p_q_x - poly_A_index_p_q_x;
-              let poly_B_bound_point = poly_B_bound_point + poly_B.index_high(p, q, x, mode) - poly_B.index(p, q, x); // Az[3, x, x, ...]
-              let poly_C_bound_point = poly_C_bound_point + poly_C.index_high(p, q, x, mode) - poly_C.index(p, q, x);
+              let poly_A_bound_point = poly_A_bound_point + poly_A_index_high_p_w_y - poly_A_index_p_w_y;
+              let poly_B_bound_point = poly_B_bound_point + poly_B.index_high(p, 0, w, y, mode) - poly_B.index(p, 0, w, y); // Az[3, x, x, ...]
+              let poly_C_bound_point = poly_C_bound_point + poly_C.index_high(p, 0, w, y, mode) - poly_C.index(p, 0, w, y);
               eval_point_3 += comb_func(
                 &poly_A_bound_point,
                 &poly_B_bound_point,
@@ -956,7 +944,9 @@ impl ZKSumcheckInstanceProof {
       let r_j = transcript.challenge_scalar(b"challenge_nextround");
 
       // bound all tables to the verifier's challenege
-      poly_A.bound_poly_var_top(&r_j); 
+      if mode == MODE_P {
+        poly_A.bound_poly_var_top(&r_j);
+      }
       poly_B.bound_poly(&r_j, mode);
       poly_C.bound_poly(&r_j, mode);
 
@@ -1003,7 +993,6 @@ impl ZKSumcheckInstanceProof {
 
           w[0] * blind_sc + w[1] * blind_eval
         };
-
         assert_eq!(target.commit(&blind, gens_1).compress(), comm_target);
 
         let a = {
@@ -1055,11 +1044,10 @@ impl ZKSumcheckInstanceProof {
     (
       ZKSumcheckInstanceProof::new(comm_polys, comm_evals, proofs),
       r,
-      vec![poly_A[0], poly_B.index(0, 0, 0), poly_C.index(0, 0, 0)],
+      vec![poly_A[0], poly_B.index(0, 0, 0, 0), poly_C.index(0, 0, 0, 0)],
       blinds_evals[num_rounds - 1],
     )
   }
-  */
 
   pub fn prove_cubic_with_additive_term_disjoint_rounds<F>(
     claim: &Scalar,
@@ -1123,7 +1111,7 @@ impl ZKSumcheckInstanceProof {
           let step_q = proof_len / num_proofs[p];
           let step_x = cons_len / num_cons[p];
           for q_rev in 0..num_proofs[p] {
-            for x_rev in 0..cons_len {
+            for x_rev in 0..num_cons[p] {
               let val = poly_Ap[p] * poly_Aq[q_rev * step_q] * poly_Ax[x_rev * step_x] * (poly_B.index(p, q_rev, 0, x_rev) * poly_C.index(p, q_rev, 0, x_rev) - poly_D.index(p, q_rev, 0, x_rev));
               let q = rev_bits(q_rev * step_q, proof_len);
               let x = rev_bits(x_rev * step_x, cons_len);

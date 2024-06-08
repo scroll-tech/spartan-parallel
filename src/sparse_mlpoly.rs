@@ -470,6 +470,22 @@ impl SparseMatPolynomial {
       })
   }
 
+  // Z is consisted of vector segments
+  // Z[i] contains entries i * max_num_cols ~ i * max_num_cols + num_cols
+  pub fn multiply_vec_disjoint_rounds(&self, num_rows: usize, max_num_cols: usize, _num_cols: usize, z: &Vec<Vec<Scalar>>) -> Vec<Scalar> {
+    (0..self.M.len())
+      .map(|i| {
+        let row = self.M[i].row;
+        let col = self.M[i].col;
+        let val = &self.M[i].val;
+        (row, val * z[col / max_num_cols][col % max_num_cols])
+      })
+      .fold(vec![Scalar::zero(); num_rows], |mut Mz, (r, v)| {
+        Mz[r] += v;
+        Mz
+      })
+  }
+
   /*
   // Trailing zeros in Z are not recorded
   // So trailing zeros in MZ should also not be recorded
@@ -515,6 +531,27 @@ impl SparseMatPolynomial {
     for i in 0..self.M.len() {
       let entry = &self.M[i];
       M_evals[entry.col] += rx[entry.row] * entry.val;
+    }
+    M_evals
+  }
+
+  // Store the result in a vector divided into num_segs segments
+  // output[i] stores entry i * max_num_cols ~ i * max_num_cols + num_cols of the original vector
+  pub fn compute_eval_table_sparse_disjoint_rounds(
+    &self,
+    rx: &[Scalar],
+    num_rows: usize,
+    num_segs: usize,
+    max_num_cols: usize,
+    num_cols: usize,
+  ) -> Vec<Vec<Scalar>> {
+    assert!(rx.len() >= num_rows);
+
+    let mut M_evals: Vec<Vec<Scalar>> = vec![vec![Scalar::zero(); num_cols]; num_segs];
+
+    for i in 0..self.M.len() {
+      let entry = &self.M[i];
+      M_evals[entry.col / max_num_cols][entry.col % max_num_cols] += rx[entry.row] * entry.val;
     }
     M_evals
   }

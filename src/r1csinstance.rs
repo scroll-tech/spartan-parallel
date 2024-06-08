@@ -361,7 +361,7 @@ impl R1CSInstance {
     num_proofs: Vec<usize>,
     max_num_proofs: usize,
     num_inputs: Vec<usize>,
-    _max_num_inputs: usize,
+    max_num_inputs: usize,
     max_num_cons: usize,
     num_cons: Vec<usize>,
     z_mat: &Vec<Vec<Vec<Vec<Scalar>>>>
@@ -382,12 +382,11 @@ impl R1CSInstance {
       Bz.push(Vec::new());
       Cz.push(Vec::new());
       for q in 0..num_proofs[p] {
-        let z = &z_list[q][0];
-        assert_eq!(z.len(), num_inputs[p]);
+        let z = &z_list[q];
 
-        Az[p].push(vec![self.A_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z)]);
-        Bz[p].push(vec![self.B_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z)]);
-        Cz[p].push(vec![self.C_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z)]);
+        Az[p].push(vec![self.A_list[p_inst].multiply_vec_disjoint_rounds(num_cons[p_inst].clone(), max_num_inputs, num_inputs[p], z)]);
+        Bz[p].push(vec![self.B_list[p_inst].multiply_vec_disjoint_rounds(num_cons[p_inst].clone(), max_num_inputs, num_inputs[p], z)]);
+        Cz[p].push(vec![self.C_list[p_inst].multiply_vec_disjoint_rounds(num_cons[p_inst].clone(), max_num_inputs, num_inputs[p], z)]);
       }
     }
     
@@ -480,6 +479,48 @@ impl R1CSInstance {
 
     (evals_A_list, evals_B_list, evals_C_list)
   }
+
+  // Store the result in a vector divided into num_segs segments
+  // output[p][q][w] stores entry w * max_num_cols ~ w * max_num_cols + num_cols of the original vector
+  pub fn compute_eval_table_sparse_disjoint_rounds(
+    &self,
+    num_instances: usize,
+    num_rows: &Vec<usize>,
+    num_segs: usize,
+    max_num_cols: usize,
+    num_cols: &Vec<usize>,
+    evals: &[Scalar],
+    // Output in p, q, w, i format, where q section has length 1
+  ) -> (Vec<Vec<Vec<Vec<Scalar>>>>, Vec<Vec<Vec<Vec<Scalar>>>>, Vec<Vec<Vec<Vec<Scalar>>>>) {
+    assert!(self.num_instances == 1 || self.num_instances == num_instances);
+    assert_eq!(num_rows, &self.num_cons);
+    assert_eq!(num_segs.next_power_of_two() * max_num_cols, self.num_vars);
+
+    let mut evals_A_list = Vec::new();
+    let mut evals_B_list = Vec::new();
+    let mut evals_C_list = Vec::new();
+    // If num_instances is 1, copy it for num_instances.next_power_of_two()
+    if self.num_instances == 1 {
+      let evals_A = self.A_list[0].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[0], num_segs, max_num_cols, num_cols[0]);
+      let evals_B = self.B_list[0].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[0], num_segs, max_num_cols, num_cols[0]);
+      let evals_C = self.C_list[0].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[0], num_segs, max_num_cols, num_cols[0]);
+      evals_A_list = vec![vec![evals_A]; num_instances];
+      evals_B_list = vec![vec![evals_B]; num_instances];
+      evals_C_list = vec![vec![evals_C]; num_instances];
+    } else {
+      for p in 0..num_instances {
+        let evals_A = self.A_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
+        let evals_B = self.B_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
+        let evals_C = self.C_list[p].compute_eval_table_sparse_disjoint_rounds(evals, num_rows[p], num_segs, max_num_cols, num_cols[p]);
+        evals_A_list.push(vec![evals_A]);
+        evals_B_list.push(vec![evals_B]);
+        evals_C_list.push(vec![evals_C]);
+      }
+    }
+
+    (evals_A_list, evals_B_list, evals_C_list)
+  }
+
 
   /*
   // Only compute the first max_num_proofs / max_num_proofs_bound entries
