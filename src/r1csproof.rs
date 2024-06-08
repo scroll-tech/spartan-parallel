@@ -260,24 +260,24 @@ impl R1CSProof {
 
     // append input to variables to create a single vector z
     let timer_tmp = Timer::new("prove_z_mat_gen");
-    let mut z_mat: Vec<Vec<Vec<Scalar>>> = Vec::new();
+    let mut z_mat: Vec<Vec<Vec<Vec<Scalar>>>> = Vec::new();
     for p in 0..num_instances {
       z_mat.push(Vec::new());
       for q in 0..num_proofs[p] {
-        z_mat[p].push(Vec::new());
+        z_mat[p].push(vec![Vec::new()]);
         for w in &witness_secs {
           let p_w = if w.w_mat.len() == 1 { 0 } else { p };
           let q_w = if w.w_mat[p_w].len() == 1 { 0 } else { q };
           // Only append the first num_inputs_entries of w_mat[p][q]
           if w.num_inputs[p_w] < num_inputs[p] {
-            z_mat[p][q].extend((0..w.num_inputs[p_w]).map(|i| w.w_mat[p_w][q_w][i]).collect::<Vec<Scalar>>());
-            z_mat[p][q].extend(vec![ZERO; num_inputs[p] - w.num_inputs[p_w]]);
+            z_mat[p][q][0].extend((0..w.num_inputs[p_w]).map(|i| w.w_mat[p_w][q_w][i]).collect::<Vec<Scalar>>());
+            z_mat[p][q][0].extend(vec![ZERO; num_inputs[p] - w.num_inputs[p_w]]);
           } else {
-            z_mat[p][q].extend((0..num_inputs[p]).map(|i| w.w_mat[p_w][q_w][i]).collect::<Vec<Scalar>>());
+            z_mat[p][q][0].extend((0..num_inputs[p]).map(|i| w.w_mat[p_w][q_w][i]).collect::<Vec<Scalar>>());
           }
         }
         if num_witness_secs != num_witness_secs.next_power_of_two() {
-          z_mat[p][q].extend(vec![ZERO; num_inputs[p] * (num_witness_secs.next_power_of_two() - num_witness_secs)]);
+          z_mat[p][q][0].extend(vec![ZERO; num_inputs[p] * (num_witness_secs.next_power_of_two() - num_witness_secs)]);
         }
       }
     }
@@ -339,7 +339,7 @@ impl R1CSProof {
     timer_sc_proof_phase1.stop();
 
     let (tau_claim, Az_claim, Bz_claim, Cz_claim) =
-      (&(poly_tau_p[0] * poly_tau_q[0] * poly_tau_x[0]), &poly_Az.index(0, 0, 0), &poly_Bz.index(0, 0, 0), &poly_Cz.index(0, 0, 0));
+      (&(poly_tau_p[0] * poly_tau_q[0] * poly_tau_x[0]), &poly_Az.index(0, 0, 0, 0), &poly_Bz.index(0, 0, 0, 0), &poly_Cz.index(0, 0, 0, 0));
 
     let (Az_blind, Bz_blind, Cz_blind, prod_Az_Bz_blind) = (
       random_tape.random_scalar(b"Az_blind"),

@@ -364,7 +364,7 @@ impl R1CSInstance {
     _max_num_inputs: usize,
     max_num_cons: usize,
     num_cons: Vec<usize>,
-    z_mat: &Vec<Vec<Vec<Scalar>>>
+    z_mat: &Vec<Vec<Vec<Vec<Scalar>>>>
   ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
     assert!(self.num_instances == 1 || self.num_instances == num_instances);
     assert_eq!(max_num_cons, self.max_num_cons);
@@ -382,12 +382,12 @@ impl R1CSInstance {
       Bz.push(Vec::new());
       Cz.push(Vec::new());
       for q in 0..num_proofs[p] {
-        let z = &z_list[q];
+        let z = &z_list[q][0];
         assert_eq!(z.len(), num_inputs[p]);
 
-        Az[p].push(self.A_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z));
-        Bz[p].push(self.B_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z));
-        Cz[p].push(self.C_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z));
+        Az[p].push(vec![self.A_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z)]);
+        Bz[p].push(vec![self.B_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z)]);
+        Cz[p].push(vec![self.C_list[p_inst].multiply_vec(num_cons[p_inst].clone(), num_inputs[p], z)]);
       }
     }
     
