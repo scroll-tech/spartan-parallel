@@ -832,6 +832,7 @@ impl SNARK {
     let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
     let block_inst_unsorted = block_inst.clone();
     block_inst.sort(block_num_instances, &index);
+    let block_num_vars: Vec<usize> = (0..block_num_instances).map(|i| block_num_vars[index[i]]).collect();
     let block_num_phy_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_phy_ops[index[i]]).collect();
     let block_num_vir_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_vir_ops[index[i]]).collect();
 
@@ -1837,7 +1838,7 @@ impl SNARK {
           block_max_num_proofs,
           block_num_proofs,
           num_vars,
-          &vec![num_vars; block_num_instances],
+          &block_num_vars,
           block_wit_secs,
           &block_inst.inst,
           &vars_gens,
