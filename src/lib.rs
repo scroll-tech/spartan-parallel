@@ -889,180 +889,6 @@ impl SNARK {
     timer_sort.stop();
 
     // --
-    // WITNESS COMMITMENTS
-    // --
-    let timer_commit = Timer::new("input_commit");
-    let (
-      block_poly_vars_list,
-      block_comm_vars_list,
-      exec_poly_inputs,
-      exec_comm_inputs
-    ) = {
-
-      // commit the witnesses and inputs separately instance-by-instance
-      let mut block_poly_vars_list = Vec::new();
-      let mut block_comm_vars_list = Vec::new();
-
-      for p in 0..block_num_instances {
-        let (block_poly_vars, block_comm_vars) = {
-          // Flatten the witnesses into a Q_i * X list
-          let vars_list_p = block_vars_mat[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-          // create a multilinear polynomial using the supplied assignment for variables
-          let block_poly_vars = DensePolynomial::new(vars_list_p);
-
-          // produce a commitment to the satisfying assignment
-          let (block_comm_vars, _blinds_vars) = block_poly_vars.commit(&vars_gens.gens_pc, None);
-
-          // add the commitment to the prover's transcript
-          block_comm_vars.append_to_transcript(b"poly_commitment", transcript);
-          (block_poly_vars, block_comm_vars)
-        };
-        block_poly_vars_list.push(block_poly_vars);
-        block_comm_vars_list.push(block_comm_vars);
-      }
-
-      let (exec_poly_inputs, exec_comm_inputs) = {
-        let exec_inputs = exec_inputs_list.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-        // create a multilinear polynomial using the supplied assignment for variables
-        let exec_poly_inputs = DensePolynomial::new(exec_inputs);
-
-        // produce a commitment to the satisfying assignment
-        let (exec_comm_inputs, _blinds_inputs) = exec_poly_inputs.commit(&vars_gens.gens_pc, None);
-
-        // add the commitment to the prover's transcript
-        exec_comm_inputs.append_to_transcript(b"poly_commitment", transcript);
-        (exec_poly_inputs, exec_comm_inputs)
-      };
-
-      (
-        block_poly_vars_list,
-        block_comm_vars_list,
-        vec![exec_poly_inputs],
-        vec![exec_comm_inputs]
-      )
-    };
-    let (
-      addr_poly_phy_mems,
-      addr_comm_phy_mems,
-      addr_phy_mems_shifted_prover,
-      addr_comm_phy_mems_shifted,
-    ) = {
-      if total_num_phy_mem_accesses > 0 {
-        let (addr_poly_phy_mems, addr_comm_phy_mems) = {
-          let addr_phy_mems = addr_phy_mems_list.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-          // create a multilinear polynomial using the supplied assignment for variables
-          let addr_poly_phy_mems = DensePolynomial::new(addr_phy_mems);
-
-          // produce a commitment to the satisfying assignment
-          let (addr_comm_phy_mems, _blinds_inputs) = addr_poly_phy_mems.commit(&vars_gens.gens_pc, None);
-
-          // add the commitment to the prover's transcript
-          addr_comm_phy_mems.append_to_transcript(b"poly_commitment", transcript);
-          (addr_poly_phy_mems, addr_comm_phy_mems)
-        };
-        // Remove the first entry and shift the remaining entries up by one
-        // Used later by coherence check
-        let (addr_phy_mems_shifted_prover, addr_comm_phy_mems_shifted) = {
-          let addr_phy_mems_shifted = [addr_phy_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 4]].concat();
-          // create a multilinear polynomial using the supplied assignment for variables
-          let addr_poly_phy_mems_shifted = DensePolynomial::new(addr_phy_mems_shifted);
-
-          // produce a commitment to the satisfying assignment
-          let (addr_comm_phy_mems_shifted, _blinds_inputs) = addr_poly_phy_mems_shifted.commit(&vars_gens.gens_pc, None);
-
-          // add the commitment to the prover's transcript
-          addr_comm_phy_mems_shifted.append_to_transcript(b"poly_commitment", transcript);
-
-          let addr_phy_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_phy_mems_list[1..].to_vec(), vec![vec![ZERO; 4]]].concat()], vec![addr_poly_phy_mems_shifted]);
-
-          (addr_phy_mems_shifted_prover, addr_comm_phy_mems_shifted)
-        };
-        (
-          vec![addr_poly_phy_mems], 
-          vec![addr_comm_phy_mems],
-          addr_phy_mems_shifted_prover, 
-          vec![addr_comm_phy_mems_shifted],
-        )
-      } else {
-        (
-          Vec::new(),
-          Vec::new(),
-          ProverWitnessSecInfo::dummy(),
-          Vec::new()
-        )
-      }
-    };
-    let (
-      addr_poly_vir_mems,
-      addr_comm_vir_mems,
-      addr_vir_mems_shifted_prover,
-      addr_comm_vir_mems_shifted,
-      addr_ts_bits_prover,
-      addr_comm_ts_bits,
-    ) = {
-      if total_num_vir_mem_accesses > 0 {
-        let (addr_poly_vir_mems, addr_comm_vir_mems) = {
-          let addr_vir_mems = addr_vir_mems_list.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-          // create a multilinear polynomial using the supplied assignment for variables
-          let addr_poly_vir_mems = DensePolynomial::new(addr_vir_mems);
-
-          // produce a commitment to the satisfying assignment
-          let (addr_comm_vir_mems, _blinds_inputs) = addr_poly_vir_mems.commit(&vars_gens.gens_pc, None);
-
-          // add the commitment to the prover's transcript
-          addr_comm_vir_mems.append_to_transcript(b"poly_commitment", transcript);
-          (addr_poly_vir_mems, addr_comm_vir_mems)
-        };
-        // Remove the first entry and shift the remaining entries up by one
-        // Used later by coherence check
-        let (addr_vir_mems_shifted_prover, addr_comm_vir_mems_shifted) = {
-          let addr_vir_mems_shifted = [addr_vir_mems_list[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
-          // create a multilinear polynomial using the supplied assignment for variables
-          let addr_poly_vir_mems_shifted = DensePolynomial::new(addr_vir_mems_shifted);
-
-          // produce a commitment to the satisfying assignment
-          let (addr_comm_vir_mems_shifted, _blinds_inputs) = addr_poly_vir_mems_shifted.commit(&vars_gens.gens_pc, None);
-          // add the commitment to the prover's transcript
-          addr_comm_vir_mems_shifted.append_to_transcript(b"poly_commitment", transcript);
-
-          let addr_vir_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_vir_mems_list[1..].to_vec(), vec![vec![ZERO; 8]]].concat()], vec![addr_poly_vir_mems_shifted]);
-          (addr_vir_mems_shifted_prover, addr_comm_vir_mems_shifted)
-        };
-        let (addr_ts_bits_prover, addr_comm_ts_bits) = {
-          let addr_ts_bits = addr_ts_bits_list.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
-          // create a multilinear polynomial using the supplied assignment for variables
-          let addr_poly_ts_bits = DensePolynomial::new(addr_ts_bits);
-
-          // produce a commitment to the satisfying assignment
-          let (addr_comm_ts_bits, _blinds_inputs) = addr_poly_ts_bits.commit(&vars_gens.gens_pc, None);
-          // add the commitment to the prover's transcript
-          addr_comm_ts_bits.append_to_transcript(b"poly_commitment", transcript);
-
-          let addr_ts_bits_prover = ProverWitnessSecInfo::new(vec![addr_ts_bits_list], vec![addr_poly_ts_bits]);
-          (addr_ts_bits_prover, addr_comm_ts_bits)
-        };
-        (
-          vec![addr_poly_vir_mems], 
-          vec![addr_comm_vir_mems],
-          addr_vir_mems_shifted_prover, 
-          vec![addr_comm_vir_mems_shifted],
-          addr_ts_bits_prover,
-          vec![addr_comm_ts_bits]
-        )
-      } else {
-        (
-          Vec::new(),
-          Vec::new(),
-          ProverWitnessSecInfo::dummy(),
-          Vec::new(),
-          ProverWitnessSecInfo::dummy(),
-          Vec::new()
-        )
-      }
-    };
-    timer_commit.stop();
-
-    // --
     // CHALLENGES AND WITNESSES FOR PERMUTATION
     // --
     let timer_gen = Timer::new("witness_gen");
@@ -1173,7 +999,7 @@ impl SNARK {
       ) = {
         let (perm_exec_poly_w2, perm_exec_comm_w2) = {
           // Flatten the witnesses into a Q_i * X list
-          let w2_list_p = perm_exec_w2.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          let w2_list_p = perm_exec_w2.clone().into_iter().flatten().collect();
           // create a multilinear polynomial using the supplied assignment for variables
           let perm_exec_poly_w2 = DensePolynomial::new(w2_list_p);
 
@@ -1187,7 +1013,7 @@ impl SNARK {
 
         let (perm_exec_poly_w3, perm_exec_comm_w3) = {
           // Flatten the witnesses into a Q_i * X list
-          let w3_list_p = perm_exec_w3.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+          let w3_list_p = perm_exec_w3.clone().into_iter().flatten().collect();
           // create a multilinear polynomial using the supplied assignment for variables
           let perm_exec_poly_w3 = DensePolynomial::new(w3_list_p);
 
@@ -1201,7 +1027,7 @@ impl SNARK {
 
         let (perm_exec_poly_w3_shifted, perm_exec_comm_w3_shifted) = {
           // Flatten the witnesses into a Q_i * X list
-          let w3_list_p = [perm_exec_w3[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
+          let w3_list_p = [perm_exec_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; 8]].concat();
           // create a multilinear polynomial using the supplied assignment for variables
           let perm_exec_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1258,7 +1084,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           let (perm_block_poly_w2, perm_block_comm_w2) = {
             // Flatten the witnesses into a Q_i * X list
-            let w2_list_p = perm_block_w2[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w2_list_p = perm_block_w2[p].clone().into_iter().flatten().collect();
             // create a multilinear polynomial using the supplied assignment for variables
             let perm_block_poly_w2 = DensePolynomial::new(w2_list_p);
             // produce a commitment to the satisfying assignment
@@ -1339,7 +1165,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           let (phy_mem_block_poly_w2, phy_mem_block_comm_w2) = {
             // Flatten the witnesses into a Q_i * X list
-            let w2_list_p = phy_mem_block_w2[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w2_list_p = phy_mem_block_w2[p].clone().into_iter().flatten().collect();
             // create a multilinear polynomial using the supplied assignment for variables
             let phy_mem_block_poly_w2 = DensePolynomial::new(w2_list_p);
             // produce a commitment to the satisfying assignment
@@ -1423,7 +1249,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           let (vir_mem_block_poly_w2, vir_mem_block_comm_w2) = {
             // Flatten the witnesses into a Q_i * X list
-            let w2_list_p = vir_mem_block_w2[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w2_list_p = vir_mem_block_w2[p].clone().into_iter().flatten().collect();
             // create a multilinear polynomial using the supplied assignment for variables
             let vir_mem_block_poly_w2 = DensePolynomial::new(w2_list_p);
             // produce a commitment to the satisfying assignment
@@ -1464,7 +1290,7 @@ impl SNARK {
         for p in 0..block_num_instances {
           let (block_poly_w3, block_comm_w3) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = block_w3[p].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w3_list_p = block_w3[p].clone().into_iter().flatten().collect();
             // create a multilinear polynomial using the supplied assignment for variables
             let block_poly_w3 = DensePolynomial::new(w3_list_p);
 
@@ -1478,7 +1304,7 @@ impl SNARK {
 
           let (block_poly_w3_shifted, block_comm_w3_shifted) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = [block_w3[p][1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
+            let w3_list_p = [block_w3[p][1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; 8]].concat();
             // create a multilinear polynomial using the supplied assignment for variables
             let block_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1593,7 +1419,7 @@ impl SNARK {
         ) = {
           let (phy_mem_addr_poly_w2, phy_mem_addr_comm_w2) = {
             // Flatten the witnesses into a Q_i * X list
-            let w2_list_p = phy_mem_addr_w2.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w2_list_p = phy_mem_addr_w2.clone().into_iter().flatten().collect();
             // create a multilinear polynomial using the supplied assignment for variables
             let phy_mem_addr_poly_w2 = DensePolynomial::new(w2_list_p);
 
@@ -1607,7 +1433,7 @@ impl SNARK {
           
           let (phy_mem_addr_poly_w3, phy_mem_addr_comm_w3) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = phy_mem_addr_w3.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w3_list_p = phy_mem_addr_w3.clone().into_iter().flatten().collect();
             // create a multilinear polynomial using the supplied assignment for variables
             let phy_mem_addr_poly_w3 = DensePolynomial::new(w3_list_p);
 
@@ -1621,7 +1447,7 @@ impl SNARK {
 
           let (phy_mem_addr_poly_w3_shifted, phy_mem_addr_comm_w3_shifted) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = [phy_mem_addr_w3[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
+            let w3_list_p = [phy_mem_addr_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; 8]].concat();
             // create a multilinear polynomial using the supplied assignment for variables
             let phy_mem_addr_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1732,7 +1558,7 @@ impl SNARK {
         ) = {
           let (vir_mem_addr_poly_w2, vir_mem_addr_comm_w2) = {
             // Flatten the witnesses into a Q_i * X list
-            let w2_list_p = vir_mem_addr_w2.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w2_list_p = vir_mem_addr_w2.clone().into_iter().flatten().collect();
             // create a multilinear polynomial using the supplied assignment for variables
             let vir_mem_addr_poly_w2 = DensePolynomial::new(w2_list_p);
 
@@ -1746,7 +1572,7 @@ impl SNARK {
           
           let (vir_mem_addr_poly_w3, vir_mem_addr_comm_w3) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = vir_mem_addr_w3.iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat());
+            let w3_list_p = vir_mem_addr_w3.clone().into_iter().flatten().collect();
             // create a multilinear polynomial using the supplied assignment for variables
             let vir_mem_addr_poly_w3 = DensePolynomial::new(w3_list_p);
 
@@ -1760,7 +1586,7 @@ impl SNARK {
 
           let (vir_mem_addr_poly_w3_shifted, vir_mem_addr_comm_w3_shifted) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = [vir_mem_addr_w3[1..].iter().fold(Vec::new(), |a, b| [a, b.to_vec()].concat()), vec![ZERO; 8]].concat();
+            let w3_list_p = [vir_mem_addr_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; 8]].concat();
             // create a multilinear polynomial using the supplied assignment for variables
             let vir_mem_addr_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1809,7 +1635,178 @@ impl SNARK {
 
     timer_gen.stop();
 
-    // Construct vars_info for inputs
+    // --
+    // WITNESS COMMITMENTS
+    // --
+    let timer_commit = Timer::new("input_commit");
+    let (
+      block_poly_vars_list,
+      block_comm_vars_list,
+      exec_poly_inputs,
+      exec_comm_inputs
+    ) = {
+
+      // commit the witnesses and inputs separately instance-by-instance
+      let mut block_poly_vars_list = Vec::new();
+      let mut block_comm_vars_list = Vec::new();
+
+      for p in 0..block_num_instances {
+        let (block_poly_vars, block_comm_vars) = {
+          // Flatten the witnesses into a Q_i * X list
+          let vars_list_p: Vec<Scalar> = block_vars_mat[p].clone().into_iter().flatten().collect();
+          // create a multilinear polynomial using the supplied assignment for variables
+          let block_poly_vars = DensePolynomial::new(vars_list_p);
+
+          // produce a commitment to the satisfying assignment
+          let (block_comm_vars, _blinds_vars) = block_poly_vars.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          block_comm_vars.append_to_transcript(b"poly_commitment", transcript);
+          (block_poly_vars, block_comm_vars)
+        };
+        block_poly_vars_list.push(block_poly_vars);
+        block_comm_vars_list.push(block_comm_vars);
+      }
+
+      let (exec_poly_inputs, exec_comm_inputs) = {
+        let exec_inputs = exec_inputs_list.clone().into_iter().flatten().collect();
+        // create a multilinear polynomial using the supplied assignment for variables
+        let exec_poly_inputs = DensePolynomial::new(exec_inputs);
+
+        // produce a commitment to the satisfying assignment
+        let (exec_comm_inputs, _blinds_inputs) = exec_poly_inputs.commit(&vars_gens.gens_pc, None);
+
+        // add the commitment to the prover's transcript
+        exec_comm_inputs.append_to_transcript(b"poly_commitment", transcript);
+        (exec_poly_inputs, exec_comm_inputs)
+      };
+
+      (
+        block_poly_vars_list,
+        block_comm_vars_list,
+        vec![exec_poly_inputs],
+        vec![exec_comm_inputs]
+      )
+    };
+    let (
+      addr_poly_phy_mems,
+      addr_comm_phy_mems,
+      addr_phy_mems_shifted_prover,
+      addr_comm_phy_mems_shifted,
+    ) = {
+      if total_num_phy_mem_accesses > 0 {
+        let (addr_poly_phy_mems, addr_comm_phy_mems) = {
+          let addr_phy_mems = addr_phy_mems_list.clone().into_iter().flatten().collect();
+          // create a multilinear polynomial using the supplied assignment for variables
+          let addr_poly_phy_mems = DensePolynomial::new(addr_phy_mems);
+
+          // produce a commitment to the satisfying assignment
+          let (addr_comm_phy_mems, _blinds_inputs) = addr_poly_phy_mems.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          addr_comm_phy_mems.append_to_transcript(b"poly_commitment", transcript);
+          (addr_poly_phy_mems, addr_comm_phy_mems)
+        };
+        // Remove the first entry and shift the remaining entries up by one
+        // Used later by coherence check
+        let (addr_phy_mems_shifted_prover, addr_comm_phy_mems_shifted) = {
+          let addr_phy_mems_shifted = [addr_phy_mems_list[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; 4]].concat();
+          // create a multilinear polynomial using the supplied assignment for variables
+          let addr_poly_phy_mems_shifted = DensePolynomial::new(addr_phy_mems_shifted);
+
+          // produce a commitment to the satisfying assignment
+          let (addr_comm_phy_mems_shifted, _blinds_inputs) = addr_poly_phy_mems_shifted.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          addr_comm_phy_mems_shifted.append_to_transcript(b"poly_commitment", transcript);
+
+          let addr_phy_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_phy_mems_list[1..].to_vec(), vec![vec![ZERO; 4]]].concat()], vec![addr_poly_phy_mems_shifted]);
+
+          (addr_phy_mems_shifted_prover, addr_comm_phy_mems_shifted)
+        };
+        (
+          vec![addr_poly_phy_mems], 
+          vec![addr_comm_phy_mems],
+          addr_phy_mems_shifted_prover, 
+          vec![addr_comm_phy_mems_shifted],
+        )
+      } else {
+        (
+          Vec::new(),
+          Vec::new(),
+          ProverWitnessSecInfo::dummy(),
+          Vec::new()
+        )
+      }
+    };
+    let (
+      addr_poly_vir_mems,
+      addr_comm_vir_mems,
+      addr_vir_mems_shifted_prover,
+      addr_comm_vir_mems_shifted,
+      addr_ts_bits_prover,
+      addr_comm_ts_bits,
+    ) = {
+      if total_num_vir_mem_accesses > 0 {
+        let (addr_poly_vir_mems, addr_comm_vir_mems) = {
+          let addr_vir_mems = addr_vir_mems_list.clone().into_iter().flatten().collect();
+          // create a multilinear polynomial using the supplied assignment for variables
+          let addr_poly_vir_mems = DensePolynomial::new(addr_vir_mems);
+
+          // produce a commitment to the satisfying assignment
+          let (addr_comm_vir_mems, _blinds_inputs) = addr_poly_vir_mems.commit(&vars_gens.gens_pc, None);
+
+          // add the commitment to the prover's transcript
+          addr_comm_vir_mems.append_to_transcript(b"poly_commitment", transcript);
+          (addr_poly_vir_mems, addr_comm_vir_mems)
+        };
+        // Remove the first entry and shift the remaining entries up by one
+        // Used later by coherence check
+        let (addr_vir_mems_shifted_prover, addr_comm_vir_mems_shifted) = {
+          let addr_vir_mems_shifted = [addr_vir_mems_list[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; 8]].concat();
+          // create a multilinear polynomial using the supplied assignment for variables
+          let addr_poly_vir_mems_shifted = DensePolynomial::new(addr_vir_mems_shifted);
+
+          // produce a commitment to the satisfying assignment
+          let (addr_comm_vir_mems_shifted, _blinds_inputs) = addr_poly_vir_mems_shifted.commit(&vars_gens.gens_pc, None);
+          // add the commitment to the prover's transcript
+          addr_comm_vir_mems_shifted.append_to_transcript(b"poly_commitment", transcript);
+
+          let addr_vir_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[addr_vir_mems_list[1..].to_vec(), vec![vec![ZERO; 8]]].concat()], vec![addr_poly_vir_mems_shifted]);
+          (addr_vir_mems_shifted_prover, addr_comm_vir_mems_shifted)
+        };
+        let (addr_ts_bits_prover, addr_comm_ts_bits) = {
+          let addr_ts_bits = addr_ts_bits_list.clone().into_iter().flatten().collect();
+          // create a multilinear polynomial using the supplied assignment for variables
+          let addr_poly_ts_bits = DensePolynomial::new(addr_ts_bits);
+
+          // produce a commitment to the satisfying assignment
+          let (addr_comm_ts_bits, _blinds_inputs) = addr_poly_ts_bits.commit(&vars_gens.gens_pc, None);
+          // add the commitment to the prover's transcript
+          addr_comm_ts_bits.append_to_transcript(b"poly_commitment", transcript);
+
+          let addr_ts_bits_prover = ProverWitnessSecInfo::new(vec![addr_ts_bits_list], vec![addr_poly_ts_bits]);
+          (addr_ts_bits_prover, addr_comm_ts_bits)
+        };
+        (
+          vec![addr_poly_vir_mems], 
+          vec![addr_comm_vir_mems],
+          addr_vir_mems_shifted_prover, 
+          vec![addr_comm_vir_mems_shifted],
+          addr_ts_bits_prover,
+          vec![addr_comm_ts_bits]
+        )
+      } else {
+        (
+          Vec::new(),
+          Vec::new(),
+          ProverWitnessSecInfo::dummy(),
+          Vec::new(),
+          ProverWitnessSecInfo::dummy(),
+          Vec::new()
+        )
+      }
+    };
     let block_vars_prover = ProverWitnessSecInfo::new(block_vars_mat, block_poly_vars_list);
     let exec_inputs_prover = ProverWitnessSecInfo::new(vec![exec_inputs_list], exec_poly_inputs);
     let addr_phy_mems_prover = if total_num_phy_mem_accesses > 0 {
@@ -1822,6 +1819,7 @@ impl SNARK {
     } else {
       ProverWitnessSecInfo::dummy()
     };
+    timer_commit.stop();
 
     // --
     // BLOCK_CORRECTNESS_EXTRACT
@@ -2387,62 +2385,6 @@ impl SNARK {
     // SAMPLE CHALLENGES, COMMIT WITNESSES, & CONSTRUCT WITNESS_SEC_INFO
     // --
     let timer_commit = Timer::new("witness_commit");
-    let (
-      block_vars_verifier,
-      exec_inputs_verifier,
-    ) = {
-      // add the commitment to the verifier's transcript
-      for p in 0..block_num_instances {
-        self.block_comm_vars_list[p].append_to_transcript(b"poly_commitment", transcript);
-      }
-      self.exec_comm_inputs[0].append_to_transcript(b"poly_commitment", transcript);
-      (
-        VerifierWitnessSecInfo::new(block_num_vars, &block_num_proofs, &self.block_comm_vars_list),
-        VerifierWitnessSecInfo::new(vec![num_ios], &vec![consis_num_proofs], &self.exec_comm_inputs),
-      )
-    };
-
-    let (
-      addr_phy_mems_verifier,
-      addr_phy_mems_shifted_verifier
-     ) = {
-      if total_num_phy_mem_accesses > 0 {
-        self.addr_comm_phy_mems[0].append_to_transcript(b"poly_commitment", transcript);
-        self.addr_comm_phy_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
-        (
-          VerifierWitnessSecInfo::new(vec![4], &vec![total_num_phy_mem_accesses], &self.addr_comm_phy_mems),
-          VerifierWitnessSecInfo::new(vec![4], &vec![total_num_phy_mem_accesses], &self.addr_comm_phy_mems_shifted)
-        )
-      } else {
-        (
-          VerifierWitnessSecInfo::dummy(),
-          VerifierWitnessSecInfo::dummy()
-        )
-      }
-    };
-
-    let (
-      addr_vir_mems_verifier,
-      addr_vir_mems_shifted_verifier,
-      addr_ts_bits_verifier
-     ) = {
-      if total_num_vir_mem_accesses > 0 {
-        self.addr_comm_vir_mems[0].append_to_transcript(b"poly_commitment", transcript);
-        self.addr_comm_vir_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
-        self.addr_comm_ts_bits[0].append_to_transcript(b"poly_commitment", transcript);
-        (
-          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems),
-          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems_shifted),
-          VerifierWitnessSecInfo::new(vec![mem_addr_ts_bits_size], &vec![total_num_vir_mem_accesses], &self.addr_comm_ts_bits)
-        )
-      } else {
-        (
-          VerifierWitnessSecInfo::dummy(),
-          VerifierWitnessSecInfo::dummy(),
-          VerifierWitnessSecInfo::dummy()
-        )
-      }
-    };
 
     let comb_tau = transcript.challenge_scalar(b"challenge_tau");
     let comb_r = transcript.challenge_scalar(b"challenge_r");
@@ -2563,6 +2505,63 @@ impl SNARK {
           VerifierWitnessSecInfo::dummy(),
           VerifierWitnessSecInfo::dummy(),
           VerifierWitnessSecInfo::dummy(),
+        )
+      }
+    };
+
+    let (
+      block_vars_verifier,
+      exec_inputs_verifier,
+    ) = {
+      // add the commitment to the verifier's transcript
+      for p in 0..block_num_instances {
+        self.block_comm_vars_list[p].append_to_transcript(b"poly_commitment", transcript);
+      }
+      self.exec_comm_inputs[0].append_to_transcript(b"poly_commitment", transcript);
+      (
+        VerifierWitnessSecInfo::new(block_num_vars, &block_num_proofs, &self.block_comm_vars_list),
+        VerifierWitnessSecInfo::new(vec![num_ios], &vec![consis_num_proofs], &self.exec_comm_inputs),
+      )
+    };
+
+    let (
+      addr_phy_mems_verifier,
+      addr_phy_mems_shifted_verifier
+     ) = {
+      if total_num_phy_mem_accesses > 0 {
+        self.addr_comm_phy_mems[0].append_to_transcript(b"poly_commitment", transcript);
+        self.addr_comm_phy_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
+        (
+          VerifierWitnessSecInfo::new(vec![4], &vec![total_num_phy_mem_accesses], &self.addr_comm_phy_mems),
+          VerifierWitnessSecInfo::new(vec![4], &vec![total_num_phy_mem_accesses], &self.addr_comm_phy_mems_shifted)
+        )
+      } else {
+        (
+          VerifierWitnessSecInfo::dummy(),
+          VerifierWitnessSecInfo::dummy()
+        )
+      }
+    };
+
+    let (
+      addr_vir_mems_verifier,
+      addr_vir_mems_shifted_verifier,
+      addr_ts_bits_verifier
+     ) = {
+      if total_num_vir_mem_accesses > 0 {
+        self.addr_comm_vir_mems[0].append_to_transcript(b"poly_commitment", transcript);
+        self.addr_comm_vir_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
+        self.addr_comm_ts_bits[0].append_to_transcript(b"poly_commitment", transcript);
+        (
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems),
+          VerifierWitnessSecInfo::new(vec![8], &vec![total_num_vir_mem_accesses], &self.addr_comm_vir_mems_shifted),
+          VerifierWitnessSecInfo::new(vec![mem_addr_ts_bits_size], &vec![total_num_vir_mem_accesses], &self.addr_comm_ts_bits)
+        )
+      } else {
+        (
+          VerifierWitnessSecInfo::dummy(),
+          VerifierWitnessSecInfo::dummy(),
+          VerifierWitnessSecInfo::dummy()
         )
       }
     };
