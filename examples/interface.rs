@@ -443,7 +443,9 @@ fn main() {
   
   // create a commitment to the R1CS instance
   println!("Comitting Circuits...");
-  let (block_comm, block_decomm) = SNARK::encode(&block_inst, &block_gens);
+  // block_comm_map records the sparse_polys committed in each commitment
+  // Note that A, B, C are committed separately, so sparse_poly[3*i+2] corresponds to poly C of instance i
+  let (block_comm_map, block_comm_list, block_decomm_list) = SNARK::multi_encode(&block_inst, &block_gens);
   println!("Finished Block");
   let (pairwise_check_comm, pairwise_check_decomm) = SNARK::encode(&pairwise_check_inst, &pairwise_check_gens);
   println!("Finished Pairwise");
@@ -488,8 +490,9 @@ fn main() {
     rtk.block_max_num_proofs,
     &block_num_proofs,
     &mut block_inst,
-    &block_comm,
-    &block_decomm,
+    &block_comm_map,
+    &block_comm_list,
+    &block_decomm_list,
     &block_gens,
     
     rtk.consis_num_proofs,
@@ -541,8 +544,9 @@ fn main() {
     block_num_instances_bound, 
     rtk.block_max_num_proofs, 
     &block_num_proofs, 
-    block_num_cons, 
-    &block_comm,
+    block_num_cons,
+    &block_comm_map,
+    &block_comm_list,
     &block_gens,
 
     rtk.consis_num_proofs, 

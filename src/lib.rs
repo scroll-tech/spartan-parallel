@@ -595,7 +595,7 @@ pub struct SNARK {
   block_r1cs_sat_proof: R1CSProof,
   block_inst_evals_bound_rp: [Scalar; 3],
   block_inst_evals_list: Vec<Scalar>,
-  block_r1cs_eval_proof: R1CSEvalProof,
+  block_r1cs_eval_proof_list: Vec<R1CSEvalProof>,
 
   pairwise_check_r1cs_sat_proof: R1CSProof,
   pairwise_check_inst_evals_bound_rp: [Scalar; 3],
@@ -655,11 +655,12 @@ impl SNARK {
   pub fn multi_encode(
     inst: &Instance,
     gens: &SNARKGens,
-  ) -> (Vec<ComputationCommitment>, Vec<ComputationDecommitment>) {
+  ) -> (Vec<Vec<usize>>, Vec<ComputationCommitment>, Vec<ComputationDecommitment>) {
     let timer_encode = Timer::new("SNARK::encode");
-    let (mut comm, mut decomm) = inst.inst.multi_commit(&gens.gens_r1cs_eval);
+    let (label_map, mut comm, mut decomm) = inst.inst.multi_commit(&gens.gens_r1cs_eval);
     timer_encode.stop();
     (
+      label_map,
       comm.drain(..).map(|i| ComputationCommitment { comm: i }).collect(),
       decomm.drain(..).map(|i| ComputationDecommitment { decomm: i }).collect(),
     )
@@ -704,8 +705,9 @@ impl SNARK {
     block_max_num_proofs: usize,
     block_num_proofs: &Vec<usize>,
     block_inst: &mut Instance,
-    block_comm: &ComputationCommitment,
-    block_decomm: &ComputationDecommitment,
+    block_comm_map: &Vec<Vec<usize>>,
+    block_comm_list: &Vec<ComputationCommitment>,
+    block_decomm_list: &Vec<ComputationDecommitment>,
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
@@ -795,7 +797,14 @@ impl SNARK {
       }
 
       // append a commitment to the computation to the transcript
-      block_comm.comm.append_to_transcript(b"block_comm", transcript);
+      for b in block_comm_map {
+        for l in b {
+          Scalar::from(*l as u64).append_to_transcript(b"block_comm_map", transcript);
+        }
+      }
+      for c in block_comm_list {
+        c.comm.append_to_transcript(b"block_comm", transcript);
+      }
       pairwise_check_comm.comm.append_to_transcript(b"pairwise_comm", transcript);
       perm_root_comm.comm.append_to_transcript(b"perm_comm", transcript);
 
@@ -1852,7 +1861,7 @@ impl SNARK {
     };
 
     // Final evaluation on BLOCK
-    let (block_inst_evals_bound_rp, block_inst_evals_list, block_r1cs_eval_proof) = {
+    let (block_inst_evals_bound_rp, block_inst_evals_list, block_r1cs_eval_proof_list) = {
       let [rp, _, rx, ry] = block_challenges;
       let timer_eval = Timer::new("eval_sparse_polys");
 
@@ -1871,23 +1880,27 @@ impl SNARK {
       let _ = transcript.challenge_scalar(b"challenge_c1");
       let _ = transcript.challenge_scalar(b"challenge_c2");
       
-      let r1cs_eval_proof = {
-        let proof = R1CSEvalProof::prove(
-          &block_decomm.decomm,
-          &rx,
-          &ry,
-          &inst_evals_list,
-          &block_gens.gens_r1cs_eval,
-          transcript,
-          &mut random_tape,
-        );
-
-        let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
-        Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
-        proof
+      let r1cs_eval_proof_list = {
+        let mut r1cs_eval_proof_list = Vec::new();
+        for i in 0..block_comm_list.len() {
+          let proof = R1CSEvalProof::prove(
+            &block_decomm_list[i].decomm,
+            &rx,
+            &ry,
+            &block_comm_map[i].iter().map(|i| inst_evals_list[*i]).collect(),
+            &block_gens.gens_r1cs_eval,
+            transcript,
+            &mut random_tape,
+          );
+          let proof_encoded: Vec<u8> = bincode::serialize(&proof).unwrap();
+          Timer::print(&format!("len_r1cs_eval_proof {:?}", proof_encoded.len()));
+          
+          r1cs_eval_proof_list.push(proof);
+        }
+        r1cs_eval_proof_list
       };
 
-      ([inst_evals_bound_rp.0, inst_evals_bound_rp.1, inst_evals_bound_rp.2], inst_evals_list, r1cs_eval_proof)
+      ([inst_evals_bound_rp.0, inst_evals_bound_rp.1, inst_evals_bound_rp.2], inst_evals_list, r1cs_eval_proof_list)
     };
     timer_proof.stop();
 
@@ -2024,7 +2037,7 @@ impl SNARK {
           &perm_root_decomm.decomm,
           &rx,
           &ry,
-          &inst_evals,
+          &inst_evals.to_vec(),
           &perm_root_gens.gens_r1cs_eval,
           transcript,
           &mut random_tape,
@@ -2195,7 +2208,7 @@ impl SNARK {
       block_r1cs_sat_proof,
       block_inst_evals_bound_rp,
       block_inst_evals_list,
-      block_r1cs_eval_proof,
+      block_r1cs_eval_proof_list,
 
       pairwise_check_r1cs_sat_proof,
       pairwise_check_inst_evals_bound_rp,
@@ -2242,7 +2255,8 @@ impl SNARK {
     block_max_num_proofs: usize,
     block_num_proofs: &Vec<usize>,
     block_num_cons: usize,
-    block_comm: &ComputationCommitment,
+    block_comm_map: &Vec<Vec<usize>>,
+    block_comm_list: &Vec<ComputationCommitment>,
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
@@ -2308,7 +2322,14 @@ impl SNARK {
       }
 
       // append a commitment to the computation to the transcript
-      block_comm.comm.append_to_transcript(b"block_comm", transcript);
+      for b in block_comm_map {
+        for l in b {
+          Scalar::from(*l as u64).append_to_transcript(b"block_comm_map", transcript);
+        }
+      }
+      for c in block_comm_list {
+        c.comm.append_to_transcript(b"block_comm", transcript);
+      }
       pairwise_check_comm.comm.append_to_transcript(b"pairwise_comm", transcript);
       perm_root_comm.comm.append_to_transcript(b"perm_comm", transcript);
 
@@ -2605,14 +2626,16 @@ impl SNARK {
         c0 * self.block_inst_evals_list[3 * i] + c1 * self.block_inst_evals_list[3 * i + 1] + c2 * self.block_inst_evals_list[3 * i + 2]
       ).collect();
 
-      self.block_r1cs_eval_proof.verify(
-        &block_comm.comm,
-        &rx,
-        &ry,
-        &self.block_inst_evals_list,
-        &block_gens.gens_r1cs_eval,
-        transcript,
-      )?;
+      for i in 0..block_comm_list.len() {
+        self.block_r1cs_eval_proof_list[i].verify(
+          &block_comm_list[i].comm,
+          &rx,
+          &ry,
+          &block_comm_map[i].iter().map(|i| self.block_inst_evals_list[*i]).collect(),
+          &block_gens.gens_r1cs_eval,
+          transcript,
+        )?;
+      }
       // Permute block_inst_evals_list to the correct order for RP evaluation
       let ABC_evals: Vec<Scalar> = (0..block_num_instances).map(|i| ABC_evals[block_index[i]]).collect();
       // Verify that block_inst_evals_bound_rp is block_inst_evals_list bind rp
@@ -2726,7 +2749,7 @@ impl SNARK {
         &perm_root_comm.comm,
         &rx,
         &ry,
-        &self.perm_root_inst_evals,
+        &self.perm_root_inst_evals.to_vec(),
         &perm_root_gens.gens_r1cs_eval,
         transcript,
       )?;

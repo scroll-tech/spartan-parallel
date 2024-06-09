@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::transcript::AppendToTranscript;
 
 use super::dense_mlpoly::DensePolynomial;
@@ -607,31 +609,80 @@ impl R1CSInstance {
     (evals[0], evals[1], evals[2])
   }
 
-  pub fn multi_commit(&self, gens: &R1CSCommitmentGens) -> (Vec<R1CSCommitment>, Vec<R1CSDecommitment>) {
-    let mut r1cs_comm_list = Vec::new();
-    let mut r1cs_decomm_list = Vec::new();
+  // Group all instances with the similar NNZ (round to the next power of eight) together
+  // Output.0 records the label of instances included within each commitment
+  // Note that we do not group A, B, C together
+  pub fn next_power_of_eight(val: usize) -> usize {
+    let mut base = 1;
+    while base < val {
+      base *= 8;
+    }
+    return base;
+  }
+
+  pub fn multi_commit(&self, gens: &R1CSCommitmentGens) -> (Vec<Vec<usize>>, Vec<R1CSCommitment>, Vec<R1CSDecommitment>) {
+    let mut nnz_size: HashMap<usize, usize> = HashMap::new();
+    let mut label_map: Vec<Vec<usize>> = Vec::new();
+    let mut sparse_polys_list: Vec<Vec<&SparseMatPolynomial>> = Vec::new();
 
     for i in 0..self.num_instances {
-      let (comm, dense) = SparseMatPolynomial::multi_commit(&[&self.A_list[i], &self.B_list[i], &self.C_list[i]], &gens.gens);
+      // A_list
+      let A_len = Self::next_power_of_eight(self.A_list[i].get_num_nz_entries());
+      if let Some(index) = nnz_size.get(&A_len) {
+        label_map[*index].push(3 * i);
+        sparse_polys_list[*index].push(&self.A_list[i]);
+      } else {
+        let next_label = nnz_size.len();
+        nnz_size.insert(A_len, next_label);
+        label_map.push(vec![3 * i]);
+        sparse_polys_list.push(vec![&self.A_list[i]]);
+      }
+      // B_list
+      let B_len = Self::next_power_of_eight(self.B_list[i].get_num_nz_entries());
+      if let Some(index) = nnz_size.get(&B_len) {
+        label_map[*index].push(3 * i + 1);
+        sparse_polys_list[*index].push(&self.B_list[i]);
+      } else {
+        let next_label = nnz_size.len();
+        nnz_size.insert(B_len, next_label);
+        label_map.push(vec![3 * i + 1]);
+        sparse_polys_list.push(vec![&self.B_list[i]]);
+      }
+      // C_list
+      let C_len = Self::next_power_of_eight(self.C_list[i].get_num_nz_entries());
+      if let Some(index) = nnz_size.get(&C_len) {
+        label_map[*index].push(3 * i + 2);
+        sparse_polys_list[*index].push(&self.C_list[i]);
+      } else {
+        let next_label = nnz_size.len();
+        nnz_size.insert(C_len, next_label);
+        label_map.push(vec![3 * i + 2]);
+        sparse_polys_list.push(vec![&self.C_list[i]]);
+      }
+    }
+
+    let mut r1cs_comm_list = Vec::new();
+    let mut r1cs_decomm_list = Vec::new();
+    for sparse_polys in sparse_polys_list {
+      let (comm, dense) = SparseMatPolynomial::multi_commit(&sparse_polys, &gens.gens);
       let r1cs_comm = R1CSCommitment {
-        num_cons: self.max_num_cons,
+        num_cons: self.num_instances * self.max_num_cons,
         num_vars: self.num_vars,
         comm,
-      };
-
+      };    
       let r1cs_decomm = R1CSDecommitment { dense };
 
       r1cs_comm_list.push(r1cs_comm);
       r1cs_decomm_list.push(r1cs_decomm);
     }
 
-    (r1cs_comm_list, r1cs_decomm_list)
+    (label_map, r1cs_comm_list, r1cs_decomm_list)
   }
 
   // Used if there is only one instance
   pub fn commit(&self, gens: &R1CSCommitmentGens) -> (R1CSCommitment, R1CSDecommitment) {
     let mut sparse_polys = Vec::new();
-    for i in 0..self.A_list.len() {
+    for i in 0..self.num_instances {
       sparse_polys.push(&self.A_list[i]);
       sparse_polys.push(&self.B_list[i]);
       sparse_polys.push(&self.C_list[i]);
@@ -659,7 +710,7 @@ impl R1CSEvalProof {
     decomm: &R1CSDecommitment,
     rx: &[Scalar], // point at which the polynomial is evaluated
     ry: &[Scalar],
-    evals: &[Scalar],
+    evals: &Vec<Scalar>,
     gens: &R1CSCommitmentGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -684,7 +735,7 @@ impl R1CSEvalProof {
     comm: &R1CSCommitment,
     rx: &[Scalar], // point at which the R1CS matrix polynomials are evaluated
     ry: &[Scalar],
-    evals: &[Scalar],
+    evals: &Vec<Scalar>,
     gens: &R1CSCommitmentGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
