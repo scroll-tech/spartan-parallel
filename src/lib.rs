@@ -846,24 +846,6 @@ impl SNARK {
     let block_num_vir_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_vir_ops[index[i]]).collect();
 
     // --
-    // PAIRWISE SORT
-    // --
-    // Sort the pairwise instances: CONSIS_CHECK, PHY_MEM_COHERE
-    let mut inst_sorter = Vec::new();
-    inst_sorter.push(InstanceSortHelper::new(consis_num_proofs, 0));
-    inst_sorter.push(InstanceSortHelper::new(total_num_phy_mem_accesses, 0));
-    inst_sorter.push(InstanceSortHelper::new(total_num_vir_mem_accesses, 0));
-    // Sort from high -> low
-    inst_sorter.sort_by(|a, b| b.cmp(a));
-
-    let pairwise_num_instances = 1 + if total_num_phy_mem_accesses > 0 { 1 } else { 0 } + if total_num_vir_mem_accesses > 0 { 1 } else { 0 };
-    let inst_sorter = &inst_sorter[..pairwise_num_instances];
-    // index[i] = j => the original jth entry should now be at the ith position
-    let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
-    let pairwise_check_inst_unsorted = pairwise_check_inst.clone();
-    pairwise_check_inst.sort(pairwise_num_instances, &index);
-
-    // --
     // PADDING
     // --
     let dummy_inputs = vec![ZERO; num_ios];
@@ -893,8 +875,27 @@ impl SNARK {
       addr_ts_bits_list.extend(vec![dummy_ts; total_num_vir_mem_accesses.next_power_of_two() - total_num_vir_mem_accesses]);
     }
     let total_num_vir_mem_accesses = if total_num_vir_mem_accesses == 0 { 0 } else { total_num_vir_mem_accesses.next_power_of_two() };
-
     let block_num_proofs = &block_num_proofs;
+    
+    // --
+    // PAIRWISE SORT
+    // --
+    // Note: perform pairwise sort after padding because pairwise sort uses padded values as parameter
+    // Sort the pairwise instances: CONSIS_CHECK, PHY_MEM_COHERE
+    let mut inst_sorter = Vec::new();
+    inst_sorter.push(InstanceSortHelper::new(consis_num_proofs, 0));
+    inst_sorter.push(InstanceSortHelper::new(total_num_phy_mem_accesses, 1));
+    inst_sorter.push(InstanceSortHelper::new(total_num_vir_mem_accesses, 2));
+    // Sort from high -> low
+    inst_sorter.sort_by(|a, b| b.cmp(a));
+
+    let pairwise_num_instances = 1 + if total_num_phy_mem_accesses > 0 { 1 } else { 0 } + if total_num_vir_mem_accesses > 0 { 1 } else { 0 };
+    let inst_sorter = &inst_sorter[..pairwise_num_instances];
+    // index[i] = j => the original jth entry should now be at the ith position
+    let index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
+    let pairwise_check_inst_unsorted = pairwise_check_inst.clone();
+    pairwise_check_inst.sort(pairwise_num_instances, &index);
+
     timer_sort.stop();
 
     // --
@@ -2369,22 +2370,6 @@ impl SNARK {
     let block_num_vir_ops: Vec<usize> = (0..block_num_instances).map(|i| block_num_vir_ops[block_index[i]]).collect();
 
     // --
-    // PAIRWISE SORT
-    // --
-    // Sort the pairwise instances: CONSIS_CHECK, PHY_MEM_COHERE
-    let mut inst_sorter = Vec::new();
-    inst_sorter.push(InstanceSortHelper::new(consis_num_proofs, 0));
-    inst_sorter.push(InstanceSortHelper::new(total_num_phy_mem_accesses, 0));
-    inst_sorter.push(InstanceSortHelper::new(total_num_vir_mem_accesses, 0));
-    // Sort from high -> low
-    inst_sorter.sort_by(|a, b| b.cmp(a));
-
-    let pairwise_num_instances = 1 + if total_num_phy_mem_accesses > 0 { 1 } else { 0 } + if total_num_vir_mem_accesses > 0 { 1 } else { 0 };
-    let inst_sorter = &inst_sorter[..pairwise_num_instances];
-    // index[i] = j => the original jth entry should now be at the ith position
-    let pairwise_index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
-
-    // --
     // PADDING
     // --
     // Pad entries of block_num_proofs to a power of 2
@@ -2400,6 +2385,22 @@ impl SNARK {
     // Pad num_proofs with 1 until the next power of 2
     block_num_proofs.extend(vec![1; block_num_instances.next_power_of_two() - block_num_instances]);
     let block_num_proofs = &block_num_proofs;
+
+    // --
+    // PAIRWISE SORT
+    // --
+    // Sort the pairwise instances: CONSIS_CHECK, PHY_MEM_COHERE
+    let mut inst_sorter = Vec::new();
+    inst_sorter.push(InstanceSortHelper::new(consis_num_proofs, 0));
+    inst_sorter.push(InstanceSortHelper::new(total_num_phy_mem_accesses, 1));
+    inst_sorter.push(InstanceSortHelper::new(total_num_vir_mem_accesses, 2));
+    // Sort from high -> low
+    inst_sorter.sort_by(|a, b| b.cmp(a));
+
+    let pairwise_num_instances = 1 + if total_num_phy_mem_accesses > 0 { 1 } else { 0 } + if total_num_vir_mem_accesses > 0 { 1 } else { 0 };
+    let inst_sorter = &inst_sorter[..pairwise_num_instances];
+    // index[i] = j => the original jth entry should now be at the ith position
+    let pairwise_index: Vec<usize> = inst_sorter.iter().map(|i| i.index).collect();
     timer_sort.stop();
 
     // --

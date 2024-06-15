@@ -232,7 +232,7 @@ impl R1CSProof {
     gens: &R1CSGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
-  ) -> (R1CSProof, [Vec<Scalar>; 4]) { 
+  ) -> (R1CSProof, [Vec<Scalar>; 4]) {
     let timer_prove = Timer::new("R1CSProof::prove");
     transcript.append_protocol_name(R1CSProof::protocol_name());
 
