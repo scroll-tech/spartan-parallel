@@ -534,7 +534,7 @@ impl Instance {
       
       // CONSIS_CHECK
       let (A, B, C) = {
-        let width = 8;
+        let width = pairwise_check_num_vars;
         
         let V_i = 4;
         let V_o = 5;
@@ -555,7 +555,7 @@ impl Instance {
 
       // PHY_MEM_COHERE
       let (A, B, C) = {
-        let width = 8;
+        let width = pairwise_check_num_vars;
         
         let V_valid = 0;
         let V_cnst = V_valid;
