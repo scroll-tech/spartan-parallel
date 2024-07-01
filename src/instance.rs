@@ -1,8 +1,6 @@
 use std::cmp::max;
 
-use crate::dense_mlpoly::{PolyCommitment, DensePolynomial};
 use crate::math::Math;
-use crate::r1csproof::R1CSGens;
 use crate::R1CSInstance;
 use crate::errors::R1CSError;
 use crate::scalar::Scalar;
@@ -247,7 +245,7 @@ impl Instance {
   /// - VMR3 = r^3 * VT
   /// - VMC = (1 or VMC[i-1]) * (tau - VA - VMR1 - VMR2 - VMR3)
   /// The final product is stored in X = MC[NV - 1]
-  pub fn gen_block_inst(
+  pub fn gen_block_inst<const PRINT_SIZE: bool>(
     num_instances: usize, 
     num_vars: usize, 
     args: &Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
@@ -258,8 +256,16 @@ impl Instance {
     // Number of physical & memory accesses per block
     num_phy_mems_accesses: &Vec<usize>,
     num_vir_mems_accesses: &Vec<usize>,
+    // Information used only by printing
+    num_vars_per_block: &Vec<usize>,
+    block_num_proofs: &Vec<usize>,
   ) -> (usize, usize, usize, Instance) {
     assert_eq!(num_instances, args.len());
+
+    if PRINT_SIZE {
+      println!("\n\n--\nBLOCK INSTS");
+      println!("{:10} {:>4}   {:>4} {:>4} {:>4}", "", "con", "var", "nnz", "exec");
+    }
 
     let mut block_max_num_cons = 0;
     let mut block_num_cons = Vec::new();
@@ -470,6 +476,16 @@ impl Instance {
       A_list.push(A);
       B_list.push(B);
       C_list.push(C);
+
+      if PRINT_SIZE {
+        println!("{:10} {:4} x {:4} {:4} {:4}", 
+          format!("Block {}", b), 
+          counter, 
+          3 * num_vars_per_block[b] + 2 * num_inputs_unpadded.next_power_of_two() + 2 * 8, 
+          max(tmp_nnz_A, max(tmp_nnz_B, tmp_nnz_C)), 
+          block_num_proofs[b]
+        );
+      }
     }
     
     let block_num_vars = 8 * num_vars;
@@ -521,11 +537,23 @@ impl Instance {
   ///             Op[k]                           Op[k + 1]              D2 & bits of ts[k + 1] - ts[k]
   /// 0   1   2   3   4   5   6   7  |  0   1   2   3   4   5   6   7  |  0   1   2   3   4
   /// v  D1   a   d  ls  ts   _   _  |  v  D1   a   d  ls  ts   _   _  | D2  EQ  B0  B1  ...
-  pub fn gen_pairwise_check_inst(max_ts_width: usize, mem_addr_ts_bits_size: usize) -> (usize, usize, usize, Instance) {
+  pub fn gen_pairwise_check_inst<const PRINT_SIZE: bool>(
+    max_ts_width: usize, 
+    mem_addr_ts_bits_size: usize,
+    // Remaining parameters used only by printing
+    consis_num_proofs: usize,
+    total_num_phy_mem_accesses: usize,
+    total_num_vir_mem_accesses: usize,
+  ) -> (usize, usize, usize, Instance) {
+    if PRINT_SIZE {
+      println!("\n\n--\nPAIRWISE INSTS");
+      println!("{:10} {:>4}   {:>4} {:>4} {:>4}", "", "con", "var", "nnz", "exec");
+    }
+
     let pairwise_check_num_vars = max(8, mem_addr_ts_bits_size);
     let pairwise_check_max_num_cons = 8 + max_ts_width;
     let pairwise_check_num_cons = vec![2, 4, 8 + max_ts_width];
-    let pairwise_check_num_non_zero_entries = max(13 + max_ts_width, 5 + 2 * max_ts_width);
+    let pairwise_check_num_non_zero_entries: usize = max(13 + max_ts_width, 5 + 2 * max_ts_width);
   
     let pairwise_check_inst = {
       let mut A_list = Vec::new();
@@ -547,6 +575,10 @@ impl Instance {
         // Output matches input
         (A, B, C) = Instance::gen_constr(A, B, C,
           0, vec![(V_o, 1), (width + V_i, -1)], vec![(width + V_i, 1)], vec![]);
+
+        if PRINT_SIZE {
+          println!("{:10} {:4} x {:4} {:4} {:4}", "Cohere", 1, 16, 2, consis_num_proofs);
+        }
         (A, B, C)
       };
       A_list.push(A);
@@ -583,7 +615,11 @@ impl Instance {
         // D[k] * (val[k + 1] - val[k]) = 0
         (A, B, C) = Instance::gen_constr(A, B, C,
           num_cons, vec![(V_D, 1)], vec![(width + V_val, 1), (V_val, -1)], vec![]);
+        num_cons += 1;
         
+        if PRINT_SIZE {
+          println!("{:10} {:4} x {:4} {:4} {:4}", "Phy Mem", num_cons, 16, 8, total_num_phy_mem_accesses);
+        }
         (A, B, C)
       };
       A_list.push(A);
@@ -652,6 +688,11 @@ impl Instance {
         // (1 - D1[k]) * (ls[k + 1] - STORE) = 0, where STORE = 0
         (A, B, C) = Instance::gen_constr(A, B, C,
           num_cons, vec![(V_cnst, 1), (V_D1, -1)], vec![(width + V_ls, 1)], vec![]);
+        num_cons += 1;
+        
+        if PRINT_SIZE {
+          println!("{:10} {:4} x {:4} {:4} {:4}", "Vir Mem", num_cons, 2 * pairwise_check_num_vars, pairwise_check_num_non_zero_entries, total_num_vir_mem_accesses);
+        }
         (A, B, C)
       };
       A_list.push(A);
@@ -681,7 +722,19 @@ impl Instance {
   /// pi[k] <- v[k] * D[k]
   /// D[k] <- x[k] * (pi[k + 1] + (1 - v[k + 1]))
   /// Note: Only process the first num_inputs_unpadded inputs since the rest are unused
-  pub fn gen_perm_root_inst(num_inputs_unpadded: usize, num_vars: usize) -> (usize, usize, Instance) {
+  pub fn gen_perm_root_inst<const PRINT_SIZE: bool>(
+    num_inputs_unpadded: usize, 
+    num_vars: usize,
+    // Remaining parameters used only by printing
+    consis_num_proofs: usize,
+    total_num_phy_mem_accesses: usize,
+    total_num_vir_mem_accesses: usize,
+  ) -> (usize, usize, Instance) {
+    if PRINT_SIZE {
+      println!("\n\n--\nPERM INSTS");
+      println!("{:10} {:>4}   {:>4} {:>4} {:>4}", "", "con", "var", "nnz", "exec");
+    }
+    
     let perm_root_num_cons = 2 * num_inputs_unpadded + 4;
     let perm_root_num_non_zero_entries = 4 * num_inputs_unpadded + 5;
     let perm_root_inst = {
@@ -772,7 +825,17 @@ impl Instance {
         // pi[k] = v[k] * D[k]
         (A, B, C) = Instance::gen_constr(A, B, C,
           constraint_count, vec![(V_v, 1)], vec![(V_d, 1)], vec![(V_pi, 1)]);
+        constraint_count += 1;
   
+        if PRINT_SIZE {
+          println!("{:10} {:4} x {:4} {:4} {:4}", 
+            "Perm Root",
+            constraint_count, 
+            3 * num_vars + 16, 
+            perm_root_num_non_zero_entries,
+            consis_num_proofs + total_num_phy_mem_accesses + total_num_vir_mem_accesses
+          );
+        }
         (A, B, C)   
       };
   
