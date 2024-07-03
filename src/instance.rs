@@ -320,6 +320,11 @@ impl Instance {
     let V_Psp = BLOCK_W3_SHIFTED_OFFSET + 4;
     let V_Vsp = BLOCK_W3_SHIFTED_OFFSET + 6;
 
+    // Variable used by printing
+    let mut total_inst_commit_size = 0;
+    let mut total_var_commit_size = 0;
+    let mut total_cons_exec_size = 0;
+
     for b in 0..num_instances {
       let arg = &args[b];
       let mut counter = arg.len();
@@ -478,18 +483,29 @@ impl Instance {
       C_list.push(C);
 
       if PRINT_SIZE {
+        let max_nnz = max(tmp_nnz_A, max(tmp_nnz_B, tmp_nnz_C));
+        let total_var = 3 * num_vars_per_block[b] + 2 * num_inputs_unpadded.next_power_of_two() + 2 * 8;
+        let num_exec = block_num_proofs[b];
         println!("{:10} {:4} x {:4} {:4} {:4}", 
           format!("Block {}", b), 
           counter, 
-          3 * num_vars_per_block[b] + 2 * num_inputs_unpadded.next_power_of_two() + 2 * 8, 
-          max(tmp_nnz_A, max(tmp_nnz_B, tmp_nnz_C)), 
-          block_num_proofs[b]
+          total_var, 
+          max_nnz, 
+          num_exec
         );
+        total_inst_commit_size += max_nnz;
+        total_var_commit_size += total_var * num_exec;
+        total_cons_exec_size += counter * num_exec;
       }
     }
     
-    let block_num_vars = 8 * num_vars;
+    if PRINT_SIZE {
+      println!("Total Inst Commit Size: {}", total_inst_commit_size);
+      println!("Total Var Commit Size: {}", total_var_commit_size);
+      println!("Total Cons Exec Size: {}", total_cons_exec_size);
+    }
 
+    let block_num_vars = 8 * num_vars;
     let block_inst = Instance::new(num_instances, block_max_num_cons, block_num_cons, block_num_vars, &A_list, &B_list, &C_list).unwrap();
     (block_num_vars, block_max_num_cons, block_num_non_zero_entries, block_inst)
   }
@@ -549,6 +565,10 @@ impl Instance {
       println!("\n\n--\nPAIRWISE INSTS");
       println!("{:10} {:>4}   {:>4} {:>4} {:>4}", "", "con", "var", "nnz", "exec");
     }
+    // Variable used by printing
+    let mut total_inst_commit_size = 0;
+    let mut total_var_commit_size = 0;
+    let mut total_cons_exec_size = 0;
 
     let pairwise_check_num_vars = max(8, mem_addr_ts_bits_size);
     let pairwise_check_max_num_cons = 8 + max_ts_width;
@@ -577,7 +597,13 @@ impl Instance {
           0, vec![(V_o, 1), (width + V_i, -1)], vec![(width + V_i, 1)], vec![]);
 
         if PRINT_SIZE {
-          println!("{:10} {:4} x {:4} {:4} {:4}", "Cohere", 1, 16, 2, consis_num_proofs);
+          let max_nnz = 2;
+          let total_var = 16;
+          let num_exec = consis_num_proofs;
+          println!("{:10} {:4} x {:4} {:4} {:4}", "Cohere", 1, total_var, max_nnz, consis_num_proofs);
+          total_inst_commit_size += max_nnz;
+          total_var_commit_size += total_var * num_exec;
+          total_cons_exec_size += num_exec;
         }
         (A, B, C)
       };
@@ -618,7 +644,13 @@ impl Instance {
         num_cons += 1;
         
         if PRINT_SIZE {
-          println!("{:10} {:4} x {:4} {:4} {:4}", "Phy Mem", num_cons, 16, 8, total_num_phy_mem_accesses);
+          let max_nnz = 8;
+          let total_var = 16;
+          let num_exec = total_num_phy_mem_accesses;
+          println!("{:10} {:4} x {:4} {:4} {:4}", "Phy Mem", num_cons, total_var, max_nnz, total_num_phy_mem_accesses);
+          total_inst_commit_size += max_nnz;
+          total_var_commit_size += total_var * num_exec;
+          total_cons_exec_size += num_cons * num_exec;
         }
         (A, B, C)
       };
@@ -691,7 +723,13 @@ impl Instance {
         num_cons += 1;
         
         if PRINT_SIZE {
-          println!("{:10} {:4} x {:4} {:4} {:4}", "Vir Mem", num_cons, 2 * pairwise_check_num_vars, pairwise_check_num_non_zero_entries, total_num_vir_mem_accesses);
+          let max_nnz = pairwise_check_num_non_zero_entries;
+          let total_var = 2 * pairwise_check_num_vars;
+          let num_exec = total_num_phy_mem_accesses;
+          println!("{:10} {:4} x {:4} {:4} {:4}", "Vir Mem", num_cons, total_var, max_nnz, total_num_vir_mem_accesses);
+          total_inst_commit_size += max_nnz;
+          total_var_commit_size += total_var * num_exec;
+          total_cons_exec_size += num_cons * num_exec;
         }
         (A, B, C)
       };
@@ -699,8 +737,13 @@ impl Instance {
       B_list.push(B);
       C_list.push(C);
 
-      let pairwise_check_inst = Instance::new(3, pairwise_check_max_num_cons, pairwise_check_num_cons, 4 * pairwise_check_num_vars, &A_list, &B_list, &C_list).unwrap();
-      
+      if PRINT_SIZE {
+        println!("Total Inst Commit Size: {}", total_inst_commit_size);
+        println!("Total Var Commit Size: {}", total_var_commit_size);
+        println!("Total Cons Exec Size: {}", total_cons_exec_size);
+      }
+
+      let pairwise_check_inst = Instance::new(3, pairwise_check_max_num_cons, pairwise_check_num_cons, 4 * pairwise_check_num_vars, &A_list, &B_list, &C_list).unwrap();      
       pairwise_check_inst
     };
     (pairwise_check_num_vars, pairwise_check_max_num_cons, pairwise_check_num_non_zero_entries, pairwise_check_inst)
@@ -734,7 +777,11 @@ impl Instance {
       println!("\n\n--\nPERM INSTS");
       println!("{:10} {:>4}   {:>4} {:>4} {:>4}", "", "con", "var", "nnz", "exec");
     }
-    
+    // Variable used by printing
+    let mut total_inst_commit_size = 0;
+    let mut total_var_commit_size = 0;
+    let mut total_cons_exec_size = 0;
+
     let perm_root_num_cons = 2 * num_inputs_unpadded + 4;
     let perm_root_num_non_zero_entries = 4 * num_inputs_unpadded + 5;
     let perm_root_inst = {
@@ -828,13 +875,19 @@ impl Instance {
         constraint_count += 1;
   
         if PRINT_SIZE {
+          let max_nnz = perm_root_num_non_zero_entries;
+          let total_var = 3 * num_vars + 16;
+          let num_exec = total_num_phy_mem_accesses;
           println!("{:10} {:4} x {:4} {:4} {:4}", 
             "Perm Root",
             constraint_count, 
-            3 * num_vars + 16, 
-            perm_root_num_non_zero_entries,
+            total_var, 
+            max_nnz,
             consis_num_proofs + total_num_phy_mem_accesses + total_num_vir_mem_accesses
           );
+          total_inst_commit_size += max_nnz;
+          total_var_commit_size += total_var * num_exec;
+          total_cons_exec_size += constraint_count * num_exec;
         }
         (A, B, C)   
       };
@@ -843,8 +896,13 @@ impl Instance {
       let B_list = vec![B.clone()];
       let C_list = vec![C.clone()];
   
+      if PRINT_SIZE {
+        println!("Total Inst Commit Size: {}", total_inst_commit_size);
+        println!("Total Var Commit Size: {}", total_var_commit_size);
+        println!("Total Cons Exec Size: {}", total_cons_exec_size);
+      }
+
       let perm_root_inst = Instance::new(1, perm_root_num_cons, vec![perm_root_num_cons], 8 * num_vars, &A_list, &B_list, &C_list).unwrap();
-      
       perm_root_inst
     };
     (perm_root_num_cons, perm_root_num_non_zero_entries, perm_root_inst)

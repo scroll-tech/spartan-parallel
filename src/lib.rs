@@ -2680,7 +2680,7 @@ impl SNARK {
       )?;
       timer_sat_proof.stop();
 
-      let timer_eval_proof = Timer::new("Consis Check Eval");
+      let timer_eval_proof = Timer::new("Pairwise Check Eval");
       // Verify Evaluation on CONSIS_CHECK
       let [rp, _, rx, ry] = pairwise_check_challenges;
       
