@@ -31,6 +31,7 @@ pub struct R1CSInstance {
   C_list: Vec<SparseMatPolynomial>,
 }
 
+#[derive(Serialize)]
 pub struct R1CSCommitmentGens {
   gens: SparseMatPolyCommitmentGens,
 }

@@ -283,6 +283,8 @@ pub struct MultiSparseMatPolynomialAsDense {
   comb_mem: DensePolynomial,
 }
 
+
+#[derive(Serialize)]
 pub struct SparseMatPolyCommitmentGens {
   gens_ops: PolyCommitmentGens,
   gens_mem: PolyCommitmentGens,

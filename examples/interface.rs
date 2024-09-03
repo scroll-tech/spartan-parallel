@@ -179,6 +179,7 @@ struct RunTimeKnowledge {
 
   block_vars_matrix: Vec<Vec<VarsAssignment>>,
   exec_inputs: Vec<InputsAssignment>,
+  init_mems_list: Vec<MemsAssignment>,
   addr_phy_mems_list: Vec<MemsAssignment>,
   addr_vir_mems_list: Vec<MemsAssignment>,
   addr_ts_bits_list: Vec<MemsAssignment>,
@@ -254,7 +255,7 @@ impl RunTimeKnowledge {
       let mut exec_counter = 0;
       buffer.clear();
       reader.read_line(&mut buffer)?;
-      while buffer != "ADDR_PHY_MEMS\n".to_string() {
+      while buffer != "INIT_MEMS\n".to_string() {
         if buffer == format!("EXEC {}\n", exec_counter + 1) {
           exec_inputs.push(Vec::new());
           exec_counter += 1;
@@ -266,6 +267,26 @@ impl RunTimeKnowledge {
       }
 
       exec_inputs.iter().map(|i| InputsAssignment::new(i).unwrap()).collect()
+    };
+
+    let init_mems_list: Vec<MemsAssignment> = {
+      let mut init_mems_list = vec![Vec::new()];
+      buffer.clear();
+      reader.read_line(&mut buffer)?;
+      
+      let mut access_counter = 0;
+      while buffer != "ADDR_PHY_MEMS\n".to_string() {
+        if buffer == format!("ACCESS {}\n", access_counter + 1) {
+          access_counter += 1;
+          init_mems_list.push(Vec::new());
+        } else if buffer == format!("ACCESS 0\n") {
+        } else {
+          init_mems_list[access_counter].push(string_to_bytes(buffer.clone()));
+        }
+        buffer.clear();
+        reader.read_line(&mut buffer)?;
+      }
+      init_mems_list.iter().map(|i| InputsAssignment::new(i).unwrap()).collect()
     };
 
     let addr_phy_mems_list: Vec<MemsAssignment> = {
@@ -365,6 +386,7 @@ impl RunTimeKnowledge {
     
       block_vars_matrix,
       exec_inputs,
+      init_mems_list,
       addr_phy_mems_list,
       addr_vir_mems_list,
       addr_ts_bits_list,

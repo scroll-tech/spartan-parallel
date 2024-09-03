@@ -500,6 +500,7 @@ impl Instance {
     }
     
     if PRINT_SIZE {
+      println!("Total Num of Blocks: {}", num_instances);
       println!("Total Inst Commit Size: {}", total_inst_commit_size);
       println!("Total Var Commit Size: {}", total_var_commit_size);
       println!("Total Cons Exec Size: {}", total_cons_exec_size);
@@ -738,6 +739,10 @@ impl Instance {
       C_list.push(C);
 
       if PRINT_SIZE {
+        let mut num_instances = 1;
+        if total_num_phy_mem_accesses > 0 { num_instances += 1; }
+        if total_num_vir_mem_accesses > 0 { num_instances += 1; }
+        println!("Total Num of Blocks: {}", num_instances);
         println!("Total Inst Commit Size: {}", total_inst_commit_size);
         println!("Total Var Commit Size: {}", total_var_commit_size);
         println!("Total Cons Exec Size: {}", total_cons_exec_size);
@@ -897,6 +902,10 @@ impl Instance {
       let C_list = vec![C.clone()];
   
       if PRINT_SIZE {
+        let mut num_instances = 1;
+        if total_num_phy_mem_accesses > 0 { num_instances += 1; }
+        if total_num_vir_mem_accesses > 0 { num_instances += 1; }
+        println!("Total Num of Blocks: {}", num_instances);
         println!("Total Inst Commit Size: {}", total_inst_commit_size);
         println!("Total Var Commit Size: {}", total_var_commit_size);
         println!("Total Cons Exec Size: {}", total_cons_exec_size);

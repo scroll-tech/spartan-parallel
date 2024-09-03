@@ -63,7 +63,7 @@ const ZERO: Scalar = Scalar::zero();
 const ONE: Scalar = Scalar::one();
 
 /// `ComputationCommitment` holds a public preprocessed NP statement (e.g., R1CS)
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct ComputationCommitment {
   comm: R1CSCommitment,
 }
@@ -117,6 +117,7 @@ pub type InputsAssignment = Assignment;
 pub type MemsAssignment = Assignment;
 
 /// `SNARKGens` holds public parameters for producing and verifying proofs with the Spartan SNARK
+#[derive(Serialize)]
 pub struct SNARKGens {
   /// Generator for witness commitment
   pub gens_r1cs_sat: R1CSGens,
@@ -225,6 +226,7 @@ impl IOProofs {
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
+
     let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
 
@@ -2274,6 +2276,29 @@ impl SNARK {
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
+    let proof_size = bincode::serialize(&self).unwrap().len();
+    let commit_size = 
+      bincode::serialize(&block_comm_list).unwrap().len() + 
+      // bincode::serialize(&block_gens).unwrap().len() + 
+      bincode::serialize(&pairwise_check_comm).unwrap().len() + 
+      // bincode::serialize(&pairwise_check_gens).unwrap().len() + 
+      bincode::serialize(&perm_root_comm).unwrap().len();
+      // bincode::serialize(&perm_root_gens).unwrap().len();
+    let meta_size = 
+      // usize
+      19 * std::mem::size_of::<usize>() +
+      // Vec<usize> or Vec<Vec<usize>>
+      bincode::serialize(block_num_phy_ops).unwrap().len() +
+      bincode::serialize(block_num_vir_ops).unwrap().len() +
+      bincode::serialize(block_num_vars).unwrap().len() +
+      bincode::serialize(block_num_proofs).unwrap().len() +
+      bincode::serialize(block_comm_map).unwrap().len() +
+      // Other vectors
+      bincode::serialize(input).unwrap().len() +
+      bincode::serialize(output).unwrap().len();
+      // Everything else
+      // bincode::serialize(vars_gens).unwrap().len();
+
     let timer_verify = Timer::new("SNARK::verify");
     transcript.append_protocol_name(SNARK::protocol_name());
 
@@ -2922,6 +2947,12 @@ impl SNARK {
     timer_proof.stop();
     
     timer_verify.stop();
+
+    println!("PROOF SIZE: {}", proof_size);
+    println!("COMMIT SIZE: {}", commit_size);
+    println!("META SIZE: {}", meta_size);
+    println!("Total Proof Size: {}", proof_size + commit_size + meta_size);
+
     Ok(())
   }
 

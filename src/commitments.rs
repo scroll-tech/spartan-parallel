@@ -2,9 +2,10 @@ use super::group::{GroupElement, VartimeMultiscalarMul, GROUP_BASEPOINT_COMPRESS
 use super::scalar::Scalar;
 use digest::XofReader;
 use digest::{ExtendableOutput, Input};
+use serde::Serialize;
 use sha3::Shake256;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MultiCommitGens {
   pub n: usize,
   pub G: Vec<GroupElement>,

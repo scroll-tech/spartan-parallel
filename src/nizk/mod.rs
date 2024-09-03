@@ -404,7 +404,7 @@ impl DotProductProof {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct DotProductProofGens {
   n: usize,
   pub gens_n: MultiCommitGens,

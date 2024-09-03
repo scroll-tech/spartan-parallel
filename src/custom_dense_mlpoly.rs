@@ -99,7 +99,7 @@ impl DensePolynomialPqx {
 
   // Given (p, q_rev, x_rev) return Z[p][q_rev][x_rev]
   pub fn index(&self, p: usize, q_rev: usize, w: usize, x_rev: usize) -> Scalar {
-      if p < self.Z.len() {
+      if p < self.Z.len() && q_rev < self.Z[p].len() && w < self.Z[p][q_rev].len() && x_rev < self.Z[p][q_rev][w].len() {
         return self.Z[p][q_rev][w][x_rev];
       } else {
         return ZERO;
