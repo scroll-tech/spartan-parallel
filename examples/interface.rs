@@ -180,6 +180,7 @@ struct RunTimeKnowledge {
   block_max_num_proofs: usize,
   block_num_proofs: Vec<usize>,
   consis_num_proofs: usize,
+  total_num_init_mem_accesses: usize,
   total_num_phy_mem_accesses: usize,
   total_num_vir_mem_accesses: usize,
 
@@ -202,7 +203,7 @@ impl RunTimeKnowledge {
     let mut reader = BufReader::new(f);
     let mut buffer = String::new();
 
-    let (block_max_num_proofs, block_num_proofs, consis_num_proofs, total_num_phy_mem_accesses, total_num_vir_mem_accesses) = {
+    let (block_max_num_proofs, block_num_proofs, consis_num_proofs, total_num_init_mem_accesses, total_num_phy_mem_accesses, total_num_vir_mem_accesses) = {
       reader.read_line(&mut buffer)?;
       let block_max_num_proofs = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
@@ -213,11 +214,14 @@ impl RunTimeKnowledge {
       let consis_num_proofs = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
       reader.read_line(&mut buffer)?;
+      let total_num_init_mem_accesses = buffer.trim().parse::<usize>().unwrap();
+      buffer.clear();
+      reader.read_line(&mut buffer)?;
       let total_num_phy_mem_accesses = buffer.trim().parse::<usize>().unwrap();
       buffer.clear();
       reader.read_line(&mut buffer)?;
       let total_num_vir_mem_accesses = buffer.trim().parse::<usize>().unwrap();
-      (block_max_num_proofs, block_num_proofs, consis_num_proofs, total_num_phy_mem_accesses, total_num_vir_mem_accesses)
+      (block_max_num_proofs, block_num_proofs, consis_num_proofs, total_num_init_mem_accesses, total_num_phy_mem_accesses, total_num_vir_mem_accesses)
     };
     
     let block_vars_matrix: Vec<Vec<VarsAssignment>> = {
@@ -387,6 +391,7 @@ impl RunTimeKnowledge {
       block_max_num_proofs,
       block_num_proofs,
       consis_num_proofs,
+      total_num_init_mem_accesses,
       total_num_phy_mem_accesses,
       total_num_vir_mem_accesses,
     
@@ -538,6 +543,7 @@ fn main() {
     &block_gens,
     
     rtk.consis_num_proofs,
+    rtk.total_num_init_mem_accesses,
     rtk.total_num_phy_mem_accesses,
     rtk.total_num_vir_mem_accesses,
     &mut pairwise_check_inst,
@@ -547,6 +553,7 @@ fn main() {
 
     block_vars_matrix,
     rtk.exec_inputs,
+    rtk.init_mems_list,
     rtk.addr_phy_mems_list,
     rtk.addr_vir_mems_list,
     rtk.addr_ts_bits_list,
@@ -592,6 +599,7 @@ fn main() {
     &block_gens,
 
     rtk.consis_num_proofs, 
+    rtk.total_num_init_mem_accesses,
     rtk.total_num_phy_mem_accesses,
     rtk.total_num_vir_mem_accesses,
     pairwise_check_num_cons,
