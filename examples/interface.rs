@@ -50,6 +50,8 @@ struct CompileTimeKnowledge {
   args: Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
 
   func_input_width: usize,
+  // Whether the input contains any memory accesses
+  init_mem_set: bool,
   input_offset: usize,
   input_block_num: usize,
   output_offset: usize,
@@ -140,6 +142,9 @@ impl CompileTimeKnowledge {
     let func_input_width = buffer.trim().parse::<usize>().unwrap();
     buffer.clear();
     reader.read_line(&mut buffer)?;
+    let init_mem_set = buffer.trim().parse::<usize>().unwrap() == 1;
+    buffer.clear();
+    reader.read_line(&mut buffer)?;
     let input_offset = buffer.trim().parse::<usize>().unwrap();
     buffer.clear();
     reader.read_line(&mut buffer)?;
@@ -161,6 +166,7 @@ impl CompileTimeKnowledge {
       max_ts_width,
       args,
       func_input_width,
+      init_mem_set,
       input_offset,
       input_block_num,
       output_offset,
