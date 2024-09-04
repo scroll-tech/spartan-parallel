@@ -579,8 +579,7 @@ impl VerifierWitnessSecInfo {
 pub struct SNARK {
   block_comm_vars_list: Vec<PolyCommitment>,
   exec_comm_inputs: Vec<PolyCommitment>,
-  comm_init_mems: Vec<PolyCommitment>,
-  comm_init_mems_shifted: Vec<PolyCommitment>,
+  // comm_init_mems: Vec<PolyCommitment>, HANDLED BY THE VERIFIER
   addr_comm_phy_mems: Vec<PolyCommitment>,
   addr_comm_phy_mems_shifted: Vec<PolyCommitment>,
   addr_comm_vir_mems: Vec<PolyCommitment>,
@@ -1859,9 +1858,7 @@ impl SNARK {
     };
     let (
       poly_init_mems,
-      comm_init_mems,
-      init_mems_shifted_prover,
-      comm_init_mems_shifted,
+      _comm_init_mems,
     ) = {
       if total_num_init_mem_accesses > 0 {
         let (poly_init_mems, comm_init_mems) = {
@@ -1876,32 +1873,13 @@ impl SNARK {
           comm_init_mems.append_to_transcript(b"poly_commitment", transcript);
           (poly_init_mems, comm_init_mems)
         };
-        // Remove the first entry and shift the remaining entries up by one
-        // Used later by coherence check
-        let (init_mems_shifted_prover, comm_init_mems_shifted) = {
-          let init_mems_shifted = [init_mems_list[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; INIT_MEM_WIDTH]].concat();
-          // create a multilinear polynomial using the supplied assignment for variables
-          let poly_init_mems_shifted = DensePolynomial::new(init_mems_shifted);
-
-          // produce a commitment to the satisfying assignment
-          let (comm_init_mems_shifted, _blinds_inputs) = poly_init_mems_shifted.commit(&vars_gens.gens_pc, None);
-          // add the commitment to the prover's transcript
-          comm_init_mems_shifted.append_to_transcript(b"poly_commitment", transcript);
-
-          let init_mems_shifted_prover = ProverWitnessSecInfo::new(vec![[init_mems_list[1..].to_vec(), vec![vec![ZERO; INIT_MEM_WIDTH]]].concat()], vec![poly_init_mems_shifted]);
-          (init_mems_shifted_prover, comm_init_mems_shifted)
-        };
         (
           vec![poly_init_mems], 
           vec![comm_init_mems],
-          init_mems_shifted_prover, 
-          vec![comm_init_mems_shifted],
         )
       } else {
         (
           Vec::new(),
-          Vec::new(),
-          ProverWitnessSecInfo::dummy(),
           Vec::new(),
         )
       }
@@ -2321,7 +2299,6 @@ impl SNARK {
     // Prove in the order of
     // - perm_block_w3 => shift by 4
     // - perm_exec_w3 => shift by 8
-    // - (if exist) init_mems => shift by 4
     // - (if exist) init_mem_w3 => shift by 8
     // - (if exist) addr_phy_mems => shift by 4
     // - (if exist) phy_mem_addr_w3 => shift by 8
@@ -2341,11 +2318,8 @@ impl SNARK {
         shifted_polys.push(poly);
       }
       header_len_list.extend(vec![8; block_num_instances]);
-      // init_mems, init_mem_w3
+      // init_mem_w3
       if total_num_init_mem_accesses > 0 {
-        orig_polys.push(&init_mems_prover.poly_w[0]);
-        shifted_polys.push(&init_mems_shifted_prover.poly_w[0]);
-        header_len_list.push(4);
         orig_polys.push(&init_mem_w3_prover.poly_w[0]);
         shifted_polys.push(&init_mem_w3_shifted_prover.poly_w[0]);
         header_len_list.push(6);
@@ -2409,8 +2383,6 @@ impl SNARK {
     SNARK {
       block_comm_vars_list,
       exec_comm_inputs,
-      comm_init_mems,
-      comm_init_mems_shifted,
       addr_comm_phy_mems,
       addr_comm_phy_mems_shifted,
       addr_comm_vir_mems,
@@ -2830,23 +2802,23 @@ impl SNARK {
       )
     };
 
-    let (
-      init_mems_verifier,
-      init_mems_shifted_verifier
-     ) = {
-      if total_num_init_mem_accesses > 0 {
-        self.comm_init_mems[0].append_to_transcript(b"poly_commitment", transcript);
-        self.comm_init_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
-        (
-          VerifierWitnessSecInfo::new(vec![INIT_MEM_WIDTH], &vec![total_num_init_mem_accesses], &self.comm_init_mems),
-          VerifierWitnessSecInfo::new(vec![INIT_MEM_WIDTH], &vec![total_num_init_mem_accesses], &self.comm_init_mems_shifted)
-        )
-      } else {
-        (
-          VerifierWitnessSecInfo::dummy(),
-          VerifierWitnessSecInfo::dummy()
-        )
-      }
+    let init_mems_verifier = {
+      if input_mem.len() > 0 {
+        assert_eq!(total_num_init_mem_accesses, input_mem.len().next_power_of_two());
+        // Let the verifier generate init_mems itself
+        let init_mems = [
+          (0..input_mem.len()).map(|i| vec![ONE, ZERO, Scalar::from(i as u64), input_mem[i].clone()]).concat(),
+          vec![ZERO; INIT_MEM_WIDTH * (total_num_init_mem_accesses - input_mem.len())]
+        ].concat();
+        // create a multilinear polynomial using the supplied assignment for variables
+        let poly_init_mems = DensePolynomial::new(init_mems.clone());
+        // produce a commitment to the satisfying assignment
+        let (comm_init_mems, _blinds_vars) = poly_init_mems.commit(&vars_gens.gens_pc, None);
+        // add the commitment to the prover's transcript
+        comm_init_mems.append_to_transcript(b"poly_commitment", transcript);
+        
+        VerifierWitnessSecInfo::new(vec![INIT_MEM_WIDTH], &vec![total_num_init_mem_accesses], &vec![comm_init_mems])
+      } else { VerifierWitnessSecInfo::dummy() }
     };
 
     let (
@@ -3173,13 +3145,8 @@ impl SNARK {
       let mut poly_size_list = [vec![8 * consis_num_proofs], (0..block_num_instances).map(|i| 8 * block_num_proofs[i]).collect()].concat();
       let mut shift_size_list = [vec![8], vec![8; block_num_instances]].concat();
       let mut header_len_list = [vec![6], vec![8; block_num_instances]].concat();
-      // init_mems, init_mem_w3
+      // init_mem_w3
       if total_num_init_mem_accesses > 0 {
-        orig_comms.push(&init_mems_verifier.comm_w[0]);
-        shifted_comms.push(&init_mems_shifted_verifier.comm_w[0]);
-        poly_size_list.push(4 * total_num_init_mem_accesses);
-        shift_size_list.push(4);
-        header_len_list.push(4);
         orig_comms.push(&init_mem_w3_verifier.comm_w[0]);
         shifted_comms.push(&init_mem_w3_shifted_verifier.comm_w[0]);
         poly_size_list.push(8 * total_num_init_mem_accesses);
