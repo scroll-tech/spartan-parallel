@@ -62,7 +62,7 @@ use crate::commitments::Commitments;
 const ZERO: Scalar = Scalar::zero();
 const ONE: Scalar = Scalar::one();
 
-const INIT_MEM_WIDTH: usize = 8;
+const INIT_MEM_WIDTH: usize = 4;
 const PHY_MEM_WIDTH: usize = 4;
 const VIR_MEM_WIDTH: usize = 8;
 const W3_WIDTH: usize = 8;
@@ -940,7 +940,7 @@ impl SNARK {
       perm_exec_comm_w2_list,
       perm_exec_w3_prover,
       perm_exec_comm_w3_list,
-      perm_exec_w3_shifted_prover, // shifted by 8
+      perm_exec_w3_shifted_prover, // shifted by W3_WIDTH
       perm_exec_comm_w3_shifted,
       // perm_block
       perm_block_w2_prover,
@@ -954,7 +954,7 @@ impl SNARK {
       // block_w3
       block_w3_prover,
       block_comm_w3_list,
-      block_w3_shifted_prover, // shifted by 8
+      block_w3_shifted_prover, // shifted by W3_WIDTH
       block_comm_w3_list_shifted,
     ) = {
       let comb_tau = transcript.challenge_scalar(b"challenge_tau");
@@ -1417,15 +1417,13 @@ impl SNARK {
       init_mem_comm_w3_shifted
     ) = {
       if total_num_init_mem_accesses > 0 {
-        // init_mem_w2 is (I, O, ZO, r * data, r^2 * ls, r^3 * ts)
+        // init_mem_w2 is (I, O, ZO, r * data, 0, 0)
         // where ZO = 0,
         
         let mut init_mem_w2 = Vec::new();
         for q in 0..total_num_init_mem_accesses {
           init_mem_w2.push(vec![ZERO; INIT_MEM_WIDTH]);
           init_mem_w2[q][3] = comb_r * init_mems_list[q][3];
-          init_mem_w2[q][4] = comb_r * comb_r * init_mems_list[q][4];
-          init_mem_w2[q][5] = comb_r * comb_r * comb_r * init_mems_list[q][5];
         }
         // init_mems_w3 is (v, x, pi, D, I, O)
         // where I = v * (v + addr + r * data + r^2 * ls + r^3 * ts),
@@ -1440,8 +1438,6 @@ impl SNARK {
             comb_tau 
             - init_mems_list[q][2] 
             - init_mem_w2[q][3]
-            - init_mem_w2[q][4]
-            - init_mem_w2[q][5]
           );
           // pi and D
           if q != total_num_init_mem_accesses - 1 {
@@ -1454,8 +1450,6 @@ impl SNARK {
             init_mems_list[q][0] 
             + init_mems_list[q][2] 
             + init_mem_w2[q][3]
-            + init_mem_w2[q][4]
-            + init_mem_w2[q][5]
           );
           init_mem_w3[q][5] = init_mems_list[q][0];
         }
@@ -2327,7 +2321,8 @@ impl SNARK {
     // Prove in the order of
     // - perm_block_w3 => shift by 4
     // - perm_exec_w3 => shift by 8
-    // - (if exist) phy_mem_block_w3 => shift by 4
+    // - (if exist) init_mems => shift by 4
+    // - (if exist) init_mem_w3 => shift by 8
     // - (if exist) addr_phy_mems => shift by 4
     // - (if exist) phy_mem_addr_w3 => shift by 8
     // - (if exist) addr_vir_mems => shift by 8
@@ -2346,6 +2341,15 @@ impl SNARK {
         shifted_polys.push(poly);
       }
       header_len_list.extend(vec![8; block_num_instances]);
+      // init_mems, init_mem_w3
+      if total_num_init_mem_accesses > 0 {
+        orig_polys.push(&init_mems_prover.poly_w[0]);
+        shifted_polys.push(&init_mems_shifted_prover.poly_w[0]);
+        header_len_list.push(4);
+        orig_polys.push(&init_mem_w3_prover.poly_w[0]);
+        shifted_polys.push(&init_mem_w3_shifted_prover.poly_w[0]);
+        header_len_list.push(6);
+      }
       // addr_phy_mems, phy_mem_addr_w3
       if total_num_phy_mem_accesses > 0 {
         orig_polys.push(&addr_phy_mems_prover.poly_w[0]);
@@ -2355,7 +2359,7 @@ impl SNARK {
         shifted_polys.push(&phy_mem_addr_w3_shifted_prover.poly_w[0]);
         header_len_list.push(6);
       }
-      // addr_vir_mems
+      // addr_vir_mems, vir_mem_addr_w3
       if total_num_vir_mem_accesses > 0 {
         orig_polys.push(&addr_vir_mems_prover.poly_w[0]);
         shifted_polys.push(&addr_vir_mems_shifted_prover.poly_w[0]);
@@ -3169,6 +3173,19 @@ impl SNARK {
       let mut poly_size_list = [vec![8 * consis_num_proofs], (0..block_num_instances).map(|i| 8 * block_num_proofs[i]).collect()].concat();
       let mut shift_size_list = [vec![8], vec![8; block_num_instances]].concat();
       let mut header_len_list = [vec![6], vec![8; block_num_instances]].concat();
+      // init_mems, init_mem_w3
+      if total_num_init_mem_accesses > 0 {
+        orig_comms.push(&init_mems_verifier.comm_w[0]);
+        shifted_comms.push(&init_mems_shifted_verifier.comm_w[0]);
+        poly_size_list.push(4 * total_num_init_mem_accesses);
+        shift_size_list.push(4);
+        header_len_list.push(4);
+        orig_comms.push(&init_mem_w3_verifier.comm_w[0]);
+        shifted_comms.push(&init_mem_w3_shifted_verifier.comm_w[0]);
+        poly_size_list.push(8 * total_num_init_mem_accesses);
+        shift_size_list.push(8);
+        header_len_list.push(6);
+      }
       // addr_phy_mems, phy_mem_addr_w3
       if total_num_phy_mem_accesses > 0 {
         orig_comms.push(&addr_phy_mems_verifier.comm_w[0]);
