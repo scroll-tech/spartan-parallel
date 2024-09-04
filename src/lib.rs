@@ -79,7 +79,7 @@ pub struct ComputationDecommitment {
 }
 
 /// `Assignment` holds an assignment of values to either the inputs or variables in an `Instance`
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Assignment {
   assignment: Vec<Scalar>,
 }
@@ -1884,6 +1884,7 @@ impl SNARK {
         )
       }
     };
+    
     let (
       addr_poly_phy_mems,
       addr_comm_phy_mems,
@@ -2865,7 +2866,7 @@ impl SNARK {
     timer_commit.stop();
 
     // --
-    // BLOCK CORRECTNESS
+    // BLOCK_CORRECTNESS_EXTRACT
     // --
     {
       let timer_sat_proof = Timer::new("Block Correctness Extract Sat");

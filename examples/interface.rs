@@ -2,12 +2,13 @@
 //! Used as a temporary interface to / from CirC
 #![allow(clippy::assertions_on_result_states)]
 use std::{fs::File, io::BufReader};
-use std::io::BufRead;
-use std::env;
+use std::io::{BufRead, Read};
+use std::{default, env};
 
 use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
 use std::time::*;
+use serde::{Serialize, Deserialize};
 
 const TOTAL_NUM_VARS_BOUND: usize = 10000000;
 
@@ -38,6 +39,7 @@ fn string_to_bytes(buffer: String) -> [u8; 32] {
 }
 
 // Everything provided by the frontend
+#[derive(Serialize, Deserialize)]
 struct CompileTimeKnowledge {
   block_num_instances: usize,
   num_vars: usize,
@@ -57,6 +59,14 @@ struct CompileTimeKnowledge {
 }
 
 impl CompileTimeKnowledge {
+  fn deserialize_from_file(benchmark_name: String) -> CompileTimeKnowledge {
+    let file_name = format!("../zok_tests/constraints/{}_bin.ctk", benchmark_name);
+    let mut f = File::open(file_name).unwrap();
+    let mut content: Vec<u8> = Vec::new();
+    f.read_to_end(&mut content).unwrap();
+    bincode::deserialize(&content).unwrap()
+  }
+  
   fn read_from_file(benchmark_name: String) -> std::io::Result<CompileTimeKnowledge> {
     let file_name = format!("../zok_tests/constraints/{}.ctk", benchmark_name);
     let f = File::open(file_name)?;
@@ -170,6 +180,7 @@ impl CompileTimeKnowledge {
 }
 
 // Everything provided by the prover
+#[derive(Serialize, Deserialize)]
 struct RunTimeKnowledge {
   block_max_num_proofs: usize,
   block_num_proofs: Vec<usize>,
@@ -192,6 +203,14 @@ struct RunTimeKnowledge {
 }
 
 impl RunTimeKnowledge {
+  fn deserialize_from_file(benchmark_name: String) -> RunTimeKnowledge {
+    let file_name = format!("../zok_tests/inputs/{}_bin.rtk", benchmark_name);
+    let mut f = File::open(file_name).unwrap();
+    let mut content: Vec<u8> = Vec::new();
+    f.read_to_end(&mut content).unwrap();
+    bincode::deserialize(&content).unwrap()
+  }
+
   fn read_from_file(benchmark_name: String) -> std::io::Result<RunTimeKnowledge> {
     let file_name = format!("../zok_tests/inputs/{}.rtk", benchmark_name);
     let f = File::open(file_name)?;
@@ -419,8 +438,10 @@ impl RunTimeKnowledge {
 
 fn main() {
   let benchmark_name = &env::args().collect::<Vec<String>>()[1];
-  let ctk = CompileTimeKnowledge::read_from_file(benchmark_name.to_string()).unwrap();
-  let rtk = RunTimeKnowledge::read_from_file(benchmark_name.to_string()).unwrap();
+  // let ctk = CompileTimeKnowledge::read_from_file(benchmark_name.to_string()).unwrap();
+  let ctk = CompileTimeKnowledge::deserialize_from_file(benchmark_name.to_string());
+  // let rtk = RunTimeKnowledge::read_from_file(benchmark_name.to_string()).unwrap();
+  let rtk = RunTimeKnowledge::deserialize_from_file(benchmark_name.to_string());
 
   // --
   // INSTANCE PREPROCESSING
