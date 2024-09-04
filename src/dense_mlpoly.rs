@@ -926,7 +926,6 @@ impl PolyEvalProof {
       );
       proof_list.push(PolyEvalProof { proof });
     }
-
     proof_list
   }
 

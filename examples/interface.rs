@@ -192,6 +192,7 @@ struct RunTimeKnowledge {
   addr_ts_bits_list: Vec<MemsAssignment>,
 
   input: Vec<[u8; 32]>,
+  input_mem: Vec<[u8; 32]>,
   output: [u8; 32],
   output_exec_num: usize
 }
@@ -363,12 +364,24 @@ impl RunTimeKnowledge {
       let mut func_inputs = Vec::new();
       buffer.clear();
       reader.read_line(&mut buffer)?;
-      while buffer != "OUTPUTS\n".to_string() {
+      while buffer != "INPUT_MEMS\n".to_string() {
         func_inputs.push(string_to_bytes(buffer.clone()));
         buffer.clear();
         reader.read_line(&mut buffer)?;
       }
       func_inputs
+    };
+
+    let input_mem = {
+      let mut input_mem = Vec::new();
+      buffer.clear();
+      reader.read_line(&mut buffer)?;
+      while buffer != "OUTPUTS\n".to_string() {
+        input_mem.push(string_to_bytes(buffer.clone()));
+        buffer.clear();
+        reader.read_line(&mut buffer)?;
+      }
+      input_mem
     };
 
     let func_outputs = {
@@ -403,6 +416,7 @@ impl RunTimeKnowledge {
       addr_ts_bits_list,
     
       input: func_inputs,
+      input_mem,
       output: func_outputs[0],
       output_exec_num
     })
@@ -577,6 +591,7 @@ fn main() {
     ctk.input_offset,
     ctk.output_offset,
     &rtk.input,
+    &rtk.input_mem,
     &rtk.output,
     rtk.output_exec_num,
 

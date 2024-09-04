@@ -65,7 +65,7 @@ const ONE: Scalar = Scalar::one();
 const INIT_MEM_WIDTH: usize = 8;
 const PHY_MEM_WIDTH: usize = 4;
 const VIR_MEM_WIDTH: usize = 8;
-const MEM_W3_WIDTH: usize = 8;
+const W3_WIDTH: usize = 8;
 
 /// `ComputationCommitment` holds a public preprocessed NP statement (e.g., R1CS)
 #[derive(Clone, Serialize)]
@@ -195,9 +195,10 @@ impl IOProofs {
           output_exec_num * num_ios, // output valid
           2, // input block num
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1), // output block num
-          output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1 // output correctness
+          output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1, // output correctness
+          5, // %AS
         ], 
-        (0..func_input_width).map(|i| 2 + input_offset + i).collect() // input correctness
+        (0..func_input_width - 1).map(|i| 2 + input_offset + i).collect() // input correctness
       ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
       vec![
         vec![ONE, ONE, input_block_num, output_block_num, output],
@@ -216,7 +217,6 @@ impl IOProofs {
   fn verify(
     &self,
     comm_poly_inputs: &PolyCommitment,
-
     num_ios: usize,
     num_inputs_unpadded: usize,
     num_proofs: usize,
@@ -226,11 +226,14 @@ impl IOProofs {
     input_offset: usize,
     output_offset: usize,
     input: Vec<Scalar>,
+    input_mem: Vec<Scalar>,
     output: Scalar,
     output_exec_num: usize,
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
+    // Check correctness of %AS
+    assert_eq!(Scalar::from(input_mem.len() as u64), input[0]);
 
     let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
@@ -246,9 +249,10 @@ impl IOProofs {
           output_exec_num * num_ios, // output valid
           2, // input block num
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1), // output block num
-          output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1 // output correctness
+          output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1, // output correctness
+          5, // %AS
         ], 
-        (0..func_input_width).map(|i| 2 + input_offset + i).collect() // input correctness
+        (0..func_input_width - 1).map(|i| 2 + input_offset + i).collect() // input correctness
       ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
       vec![
         vec![ONE, ONE, input_block_num, output_block_num, output],
@@ -883,6 +887,7 @@ impl SNARK {
       let dummy_addr = vec![ZERO; INIT_MEM_WIDTH];
       init_mems_list.extend(vec![dummy_addr; total_num_init_mem_accesses.next_power_of_two() - total_num_init_mem_accesses]);
     }
+    let total_num_init_mem_accesses = if total_num_init_mem_accesses == 0 { 0 } else { total_num_init_mem_accesses.next_power_of_two() };
     // Pad addr_phy_mems with dummys so the length is a power of 2
     if total_num_phy_mem_accesses > 0 {
       let dummy_addr = vec![ZERO; PHY_MEM_WIDTH];
@@ -1426,7 +1431,7 @@ impl SNARK {
         // where I = v * (v + addr + r * data + r^2 * ls + r^3 * ts),
         //       O = v * v = v
         // are used by (dummy) consistency check
-        let mut init_mem_w3 = vec![vec![ZERO; MEM_W3_WIDTH]; total_num_init_mem_accesses];
+        let mut init_mem_w3 = vec![vec![ZERO; W3_WIDTH]; total_num_init_mem_accesses];
         for q in (0..total_num_init_mem_accesses).rev() {
           // v
           init_mem_w3[q][0] = init_mems_list[q][0];
@@ -1493,7 +1498,7 @@ impl SNARK {
 
           let (init_mem_poly_w3_shifted, init_mem_comm_w3_shifted) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = [init_mem_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; MEM_W3_WIDTH]].concat();
+            let w3_list_p = [init_mem_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; W3_WIDTH]].concat();
             // create a multilinear polynomial using the supplied assignment for variables
             let init_mem_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1517,7 +1522,7 @@ impl SNARK {
 
         let init_mem_w2_prover = ProverWitnessSecInfo::new(vec![init_mem_w2], vec![init_mem_poly_w2]);
         let init_mem_w3_prover = ProverWitnessSecInfo::new(vec![init_mem_w3.clone()], vec![init_mem_poly_w3]);
-        let init_mem_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[init_mem_w3[1..].to_vec(), vec![vec![ZERO; MEM_W3_WIDTH]]].concat()], vec![init_mem_poly_w3_shifted]);
+        let init_mem_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[init_mem_w3[1..].to_vec(), vec![vec![ZERO; W3_WIDTH]]].concat()], vec![init_mem_poly_w3_shifted]);
 
         (
           init_mem_w2_prover,
@@ -1538,6 +1543,7 @@ impl SNARK {
         )
       }
     };
+    timer_sec_gen.stop();
 
     // Physical Memory-as-a-whole
     let timer_sec_gen = Timer::new("phy_mem_addr_witness_gen");
@@ -1562,7 +1568,7 @@ impl SNARK {
         // where I = v * (v + addr + r * val),
         //       O = v * v = v
         // are used by (dummy) consistency check
-        let mut phy_mem_addr_w3 = vec![vec![ZERO; MEM_W3_WIDTH]; total_num_phy_mem_accesses];
+        let mut phy_mem_addr_w3 = vec![vec![ZERO; W3_WIDTH]; total_num_phy_mem_accesses];
         for q in (0..total_num_phy_mem_accesses).rev() {
           // v
           phy_mem_addr_w3[q][0] = addr_phy_mems_list[q][0];
@@ -1617,7 +1623,7 @@ impl SNARK {
 
           let (phy_mem_addr_poly_w3_shifted, phy_mem_addr_comm_w3_shifted) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = [phy_mem_addr_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; MEM_W3_WIDTH]].concat();
+            let w3_list_p = [phy_mem_addr_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; W3_WIDTH]].concat();
             // create a multilinear polynomial using the supplied assignment for variables
             let phy_mem_addr_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1641,7 +1647,7 @@ impl SNARK {
 
         let phy_mem_addr_w2_prover = ProverWitnessSecInfo::new(vec![phy_mem_addr_w2], vec![phy_mem_addr_poly_w2]);
         let phy_mem_addr_w3_prover = ProverWitnessSecInfo::new(vec![phy_mem_addr_w3.clone()], vec![phy_mem_addr_poly_w3]);
-        let phy_mem_addr_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[phy_mem_addr_w3[1..].to_vec(), vec![vec![ZERO; MEM_W3_WIDTH]]].concat()], vec![phy_mem_addr_poly_w3_shifted]);
+        let phy_mem_addr_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[phy_mem_addr_w3[1..].to_vec(), vec![vec![ZERO; W3_WIDTH]]].concat()], vec![phy_mem_addr_poly_w3_shifted]);
 
         (
           phy_mem_addr_w2_prover,
@@ -1689,7 +1695,7 @@ impl SNARK {
         // where I = v * (v + addr + r * data + r^2 * ls + r^3 * ts),
         //       O = v * v = v
         // are used by (dummy) consistency check
-        let mut vir_mem_addr_w3 = vec![vec![ZERO; MEM_W3_WIDTH]; total_num_vir_mem_accesses];
+        let mut vir_mem_addr_w3 = vec![vec![ZERO; W3_WIDTH]; total_num_vir_mem_accesses];
         for q in (0..total_num_vir_mem_accesses).rev() {
           // v
           vir_mem_addr_w3[q][0] = addr_vir_mems_list[q][0];
@@ -1756,7 +1762,7 @@ impl SNARK {
 
           let (vir_mem_addr_poly_w3_shifted, vir_mem_addr_comm_w3_shifted) = {
             // Flatten the witnesses into a Q_i * X list
-            let w3_list_p = [vir_mem_addr_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; MEM_W3_WIDTH]].concat();
+            let w3_list_p = [vir_mem_addr_w3[1..].to_vec().clone().into_iter().flatten().collect(), vec![ZERO; W3_WIDTH]].concat();
             // create a multilinear polynomial using the supplied assignment for variables
             let vir_mem_addr_poly_w3_shifted = DensePolynomial::new(w3_list_p);
 
@@ -1780,7 +1786,7 @@ impl SNARK {
 
         let vir_mem_addr_w2_prover = ProverWitnessSecInfo::new(vec![vir_mem_addr_w2], vec![vir_mem_addr_poly_w2]);
         let vir_mem_addr_w3_prover = ProverWitnessSecInfo::new(vec![vir_mem_addr_w3.clone()], vec![vir_mem_addr_poly_w3]);
-        let vir_mem_addr_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[vir_mem_addr_w3[1..].to_vec(), vec![vec![ZERO; MEM_W3_WIDTH]]].concat()], vec![vir_mem_addr_poly_w3_shifted]);
+        let vir_mem_addr_w3_shifted_prover = ProverWitnessSecInfo::new(vec![[vir_mem_addr_w3[1..].to_vec(), vec![vec![ZERO; W3_WIDTH]]].concat()], vec![vir_mem_addr_poly_w3_shifted]);
 
         (
           vir_mem_addr_w2_prover,
@@ -2274,8 +2280,8 @@ impl SNARK {
     // Record the prod of exec, blocks, mem_block, & mem_addr
     let (perm_poly_poly_list, proof_eval_perm_poly_prod_list) = {
       let (perm_poly_w3_prover, inst_map) = {
-        //                                                    INPUT_EXEC           PHY_MEM_ADDR             VIR_MEM_ADDR             INPUT_BLOCK
-        let mut components = vec![&perm_exec_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover, &block_w3_prover];
+        //                                                    INPUT_EXEC            INIT_MEM             PHY_MEM_ADDR             VIR_MEM_ADDR             INPUT_BLOCK
+        let mut components = vec![&perm_exec_w3_prover, &init_mem_w3_prover, &phy_mem_addr_w3_prover, &vir_mem_addr_w3_prover, &block_w3_prover];
         if max_block_num_phy_ops > 0 {
           components.push(&block_w3_prover);
         }
@@ -2284,8 +2290,8 @@ impl SNARK {
         }
         ProverWitnessSecInfo::merge(components)
       };
-      let pm_bl_id = 4;
-      let vm_bl_id = if max_block_num_phy_ops > 0 { 5 } else { 4 };
+      let pm_bl_id = 5;
+      let vm_bl_id = if max_block_num_phy_ops > 0 { 6 } else { 5 };
       // PHY_MEM_BLOCK takes r = 4, VIR_MEM_BLOCK takes r = 6, everything else takes r = 2
       let perm_poly_poly_list: Vec<Scalar> = (0..inst_map.len()).map(|i| {
           let p = &perm_poly_w3_prover.poly_w[i];
@@ -2296,7 +2302,11 @@ impl SNARK {
       let two_b = vec![ONE, ZERO];
       let four_b = vec![ONE, ZERO, ZERO];
       let six_b = vec![ONE, ONE, ZERO];
-      let r_list: Vec<&Vec<Scalar>> = inst_map.iter().map(|i| if *i == vm_bl_id { &six_b } else if *i == pm_bl_id { &four_b } else { &two_b }).collect();
+      let r_list: Vec<&Vec<Scalar>> = inst_map.iter().map(|i| 
+        if *i == vm_bl_id { &six_b } 
+        else if *i == pm_bl_id { &four_b } 
+        else { &two_b }
+      ).collect();
       let proof_eval_perm_poly_prod_list = PolyEvalProof::prove_batched_instances(
         &perm_poly_w3_prover.poly_w,
         None,
@@ -2456,6 +2466,7 @@ impl SNARK {
     input_offset: usize,
     output_offset: usize,
     input: &Vec<[u8; 32]>,
+    input_mem: &Vec<[u8; 32]>,
     output: &[u8; 32],
     output_exec_num: usize,
 
@@ -2534,6 +2545,7 @@ impl SNARK {
     let input_block_num = Scalar::from(input_block_num as u64);
     let output_block_num = Scalar::from(output_block_num as u64);
     let input: Vec<Scalar> = input.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
+    let input_mem: Vec<Scalar> = input_mem.iter().map(|i| Scalar::from_bytes(i).unwrap()).collect();
     let output: Scalar = Scalar::from_bytes(output).unwrap();
     {
       let timer_commit = Timer::new("inst_commit");
@@ -2720,13 +2732,13 @@ impl SNARK {
       (
         VerifierWitnessSecInfo::new(vec![num_ios], &vec![1], &vec![perm_comm_w0]),
         VerifierWitnessSecInfo::new(vec![num_ios], &vec![consis_num_proofs], &self.perm_exec_comm_w2_list),
-        VerifierWitnessSecInfo::new(vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_list),
-        VerifierWitnessSecInfo::new(vec![8], &vec![consis_num_proofs], &self.perm_exec_comm_w3_shifted),
+        VerifierWitnessSecInfo::new(vec![W3_WIDTH], &vec![consis_num_proofs], &self.perm_exec_comm_w3_list),
+        VerifierWitnessSecInfo::new(vec![W3_WIDTH], &vec![consis_num_proofs], &self.perm_exec_comm_w3_shifted),
         VerifierWitnessSecInfo::new(vec![num_ios; block_num_instances], &block_num_proofs.clone(), &self.perm_block_comm_w2_list),
         phy_mem_block_w2_verifier,
         vir_mem_block_w2_verifier,
-        VerifierWitnessSecInfo::new(vec![8; block_num_instances], &block_num_proofs.clone(), &self.block_comm_w3_list),
-        VerifierWitnessSecInfo::new(vec![8; block_num_instances], &block_num_proofs.clone(), &self.block_comm_w3_list_shifted),
+        VerifierWitnessSecInfo::new(vec![W3_WIDTH; block_num_instances], &block_num_proofs.clone(), &self.block_comm_w3_list),
+        VerifierWitnessSecInfo::new(vec![W3_WIDTH; block_num_instances], &block_num_proofs.clone(), &self.block_comm_w3_list_shifted),
       )
     };
 
@@ -2741,8 +2753,8 @@ impl SNARK {
         self.init_mem_comm_w3_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         (
           VerifierWitnessSecInfo::new(vec![INIT_MEM_WIDTH], &vec![total_num_init_mem_accesses], &self.init_mem_comm_w2),
-          VerifierWitnessSecInfo::new(vec![MEM_W3_WIDTH], &vec![total_num_init_mem_accesses], &self.init_mem_comm_w3),
-          VerifierWitnessSecInfo::new(vec![MEM_W3_WIDTH], &vec![total_num_init_mem_accesses], &self.init_mem_comm_w3_shifted),
+          VerifierWitnessSecInfo::new(vec![W3_WIDTH], &vec![total_num_init_mem_accesses], &self.init_mem_comm_w3),
+          VerifierWitnessSecInfo::new(vec![W3_WIDTH], &vec![total_num_init_mem_accesses], &self.init_mem_comm_w3_shifted),
         )
       } else {
         (
@@ -2764,8 +2776,8 @@ impl SNARK {
         self.phy_mem_addr_comm_w3_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         (
           VerifierWitnessSecInfo::new(vec![PHY_MEM_WIDTH], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w2),
-          VerifierWitnessSecInfo::new(vec![MEM_W3_WIDTH], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w3),
-          VerifierWitnessSecInfo::new(vec![MEM_W3_WIDTH], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w3_shifted),
+          VerifierWitnessSecInfo::new(vec![W3_WIDTH], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w3),
+          VerifierWitnessSecInfo::new(vec![W3_WIDTH], &vec![total_num_phy_mem_accesses], &self.phy_mem_addr_comm_w3_shifted),
         )
       } else {
         (
@@ -2787,8 +2799,8 @@ impl SNARK {
         self.vir_mem_addr_comm_w3_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         (
           VerifierWitnessSecInfo::new(vec![VIR_MEM_WIDTH], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w2),
-          VerifierWitnessSecInfo::new(vec![MEM_W3_WIDTH], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w3),
-          VerifierWitnessSecInfo::new(vec![MEM_W3_WIDTH], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w3_shifted),
+          VerifierWitnessSecInfo::new(vec![W3_WIDTH], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w3),
+          VerifierWitnessSecInfo::new(vec![W3_WIDTH], &vec![total_num_vir_mem_accesses], &self.vir_mem_addr_comm_w3_shifted),
         )
       } else {
         (
@@ -2822,8 +2834,8 @@ impl SNARK {
         self.comm_init_mems[0].append_to_transcript(b"poly_commitment", transcript);
         self.comm_init_mems_shifted[0].append_to_transcript(b"poly_commitment", transcript);
         (
-          VerifierWitnessSecInfo::new(vec![PHY_MEM_WIDTH], &vec![total_num_init_mem_accesses], &self.comm_init_mems),
-          VerifierWitnessSecInfo::new(vec![PHY_MEM_WIDTH], &vec![total_num_init_mem_accesses], &self.comm_init_mems_shifted)
+          VerifierWitnessSecInfo::new(vec![INIT_MEM_WIDTH], &vec![total_num_init_mem_accesses], &self.comm_init_mems),
+          VerifierWitnessSecInfo::new(vec![INIT_MEM_WIDTH], &vec![total_num_init_mem_accesses], &self.comm_init_mems_shifted)
         )
       } else {
         (
@@ -3051,8 +3063,8 @@ impl SNARK {
       let timer_eval_opening = Timer::new("Perm Product");
       // Verify prod of exec, blocks, mem_block, & mem_addr
       let (perm_poly_w3_verifier, inst_map) = {
-        //                                                      INPUT_EXEC              PHY_MEM_ADDR               VIR_MEM_ADDR               INPUT_BLOCK
-        let mut components = vec![&perm_exec_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier, &block_w3_verifier];
+        //                                                      INPUT_EXEC              INIT_MEM               PHY_MEM_ADDR               VIR_MEM_ADDR               INPUT_BLOCK
+        let mut components = vec![&perm_exec_w3_verifier, &init_mem_w3_verifier, &phy_mem_addr_w3_verifier, &vir_mem_addr_w3_verifier, &block_w3_verifier];
         if max_block_num_phy_ops > 0 {
           components.push(&block_w3_verifier);
         }
@@ -3061,8 +3073,8 @@ impl SNARK {
         }
         VerifierWitnessSecInfo::merge(components)
       };
-      let pm_bl_id = 4;
-      let vm_bl_id = if max_block_num_phy_ops > 0 { 5 } else { 4 };
+      let pm_bl_id = 5;
+      let vm_bl_id = if max_block_num_phy_ops > 0 { 6 } else { 5 };
 
       let perm_poly_num_instances = perm_poly_w3_verifier.num_proofs.len();
       let mut perm_poly_num_proofs: Vec<usize> = perm_poly_w3_verifier.num_proofs.clone();
@@ -3092,29 +3104,39 @@ impl SNARK {
       let mut phy_mem_addr_poly_bound_tau = ONE;
       let mut vir_mem_block_poly_bound_tau = ONE;
       let mut vir_mem_addr_poly_bound_tau = ONE;
-      // INST_MAP: 0 -> perm_exec, 1 -> perm_block, 2 -> phy_mem_block, 3 -> vir_mem_block, 5 -> phy_mem_addr, 6 -> vir_mem_addr
+      // INST_MAP: 
+      //   0 -> perm_exec, 
+      //   1 -> init_mem, count towards vir_mem_block
+      //   2 -> phy_mem_block, 
+      //   3 -> vir_mem_block, 
+      //   4 -> perm_block,
+      //   5 -> phy_mem_addr, 
+      //   6 -> vir_mem_addr
       for p in 0..perm_poly_num_instances {
         match inst_map[p] {
           0 => {
             perm_exec_poly_bound_tau *= self.perm_poly_poly_list[p]; 
           },
           1 => {
-            phy_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
+            vir_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
           },
           2 => {
-            vir_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
+            phy_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
           },
           3 => {
-            perm_block_poly_bound_tau *= self.perm_poly_poly_list[p]; 
+            vir_mem_addr_poly_bound_tau *= self.perm_poly_poly_list[p];
           },
           4 => {
+            perm_block_poly_bound_tau *= self.perm_poly_poly_list[p]; 
+          },
+          5 => {
             if max_block_num_phy_ops > 0 {
               phy_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
             } else {
               vir_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
             }
           },
-          5 => {
+          6 => {
             vir_mem_block_poly_bound_tau *= self.perm_poly_poly_list[p];
           },
           _ => {}
@@ -3201,6 +3223,7 @@ impl SNARK {
       input_offset,
       output_offset,
       input,
+      input_mem,
       output,
       output_exec_num,
       vars_gens,
