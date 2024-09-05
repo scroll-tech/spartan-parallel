@@ -12,6 +12,7 @@ use serde::{Serialize, Deserialize};
 
 const TOTAL_NUM_VARS_BOUND: usize = 10000000;
 
+/*
 // Convert a string of numbers separated by spaces into a vector
 fn string_to_vec(buffer: String) -> Vec<usize> {
   let split: Vec<String> = buffer.split(' ').map(|i| i.to_string().trim().to_string()).collect();
@@ -37,6 +38,7 @@ fn string_to_bytes(buffer: String) -> [u8; 32] {
   }
   list
 }
+*/
 
 // Everything provided by the frontend
 #[derive(Serialize, Deserialize)]
@@ -51,6 +53,7 @@ struct CompileTimeKnowledge {
 
   args: Vec<Vec<(Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>, Vec<(usize, [u8; 32])>)>>,
 
+  input_liveness: Vec<bool>,
   func_input_width: usize,
   input_offset: usize,
   input_block_num: usize,
@@ -67,6 +70,7 @@ impl CompileTimeKnowledge {
     bincode::deserialize(&content).unwrap()
   }
   
+  /* Archived & Outdated
   fn read_from_file(benchmark_name: String) -> std::io::Result<CompileTimeKnowledge> {
     let file_name = format!("../zok_tests/constraints/{}.ctk", benchmark_name);
     let f = File::open(file_name)?;
@@ -177,6 +181,7 @@ impl CompileTimeKnowledge {
       output_block_num
     })
   }
+  */
 }
 
 // Everything provided by the prover
@@ -211,6 +216,7 @@ impl RunTimeKnowledge {
     bincode::deserialize(&content).unwrap()
   }
 
+  /* Archived
   fn read_from_file(benchmark_name: String) -> std::io::Result<RunTimeKnowledge> {
     let file_name = format!("../zok_tests/inputs/{}.rtk", benchmark_name);
     let f = File::open(file_name)?;
@@ -434,6 +440,7 @@ impl RunTimeKnowledge {
       output_exec_num
     })
   }
+  */
 }
 
 fn main() {
@@ -545,6 +552,7 @@ fn main() {
   let proof = SNARK::prove(
     ctk.input_block_num,
     ctk.output_block_num,
+    &ctk.input_liveness,
     ctk.func_input_width,
     ctk.input_offset,
     ctk.output_offset,
@@ -602,6 +610,7 @@ fn main() {
   assert!(proof.verify(
     ctk.input_block_num,
     ctk.output_block_num,
+    &ctk.input_liveness,
     ctk.func_input_width,
     ctk.input_offset,
     ctk.output_offset,

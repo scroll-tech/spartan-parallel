@@ -172,7 +172,8 @@ impl IOProofs {
     num_proofs: usize,
     input_block_num: Scalar,
     output_block_num: Scalar,
-    func_input_width: usize,
+    
+    input_liveness: &Vec<bool>,
     input_offset: usize,
     output_offset: usize,
     input: Vec<Scalar>,
@@ -185,6 +186,19 @@ impl IOProofs {
     let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
 
+    // input indices are 5(%AS) ++ [2 + input_offset..](others)
+    // Filter out all dead inputs
+    let raw_input_indices = [vec![5], (0..input_liveness.len() - 1).map(|i| 2 + input_offset + i).collect()].concat();
+    assert_eq!(input_liveness.len(), input.len());
+    let mut live_input_indices = Vec::new();
+    let mut live_input = Vec::new();
+    for i in 0..input_liveness.len() {
+      if input_liveness[i] {
+        live_input_indices.push(raw_input_indices[i]);
+        live_input.push(input[i].clone());
+      }
+    }
+
     // batch prove all proofs
     let proofs = PolyEvalProof::prove_batched_points(
       exec_poly_inputs,
@@ -196,13 +210,12 @@ impl IOProofs {
           2, // input block num
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1), // output block num
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1, // output correctness
-          5, // %AS
         ], 
-        (0..func_input_width - 1).map(|i| 2 + input_offset + i).collect() // input correctness
+        live_input_indices // input correctness
       ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
       vec![
         vec![ONE, ONE, input_block_num, output_block_num, output],
-        input
+        live_input
       ].concat(),
       None,
       &vars_gens.gens_pc,
@@ -222,21 +235,31 @@ impl IOProofs {
     num_proofs: usize,
     input_block_num: Scalar,
     output_block_num: Scalar,
-    func_input_width: usize,
+
+    input_liveness: &Vec<bool>,
     input_offset: usize,
     output_offset: usize,
     input: Vec<Scalar>,
-    input_mem: Vec<Scalar>,
     output: Scalar,
     output_exec_num: usize,
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
-    // Check correctness of %AS
-    assert_eq!(Scalar::from(input_mem.len() as u64), input[0]);
-
     let r_len = (num_proofs * num_ios).log_2();
     let to_bin_array = |x: usize| (0..r_len).rev().map(|n| (x >> n) & 1).map(|i| Scalar::from(i as u64)).collect::<Vec::<Scalar>>();
+
+    // input indices are 5(%AS) ++ [2 + input_offset..](others)
+    // Filter out all dead inputs
+    let raw_input_indices = [vec![5], (0..input_liveness.len() - 1).map(|i| 2 + input_offset + i).collect()].concat();
+    assert_eq!(input_liveness.len(), input.len());
+    let mut live_input_indices = Vec::new();
+    let mut live_input = Vec::new();
+    for i in 0..input_liveness.len() {
+      if input_liveness[i] {
+        live_input_indices.push(raw_input_indices[i]);
+        live_input.push(input[i].clone());
+      }
+    }
 
     // batch verify all proofs
     let _ = PolyEvalProof::verify_plain_batched_points(
@@ -250,13 +273,12 @@ impl IOProofs {
           2, // input block num
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1), // output block num
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1, // output correctness
-          5, // %AS
         ], 
-        (0..func_input_width - 1).map(|i| 2 + input_offset + i).collect() // input correctness
+        live_input_indices // input correctness
       ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
       vec![
         vec![ONE, ONE, input_block_num, output_block_num, output],
-        input
+        live_input
       ].concat(),
       comm_poly_inputs,
     )?;
@@ -700,6 +722,7 @@ impl SNARK {
   pub fn prove(
     input_block_num: usize,
     output_block_num: usize,
+    input_liveness: &Vec<bool>,
     func_input_width: usize,
     input_offset: usize,
     output_offset: usize,
@@ -2367,7 +2390,7 @@ impl SNARK {
       consis_num_proofs,
       input_block_num,
       output_block_num,
-      func_input_width,
+      input_liveness,
       input_offset,
       output_offset,
       input,
@@ -2439,6 +2462,7 @@ impl SNARK {
     &self,
     input_block_num: usize,
     output_block_num: usize,
+    input_liveness: &Vec<bool>,
     func_input_width: usize,
     input_offset: usize,
     output_offset: usize,
@@ -3204,11 +3228,10 @@ impl SNARK {
       consis_num_proofs,
       input_block_num,
       output_block_num,
-      func_input_width,
+      input_liveness,
       input_offset,
       output_offset,
       input,
-      input_mem,
       output,
       output_exec_num,
       vars_gens,
