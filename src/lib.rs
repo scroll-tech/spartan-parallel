@@ -38,7 +38,7 @@ mod timer;
 mod transcript;
 mod unipoly;
 
-use std::cmp::{max, Ordering};
+use std::{cmp::{max, Ordering}, fs::File, io::Write};
 
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use instance::Instance;
@@ -110,7 +110,29 @@ impl Assignment {
       assignment: assignment_scalar.unwrap(),
     })
   }
+
+  /// Write the assignment into a file
+  pub fn write(&self, mut f: &File) -> std::io::Result<()> {
+    for assg in &self.assignment {
+        write_bytes(&mut f, &assg.to_bytes())?;
+    }
+    Ok(())
+  }
 }
+
+fn write_bytes(mut f: &File, bytes: &[u8; 32]) -> std::io::Result<()> {
+  // Disregard the trailing zeros
+  let mut size = 32;
+  while size > 0 && bytes[size - 1] == 0 {
+      size -= 1;
+  }
+  for i in 0..size {
+      write!(&mut f, "{} ", bytes[i])?;
+  }
+  writeln!(&mut f, "")?;
+  Ok(())
+}
+
 
 /// `VarsAssignment` holds an assignment of values to variables in an `Instance`
 pub type VarsAssignment = Assignment;
@@ -188,16 +210,19 @@ impl IOProofs {
 
     // input indices are 5(%AS) ++ [2 + input_offset..](others)
     // Filter out all dead inputs
-    let raw_input_indices = [vec![5], (0..input_liveness.len() - 1).map(|i| 2 + input_offset + i).collect()].concat();
+    let mut input_indices: Vec<usize> = (0..input_liveness.len() - 1).map(|i| 2 + input_offset + i).collect();
+    if input_liveness[0] {
+      // %AS is alive, add entry 5
+      input_indices.insert(0, 5);
+    }
     assert_eq!(input_liveness.len(), input.len());
-    let mut live_input_indices = Vec::new();
     let mut live_input = Vec::new();
     for i in 0..input_liveness.len() {
       if input_liveness[i] {
-        live_input_indices.push(raw_input_indices[i]);
         live_input.push(input[i].clone());
       }
     }
+    input_indices = input_indices[..live_input.len()].to_vec();
 
     // batch prove all proofs
     let proofs = PolyEvalProof::prove_batched_points(
@@ -211,7 +236,7 @@ impl IOProofs {
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1), // output block num
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1, // output correctness
         ], 
-        live_input_indices // input correctness
+        input_indices // input correctness
       ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
       vec![
         vec![ONE, ONE, input_block_num, output_block_num, output],
@@ -250,16 +275,19 @@ impl IOProofs {
 
     // input indices are 5(%AS) ++ [2 + input_offset..](others)
     // Filter out all dead inputs
-    let raw_input_indices = [vec![5], (0..input_liveness.len() - 1).map(|i| 2 + input_offset + i).collect()].concat();
+    let mut input_indices: Vec<usize> = (0..input_liveness.len() - 1).map(|i| 2 + input_offset + i).collect();
+    if input_liveness[0] {
+      // %AS is alive, add entry 5
+      input_indices.insert(0, 5);
+    }
     assert_eq!(input_liveness.len(), input.len());
-    let mut live_input_indices = Vec::new();
     let mut live_input = Vec::new();
     for i in 0..input_liveness.len() {
       if input_liveness[i] {
-        live_input_indices.push(raw_input_indices[i]);
         live_input.push(input[i].clone());
       }
     }
+    input_indices = input_indices[..live_input.len()].to_vec();
 
     // batch verify all proofs
     let _ = PolyEvalProof::verify_plain_batched_points(
@@ -274,7 +302,7 @@ impl IOProofs {
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1), // output block num
           output_exec_num * num_ios + 2 + (num_inputs_unpadded - 1) + output_offset - 1, // output correctness
         ], 
-        live_input_indices // input correctness
+        input_indices // input correctness
       ].concat().iter().map(|i| to_bin_array(*i)).collect(), 
       vec![
         vec![ONE, ONE, input_block_num, output_block_num, output],
