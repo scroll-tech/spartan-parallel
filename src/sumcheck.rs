@@ -1,6 +1,6 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::type_complexity)]
-use crate::custom_dense_mlpoly::{rev_bits, DensePolynomialPqx};
+use crate::custom_dense_mlpoly::DensePolynomialPqx;
 use crate::math::Math;
 
 use super::commitments::{Commitments, MultiCommitGens};

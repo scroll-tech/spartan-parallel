@@ -3,7 +3,7 @@ use crate::{ProverWitnessSecInfo, VerifierWitnessSecInfo};
 
 use super::commitments::{Commitments, MultiCommitGens};
 use super::dense_mlpoly::{
-  DensePolynomial, EqPolynomial, PolyCommitment, PolyCommitmentGens, PolyEvalProof,
+  DensePolynomial, EqPolynomial, PolyCommitmentGens, PolyEvalProof,
 };
 use super::custom_dense_mlpoly::DensePolynomialPqx;
 use super::errors::ProofVerifyError;
@@ -18,7 +18,6 @@ use super::timer::Timer;
 use super::transcript::{AppendToTranscript, ProofTranscript};
 use core::iter;
 use std::cmp::min;
-use curve25519_dalek::ristretto::RistrettoPoint;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 

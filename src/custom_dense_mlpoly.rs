@@ -2,7 +2,6 @@
 use std::cmp::min;
 
 use crate::dense_mlpoly::DensePolynomial;
-use crate::timer::Timer;
 
 use super::math::Math;
 use super::scalar::Scalar;
