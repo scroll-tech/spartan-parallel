@@ -46,6 +46,14 @@ pub struct PolyCommitment {
   pub(crate) C: Vec<CompressedGroup>,
 }
 
+impl PolyCommitment {
+  pub fn empty() -> Self {
+    PolyCommitment {
+      C: Vec::new()
+    }
+  }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConstPolyCommitment {
   C: CompressedGroup,
