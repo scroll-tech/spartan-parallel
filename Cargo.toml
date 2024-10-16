@@ -34,7 +34,7 @@ flate2 = { version = "1.0.14" }
 criterion = "0.3.1"
 
 [patch.crates-io]
-curve25519-dalek = { path = "../curve25519-dalek" }
+curve25519-dalek = { git = "https://github.com/Jiangkm3/curve25519-dalek.git", branch = "3.2-dependency-fix" }
 
 [lib]
 name = "libspartan"
