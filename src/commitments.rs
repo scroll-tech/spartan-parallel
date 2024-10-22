@@ -1,9 +1,10 @@
 use super::group::{GroupElement, VartimeMultiscalarMul, GROUP_BASEPOINT_COMPRESSED};
 use super::scalar::Scalar;
 use digest::{ExtendableOutput, Input, XofReader};
+use serde::Serialize;
 use sha3::Shake256;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MultiCommitGens {
   pub n: usize,
   pub G: Vec<GroupElement>,
@@ -85,7 +86,7 @@ impl Commitments for Vec<Scalar> {
 
 impl Commitments for [Scalar] {
   fn commit(&self, blind: &Scalar, gens_n: &MultiCommitGens) -> GroupElement {
-    assert_eq!(gens_n.n, self.len());
-    GroupElement::vartime_multiscalar_mul(self, &gens_n.G) + blind * gens_n.h
+    assert!(gens_n.n >= self.len());
+    GroupElement::vartime_multiscalar_mul(self, &gens_n.G[..self.len()]) + blind * gens_n.h
   }
 }
