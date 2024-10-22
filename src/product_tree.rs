@@ -8,7 +8,7 @@ use super::transcript::ProofTranscript;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProductCircuit {
   left_vec: Vec<DensePolynomial>,
   right_vec: Vec<DensePolynomial>,
@@ -63,6 +63,7 @@ impl ProductCircuit {
   }
 }
 
+#[derive(Clone)]
 pub struct DotProductCircuit {
   left: DensePolynomial,
   right: DensePolynomial,
