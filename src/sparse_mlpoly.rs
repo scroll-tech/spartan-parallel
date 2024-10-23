@@ -51,18 +51,14 @@ impl Derefs {
   pub fn new(row_ops_val: Vec<DensePolynomial>, col_ops_val: Vec<DensePolynomial>) -> Self {
     assert_eq!(row_ops_val.len(), col_ops_val.len());
 
-    let derefs = {
-      // combine all polynomials into a single polynomial (used below to produce a single commitment)
-      let comb = DensePolynomial::merge(row_ops_val.iter().chain(col_ops_val.iter()));
+    // combine all polynomials into a single polynomial (used below to produce a single commitment)
+    let comb = DensePolynomial::merge(row_ops_val.iter().chain(col_ops_val.iter()));
 
-      Derefs {
-        row_ops_val,
-        col_ops_val,
-        comb,
-      }
-    };
-
-    derefs
+    Derefs {
+      row_ops_val,
+      col_ops_val,
+      comb,
+    }
   }
 
   pub fn commit(&self, gens: &PolyCommitmentGens) -> DerefsCommitment {
@@ -345,7 +341,7 @@ impl AppendToTranscript for SparseMatPolyCommitment {
 
 impl SparseMatPolynomial {
   pub fn new(num_vars_x: usize, num_vars_y: usize, M: Vec<SparseMatEntry>) -> Self {
-    SparseMatPolynomial {
+    Self {
       num_vars_x,
       num_vars_y,
       M,
@@ -379,8 +375,9 @@ impl SparseMatPolynomial {
       assert_eq!(sparse_polys[i].num_vars_y, sparse_polys[0].num_vars_y);
     }
 
-    let N = (0..sparse_polys.len())
-      .map(|i| sparse_polys[i].get_num_nz_entries())
+    let N = sparse_polys
+      .iter()
+      .map(|sparse_poly| sparse_poly.get_num_nz_entries())
       .max()
       .unwrap();
 
@@ -432,13 +429,10 @@ impl SparseMatPolynomial {
     assert_eq!(self.num_vars_x.pow2(), eval_table_rx.len());
     assert_eq!(self.num_vars_y.pow2(), eval_table_ry.len());
 
-    (0..self.M.len())
-      .map(|i| {
-        let row = self.M[i].row;
-        let col = self.M[i].col;
-        let val = &self.M[i].val;
-        eval_table_rx[row] * eval_table_ry[col] * val
-      })
+    self
+      .M
+      .iter()
+      .map(|SparseMatEntry { row, col, val }| eval_table_rx[*row] * eval_table_ry[*col] * val)
       .sum()
   }
 
@@ -450,8 +444,9 @@ impl SparseMatPolynomial {
     let eval_table_rx = EqPolynomial::new(rx.to_vec()).evals();
     let eval_table_ry = EqPolynomial::new(ry.to_vec()).evals();
 
-    (0..polys.len())
-      .map(|i| polys[i].evaluate_with_tables(&eval_table_rx, &eval_table_ry))
+    polys
+      .iter()
+      .map(|poly| poly.evaluate_with_tables(&eval_table_rx, &eval_table_ry))
       .collect::<Vec<Scalar>>()
   }
 
@@ -469,7 +464,8 @@ impl SparseMatPolynomial {
       .fold(vec![Scalar::zero(); num_rows], |mut Mz, (r, v)| {
         Mz[r] += v;
         Mz
-      })
+      },
+    )
   }
 
   // Z is consisted of vector segments
@@ -528,13 +524,13 @@ impl SparseMatPolynomial {
   ) -> Vec<Scalar> {
     assert_eq!(rx.len(), num_rows);
 
-    let mut M_evals: Vec<Scalar> = vec![Scalar::zero(); num_cols];
-
-    for i in 0..self.M.len() {
-      let entry = &self.M[i];
-      M_evals[entry.col] += rx[entry.row] * entry.val;
-    }
-    M_evals
+    self.M.iter().fold(
+      vec![Scalar::zero(); num_cols],
+      |mut M_evals, SparseMatEntry { row, col, val }| {
+        M_evals[*col] += rx[*row] * val;
+        M_evals
+      },
+    )
   }
 
   // Store the result in a vector divided into num_segs segments
@@ -802,18 +798,18 @@ impl HashLayerProof {
     let (rand_mem, rand_ops) = rand;
 
     // decommit ops-addr at rand_ops
-    let mut eval_ops_addr_vec: Vec<Scalar> = Vec::new();
-    for i in 0..addr_timestamps.ops_addr.len() {
-      let eval_ops_addr = addr_timestamps.ops_addr[i].evaluate(rand_ops);
-      eval_ops_addr_vec.push(eval_ops_addr);
-    }
+    let eval_ops_addr_vec = addr_timestamps
+      .ops_addr
+      .iter()
+      .map(|addr| addr.evaluate(rand_ops))
+      .collect();
 
     // decommit read_ts at rand_ops
-    let mut eval_read_ts_vec: Vec<Scalar> = Vec::new();
-    for i in 0..addr_timestamps.read_ts.len() {
-      let eval_read_ts = addr_timestamps.read_ts[i].evaluate(rand_ops);
-      eval_read_ts_vec.push(eval_read_ts);
-    }
+    let eval_read_ts_vec = addr_timestamps
+      .read_ts
+      .iter()
+      .map(|addr| addr.evaluate(rand_ops))
+      .collect();
 
     // decommit audit-ts at rand_mem
     let eval_audit_ts = addr_timestamps.audit_ts.evaluate(rand_mem);
@@ -834,11 +830,15 @@ impl HashLayerProof {
     let (rand_mem, rand_ops) = rand;
 
     // decommit derefs at rand_ops
-    let eval_row_ops_val = (0..derefs.row_ops_val.len())
-      .map(|i| derefs.row_ops_val[i].evaluate(rand_ops))
+    let eval_row_ops_val = derefs
+      .row_ops_val
+      .iter()
+      .map(|row| row.evaluate(rand_ops))
       .collect::<Vec<Scalar>>();
-    let eval_col_ops_val = (0..derefs.col_ops_val.len())
-      .map(|i| derefs.col_ops_val[i].evaluate(rand_ops))
+    let eval_col_ops_val = derefs
+      .col_ops_val
+      .iter()
+      .map(|col| col.evaluate(rand_ops))
       .collect::<Vec<Scalar>>();
     let proof_derefs = DerefsEvalProof::prove(
       derefs,
@@ -1302,10 +1302,8 @@ impl ProductLayerProof {
     let (row_eval_init, row_eval_read, row_eval_write, row_eval_audit) = &self.eval_row;
     assert_eq!(row_eval_write.len(), num_instances);
     assert_eq!(row_eval_read.len(), num_instances);
-    let ws: Scalar = (0..row_eval_write.len())
-      .map(|i| row_eval_write[i])
-      .product();
-    let rs: Scalar = (0..row_eval_read.len()).map(|i| row_eval_read[i]).product();
+    let ws: Scalar = row_eval_write.iter().product();
+    let rs: Scalar = row_eval_read.iter().product();
     assert_eq!(row_eval_init * ws, rs * row_eval_audit);
 
     row_eval_init.append_to_transcript(b"claim_row_eval_init", transcript);
@@ -1317,10 +1315,8 @@ impl ProductLayerProof {
     let (col_eval_init, col_eval_read, col_eval_write, col_eval_audit) = &self.eval_col;
     assert_eq!(col_eval_write.len(), num_instances);
     assert_eq!(col_eval_read.len(), num_instances);
-    let ws: Scalar = (0..col_eval_write.len())
-      .map(|i| col_eval_write[i])
-      .product();
-    let rs: Scalar = (0..col_eval_read.len()).map(|i| col_eval_read[i]).product();
+    let ws: Scalar = col_eval_write.iter().product();
+    let rs: Scalar = col_eval_read.iter().product();
     assert_eq!(col_eval_init * ws, rs * col_eval_audit);
 
     col_eval_init.append_to_transcript(b"claim_col_eval_init", transcript);
@@ -1330,7 +1326,7 @@ impl ProductLayerProof {
 
     // verify the evaluation of the sparse polynomial
     let (eval_dotp_left, eval_dotp_right) = &self.eval_val;
-    assert_eq!(eval_dotp_left.len(), eval_dotp_left.len());
+    assert_eq!(eval_dotp_left.len(), eval_dotp_right.len());
     assert_eq!(eval_dotp_left.len(), num_instances);
     let mut claims_dotp_circuit: Vec<Scalar> = Vec::new();
     for i in 0..num_instances {
@@ -1644,15 +1640,9 @@ impl SparsePolynomial {
 
   fn compute_chi(a: &[bool], r: &[Scalar]) -> Scalar {
     assert_eq!(a.len(), r.len());
-    let mut chi_i = Scalar::one();
-    for j in 0..r.len() {
-      if a[j] {
-        chi_i *= r[j];
-      } else {
-        chi_i *= Scalar::one() - r[j];
-      }
-    }
-    chi_i
+    a.iter().zip(r.iter()).fold(Scalar::one(), |sum, (a, r)| {
+      sum * if *a { *r } else { Scalar::one() - r }
+    })
   }
 
   // Takes O(n log n). TODO: do this in O(n) where n is the number of entries in Z
@@ -1683,15 +1673,15 @@ mod tests {
     let num_vars_x: usize = num_rows.log_2();
     let num_vars_y: usize = num_cols.log_2();
 
-    let mut M: Vec<SparseMatEntry> = Vec::new();
-
-    for _i in 0..num_nz_entries {
-      M.push(SparseMatEntry::new(
-        (csprng.next_u64() % (num_rows as u64)) as usize,
-        (csprng.next_u64() % (num_cols as u64)) as usize,
-        Scalar::random(&mut csprng),
-      ));
-    }
+    let M = (0..num_nz_entries)
+      .map(|_i| {
+        SparseMatEntry::new(
+          (csprng.next_u64() % (num_rows as u64)) as usize,
+          (csprng.next_u64() % (num_cols as u64)) as usize,
+          Scalar::random(&mut csprng),
+        )
+      })
+      .collect();
 
     let poly_M = SparseMatPolynomial::new(num_vars_x, num_vars_y, M);
     let gens = SparseMatPolyCommitmentGens::new(

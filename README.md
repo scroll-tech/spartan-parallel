@@ -1,6 +1,6 @@
 # Spartan: High-speed zkSNARKs without trusted setup
 
-![Rust](https://github.com/microsoft/Spartan/workflows/Rust/badge.svg)
+![Rust](https://github.com/microsoft/Spartan/actions/workflows/rust.yml/badge.svg)
 [![](https://img.shields.io/crates/v/spartan.svg)](<(https://crates.io/crates/spartan)>)
 
 Spartan is a high-speed zero-knowledge proof system, a cryptographic primitive that enables a prover to prove a mathematical statement to a verifier without revealing anything besides the validity of the statement. This repository provides `libspartan,` a Rust library that implements a zero-knowledge succinct non-interactive argument of knowledge (zkSNARK), which is a type of zero-knowledge proof system with short proofs and fast verification times. The details of the Spartan proof system are described in our [paper](https://eprint.iacr.org/2019/550) published at [CRYPTO 2020](https://crypto.iacr.org/2020/). The security of the Spartan variant implemented in this library is based on the discrete logarithm problem in the random oracle model.
@@ -187,7 +187,7 @@ fn produce_tiny_r1cs() -> (
   // To construct these matrices, we will use `curve25519-dalek` but one can use any other method.
 
   // a variable that holds a byte representation of 1
-  let one = Scalar::one().to_bytes();
+  let one = Scalar::ONE.to_bytes();
 
   // R1CS is a set of three sparse matrices A B C, where is a row for every
   // constraint and a column for every entry in z = (vars, 1, inputs)
@@ -224,10 +224,10 @@ fn produce_tiny_r1cs() -> (
   let z1 = Scalar::random(&mut csprng);
   let z2 = (z0 + z1) * i0; // constraint 0
   let z3 = (z0 + i1) * z2; // constraint 1
-  let z4 = Scalar::zero(); //constraint 2
+  let z4 = Scalar::ZERO; //constraint 2
 
   // create a VarsAssignment
-  let mut vars = vec![Scalar::zero().to_bytes(); num_vars];
+  let mut vars = vec![Scalar::ZERO.to_bytes(); num_vars];
   vars[0] = z0.to_bytes();
   vars[1] = z1.to_bytes();
   vars[2] = z2.to_bytes();
@@ -236,7 +236,7 @@ fn produce_tiny_r1cs() -> (
   let assignment_vars = VarsAssignment::new(&vars).unwrap();
 
   // create an InputsAssignment
-  let mut inputs = vec![Scalar::zero().to_bytes(); num_inputs];
+  let mut inputs = vec![Scalar::ZERO.to_bytes(); num_inputs];
   inputs[0] = i0.to_bytes();
   inputs[1] = i1.to_bytes();
   let assignment_inputs = InputsAssignment::new(&inputs).unwrap();
