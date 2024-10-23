@@ -130,6 +130,4 @@
 
 // criterion_main!(benches_snark);
 
-pub fn main() {
-  
-}
+pub fn main() {}

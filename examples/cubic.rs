@@ -2,7 +2,7 @@
 // //! The example is described in detail [here].
 // //!
 // //! The R1CS for this problem is:
-// //! Instance 1: 
+// //! Instance 1:
 // //! `Z0 * Z0 - Z1 = 0`
 // //! `Z1 * Z0 - Z2 = 0`
 // //! `(Z2 + Z0) * 1 - Z3 = 0`
@@ -298,6 +298,4 @@
 //   println!("proof verification successful!");
 // }
 
-pub fn main() {
-  
-}
+pub fn main() {}

@@ -91,6 +91,4 @@
 
 // criterion_main!(benches_nizk);
 
-pub fn main() {
-
-}
+pub fn main() {}

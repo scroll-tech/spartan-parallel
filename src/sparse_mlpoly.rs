@@ -463,7 +463,13 @@ impl SparseMatPolynomial {
 
   // Z is consisted of vector segments
   // Z[i] contains entries i * max_num_cols ~ i * max_num_cols + num_cols
-  pub fn multiply_vec_disjoint_rounds(&self, num_rows: usize, max_num_cols: usize, _num_cols: usize, z: &Vec<Vec<Scalar>>) -> Vec<Scalar> {
+  pub fn multiply_vec_disjoint_rounds(
+    &self,
+    num_rows: usize,
+    max_num_cols: usize,
+    _num_cols: usize,
+    z: &Vec<Vec<Scalar>>,
+  ) -> Vec<Scalar> {
     (0..self.M.len())
       .map(|i| {
         let row = self.M[i].row;
