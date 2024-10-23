@@ -8,7 +8,7 @@ use super::transcript::ProofTranscript;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProductCircuit {
   left_vec: Vec<DensePolynomial>,
   right_vec: Vec<DensePolynomial>,
@@ -63,6 +63,7 @@ impl ProductCircuit {
   }
 }
 
+#[derive(Clone)]
 pub struct DotProductCircuit {
   left: DensePolynomial,
   right: DensePolynomial,
@@ -257,8 +258,8 @@ impl ProductCircuitEvalProof {
 
 impl ProductCircuitEvalProofBatched {
   pub fn prove(
-    prod_circuit_vec: &mut [&mut ProductCircuit],
-    dotp_circuit_vec: &mut [&mut DotProductCircuit],
+    prod_circuit_vec: &mut Vec<&mut ProductCircuit>,
+    dotp_circuit_vec: &mut Vec<&mut DotProductCircuit>,
     transcript: &mut Transcript,
   ) -> (Self, Vec<Scalar>) {
     assert!(!prod_circuit_vec.is_empty());

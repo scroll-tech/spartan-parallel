@@ -101,7 +101,6 @@ impl EqualityProof {
 
     let C1 = v1.commit(s1, gens_n).compress();
     C1.append_to_transcript(b"C1", transcript);
-
     let C2 = v2.commit(s2, gens_n).compress();
     C2.append_to_transcript(b"C2", transcript);
 
@@ -404,6 +403,7 @@ impl DotProductProof {
   }
 }
 
+#[derive(Clone, Serialize)]
 pub struct DotProductProofGens {
   n: usize,
   pub gens_n: MultiCommitGens,
@@ -417,7 +417,7 @@ impl DotProductProofGens {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DotProductProofLog {
   bullet_reduction_proof: BulletReductionProof,
   delta: CompressedGroup,
@@ -450,7 +450,7 @@ impl DotProductProofLog {
 
     let n = x_vec.len();
     assert_eq!(x_vec.len(), a_vec.len());
-    assert_eq!(gens.n, n);
+    assert!(gens.n >= n);
 
     // produce randomness for generating a proof
     let d = random_tape.random_scalar(b"d");
@@ -482,7 +482,7 @@ impl DotProductProofLog {
       BulletReductionProof::prove(
         transcript,
         &gens_1_scaled.G[0],
-        &gens.gens_n.G,
+        &gens.gens_n.G[..n],
         &gens.gens_n.h,
         x_vec,
         a_vec,
@@ -531,7 +531,7 @@ impl DotProductProofLog {
     Cx: &CompressedGroup,
     Cy: &CompressedGroup,
   ) -> Result<(), ProofVerifyError> {
-    assert_eq!(gens.n, n);
+    assert!(gens.n >= n);
     assert_eq!(a.len(), n);
 
     transcript.append_protocol_name(DotProductProofLog::protocol_name());
@@ -549,7 +549,7 @@ impl DotProductProofLog {
     let (g_hat, Gamma_hat, a_hat) =
       self
         .bullet_reduction_proof
-        .verify(n, a, transcript, &Gamma, &gens.gens_n.G)?;
+        .verify(n, a, transcript, &Gamma, &gens.gens_n.G[..n])?;
     self.delta.append_to_transcript(b"delta", transcript);
     self.beta.append_to_transcript(b"beta", transcript);
 

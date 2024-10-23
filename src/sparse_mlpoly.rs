@@ -16,7 +16,7 @@ use core::cmp::Ordering;
 use merlin::Transcript;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SparseMatEntry {
   row: usize,
   col: usize,
@@ -29,7 +29,7 @@ impl SparseMatEntry {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SparseMatPolynomial {
   num_vars_x: usize,
   num_vars_y: usize,
@@ -279,6 +279,7 @@ pub struct MultiSparseMatPolynomialAsDense {
   comb_mem: DensePolynomial,
 }
 
+#[derive(Serialize)]
 pub struct SparseMatPolyCommitmentGens {
   gens_ops: PolyCommitmentGens,
   gens_mem: PolyCommitmentGens,
@@ -314,7 +315,7 @@ impl SparseMatPolyCommitmentGens {
   }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SparseMatPolyCommitment {
   batch_size: usize,
   num_ops: usize,
@@ -460,6 +461,59 @@ impl SparseMatPolynomial {
     )
   }
 
+  // Z is consisted of vector segments
+  // Z[i] contains entries i * max_num_cols ~ i * max_num_cols + num_cols
+  pub fn multiply_vec_disjoint_rounds(
+    &self,
+    num_rows: usize,
+    max_num_cols: usize,
+    _num_cols: usize,
+    z: &Vec<Vec<Scalar>>,
+  ) -> Vec<Scalar> {
+    (0..self.M.len())
+      .map(|i| {
+        let row = self.M[i].row;
+        let col = self.M[i].col;
+        let val = &self.M[i].val;
+        (row, val * z[col / max_num_cols][col % max_num_cols])
+      })
+      .fold(vec![Scalar::zero(); num_rows], |mut Mz, (r, v)| {
+        Mz[r] += v;
+        Mz
+      })
+  }
+
+  /*
+  // Trailing zeros in Z are not recorded
+  // So trailing zeros in MZ should also not be recorded
+  // Return a num_proofs * base_num_rows matrix
+  pub fn multiply_vec_pad(&self,
+    max_num_proofs_bound: usize,
+    num_proofs: usize,
+    base_num_rows: usize,
+    base_num_cols: usize,
+    z: &[Scalar]
+  ) -> Vec<Vec<Scalar>> {
+    assert!(z.len() == num_proofs * base_num_cols);
+    let mut Mz_list = vec![vec![Scalar::zero(); base_num_rows]; num_proofs];
+    // Based on the construction of PERM_POLY and CONSIS_CHECK,
+    // We don't need to scan through every non-zero entry of the instance
+    // Only the first (num_proofs / max_num_proofs_bound) fraction of entries will correspond to non-zero values in Z
+    for i in 0..self.M.len() * num_proofs / max_num_proofs_bound {
+      let row = self.M[i].row;
+      // No need to evaluate constraints beyond num_proofs * base_num_rows
+      // As the results are always 0
+      if row < num_proofs * base_num_rows {
+        let col = self.M[i].col;
+        let val = &self.M[i].val;
+        let (r, v) = (row, if col < z.len() { val * z[col] } else { Scalar::zero() });
+        Mz_list[r / base_num_rows][r % base_num_rows] += v;
+      }
+    }
+    Mz_list
+  }
+  */
+
   pub fn compute_eval_table_sparse(
     &self,
     rx: &[Scalar],
@@ -476,6 +530,50 @@ impl SparseMatPolynomial {
       },
     )
   }
+
+  // Store the result in a vector divided into num_segs segments
+  // output[i] stores entry i * max_num_cols ~ i * max_num_cols + num_cols of the original vector
+  pub fn compute_eval_table_sparse_disjoint_rounds(
+    &self,
+    rx: &[Scalar],
+    num_rows: usize,
+    num_segs: usize,
+    max_num_cols: usize,
+    num_cols: usize,
+  ) -> Vec<Vec<Scalar>> {
+    assert!(rx.len() >= num_rows);
+
+    let mut M_evals: Vec<Vec<Scalar>> = vec![vec![Scalar::zero(); num_cols]; num_segs];
+
+    for i in 0..self.M.len() {
+      let entry = &self.M[i];
+      M_evals[entry.col / max_num_cols][entry.col % max_num_cols] += rx[entry.row] * entry.val;
+    }
+    M_evals
+  }
+
+  /*
+  // Only compute the first max_num_proofs / max_num_proofs_bound entries
+  // num_cols is already num_vars * max_num_proofs / max_num_proofs_bound
+  pub fn compute_eval_table_sparse_single(
+    &self,
+    rx: &[Scalar],
+    max_num_proofs: usize,
+    max_num_proofs_bound: usize,
+    _num_rows: usize,
+    num_cols: usize,
+  ) -> Vec<Scalar> {
+    let mut M_evals: Vec<Scalar> = vec![Scalar::zero(); num_cols];
+    for i in 0..self.M.len() * max_num_proofs / max_num_proofs_bound {
+      let entry = &self.M[i];
+      // Skip out-of-bound constraints
+      if entry.row < rx.len() && entry.col < num_cols {
+        M_evals[entry.col] += rx[entry.row] * entry.val;
+      }
+    }
+    M_evals
+  }
+  */
 
   pub fn multi_commit(
     sparse_polys: &[&SparseMatPolynomial],
@@ -1116,72 +1214,39 @@ impl ProductLayerProof {
     // So we can produce a batched product proof for all of them at the same time.
     // prove the correctness of claim_row_eval_read, claim_row_eval_write, claim_col_eval_read, and claim_col_eval_write
     // TODO: we currently only produce proofs for 3 batched sparse polynomial evaluations
-    assert_eq!(row_prod_layer.read_vec.len(), 3);
-    let (row_read_A, row_read_B, row_read_C) = {
-      let (vec_A, vec_BC) = row_prod_layer.read_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (row_write_A, row_write_B, row_write_C) = {
-      let (vec_A, vec_BC) = row_prod_layer.write_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (col_read_A, col_read_B, col_read_C) = {
-      let (vec_A, vec_BC) = col_prod_layer.read_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (col_write_A, col_write_B, col_write_C) = {
-      let (vec_A, vec_BC) = col_prod_layer.write_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (dotp_left_A, dotp_left_B, dotp_left_C) = {
-      let (vec_A, vec_BC) = dotp_circuit_left_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
-
-    let (dotp_right_A, dotp_right_B, dotp_right_C) = {
-      let (vec_A, vec_BC) = dotp_circuit_right_vec.split_at_mut(1);
-      let (vec_B, vec_C) = vec_BC.split_at_mut(1);
-      (vec_A, vec_B, vec_C)
-    };
+    let num_instances = row_prod_layer.read_vec.len();
+    let mut prod_circuit_list = Vec::new();
+    let mut dotp_circuit_list = Vec::new();
+    let (_, dotp_left_vec) = dotp_circuit_left_vec.split_at_mut(0);
+    let (_, dotp_right_vec) = dotp_circuit_right_vec.split_at_mut(0);
+    // row_read
+    for i in 0..num_instances {
+      prod_circuit_list.push(row_prod_layer.read_vec[i].clone());
+      dotp_circuit_list.push(dotp_left_vec[i].clone());
+      dotp_circuit_list.push(dotp_right_vec[i].clone());
+    }
+    // row_write
+    for i in 0..num_instances {
+      prod_circuit_list.push(row_prod_layer.write_vec[i].clone());
+    }
+    // col_read
+    for i in 0..num_instances {
+      prod_circuit_list.push(col_prod_layer.read_vec[i].clone());
+    }
+    // col_write
+    for i in 0..num_instances {
+      prod_circuit_list.push(col_prod_layer.write_vec[i].clone());
+    }
 
     let (proof_ops, rand_ops) = ProductCircuitEvalProofBatched::prove(
-      &mut [
-        &mut row_read_A[0],
-        &mut row_read_B[0],
-        &mut row_read_C[0],
-        &mut row_write_A[0],
-        &mut row_write_B[0],
-        &mut row_write_C[0],
-        &mut col_read_A[0],
-        &mut col_read_B[0],
-        &mut col_read_C[0],
-        &mut col_write_A[0],
-        &mut col_write_B[0],
-        &mut col_write_C[0],
-      ],
-      &mut [
-        &mut dotp_left_A[0],
-        &mut dotp_right_A[0],
-        &mut dotp_left_B[0],
-        &mut dotp_right_B[0],
-        &mut dotp_left_C[0],
-        &mut dotp_right_C[0],
-      ],
+      &mut prod_circuit_list.iter_mut().map(|i| &mut *i).collect(),
+      &mut dotp_circuit_list.iter_mut().map(|i| &mut *i).collect(),
       transcript,
     );
 
     // produce a batched proof of memory-related product circuits
     let (proof_mem, rand_mem) = ProductCircuitEvalProofBatched::prove(
-      &mut [
+      &mut vec![
         &mut row_prod_layer.init,
         &mut row_prod_layer.audit,
         &mut col_prod_layer.init,
@@ -1550,8 +1615,8 @@ impl SparseMatPolyEvalProof {
 }
 
 pub struct SparsePolyEntry {
-  idx: usize,
-  val: Scalar,
+  pub idx: usize,
+  pub val: Scalar,
 }
 
 impl SparsePolyEntry {

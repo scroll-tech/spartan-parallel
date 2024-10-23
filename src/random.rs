@@ -3,6 +3,7 @@ use super::transcript::ProofTranscript;
 use merlin::Transcript;
 use rand::rngs::OsRng;
 
+#[derive(Clone)]
 pub struct RandomTape {
   tape: Transcript,
 }
