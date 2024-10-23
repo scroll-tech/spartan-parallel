@@ -283,17 +283,17 @@ impl DensePolynomial {
     cons_len: usize,
     proof_len: usize,
     instance_len: usize,
-    num_proofs: &Vec<usize>,
+    num_proofs: &[usize],
   ) {
     let n = self.len() / 2;
     assert_eq!(n, cons_len * proof_len * instance_len);
 
-    for p in 0..instance_len {
+    for (p, &num_proof) in num_proofs.iter().enumerate() {
       // Certain p, q combinations within the boolean hypercube always evaluate to 0
       let max_q = if proof_len != proof_space {
         proof_len
       } else {
-        num_proofs[p]
+        num_proof
       };
       for q in 0..max_q {
         for x in 0..cons_len {
@@ -324,16 +324,16 @@ impl DensePolynomial {
       n /= 2;
       max_proof_space /= 2;
 
-      for p in 0..instance_space {
-        if num_proofs[p] == 1 {
+      for (p, num_proof) in num_proofs.iter_mut().enumerate() {
+        if *num_proof == 1 {
           // q = 0
           for x in 0..cons_space {
             let i = p * cons_space + x;
             self.Z[i] = (Scalar::one() - r) * self.Z[i];
           }
         } else {
-          num_proofs[p] /= 2;
-          let step = max_proof_space / num_proofs[p];
+          *num_proof /= 2;
+          let step = max_proof_space / *num_proof;
           for q in (0..max_proof_space).step_by(step) {
             for x in 0..cons_space {
               let i = q * instance_space * cons_space + p * cons_space + x;
