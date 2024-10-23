@@ -21,9 +21,9 @@ impl Instance {
     max_num_cons: usize,
     num_cons: Vec<usize>,
     num_vars: usize,
-    A: &Vec<Vec<(usize, usize, [u8; 32])>>,
-    B: &Vec<Vec<(usize, usize, [u8; 32])>>,
-    C: &Vec<Vec<(usize, usize, [u8; 32])>>,
+    A: &[Vec<(usize, usize, [u8; 32])>],
+    B: &[Vec<(usize, usize, [u8; 32])>],
+    C: &[Vec<(usize, usize, [u8; 32])>],
   ) -> Result<Instance, R1CSError> {
     let (num_vars_padded, max_num_cons_padded, num_cons_padded) = {
       let num_vars_padded = {

@@ -3677,7 +3677,7 @@ impl SNARK {
       let perm_poly_num_inputs: Vec<usize> = vec![8; perm_poly_num_instances];
 
       // Commitment Opening
-      let num_vars_list = (0..perm_poly_num_instances)
+      let num_vars_list: Vec<_> = (0..perm_poly_num_instances)
         .map(|i| (perm_poly_num_proofs[i] * perm_poly_num_inputs[i]).log_2())
         .collect();
       let two_b = vec![ONE, ZERO];
