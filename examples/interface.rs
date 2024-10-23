@@ -53,6 +53,7 @@ struct CompileTimeKnowledge {
   block_num_vir_ops: Vec<usize>,
   max_ts_width: usize,
 
+  #[allow(clippy::type_complexity)]
   args: Vec<
     Vec<(
       Vec<(usize, [u8; 32])>,

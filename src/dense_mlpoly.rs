@@ -606,7 +606,7 @@ impl PolyEvalProof {
         random_tape,
         &LZ,
         &LZ_blind,
-        &R,
+        R,
         &Zc_list[i],
         blind_Zr,
       );
@@ -678,7 +678,7 @@ impl PolyEvalProof {
 
       proof_list[i]
         .proof
-        .verify(R.len(), &gens.gens, transcript, &R, &C_LZ, &C_Zc)?
+        .verify(R.len(), &gens.gens, transcript, R, &C_LZ, &C_Zc)?
     }
 
     Ok(())
@@ -893,7 +893,7 @@ impl PolyEvalProof {
       if let Some(index) = index_map.get(&(num_proofs, num_inputs)) {
         c *= c_base;
         let L = &L_list[*index].to_vec();
-        let LZ = poly.bound(&L);
+        let LZ = poly.bound(L);
         LZ_list[*index] = (0..LZ.len())
           .map(|j| LZ_list[*index][j] + c * LZ[j])
           .collect();
@@ -1106,7 +1106,7 @@ impl PolyEvalProof {
         L_map.get(&num_vars).unwrap()
       };
 
-      let LZ = poly.bound(&L);
+      let LZ = poly.bound(L);
       LZ_comb = (0..R_size)
         .map(|i| LZ_comb[i] + if i < LZ.len() { c * LZ[i] } else { zero })
         .collect();
