@@ -2,6 +2,7 @@
 #![doc = include_str!("../README.md")]
 #![deny(missing_docs)]
 #![allow(clippy::assertions_on_result_states)]
+#![allow(clippy::needless_range_loop)]
 
 // TODO: Can we allow split in R1CSGens?
 // TODO: Can we parallelize the proofs?
@@ -278,6 +279,7 @@ impl IOProofs {
     IOProofs { proofs }
   }
 
+  #[allow(clippy::too_many_arguments)]
   fn verify(
     &self,
     comm_poly_inputs: &PolyCommitment,
@@ -443,6 +445,7 @@ impl ShiftProofs {
     }
   }
 
+  #[allow(clippy::too_many_arguments)]
   fn verify(
     &self,
     orig_comms: Vec<&PolyCommitment>,
@@ -454,10 +457,9 @@ impl ShiftProofs {
     vars_gens: &R1CSGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
-    let num_instances = orig_comms.len();
     // Open entry 0..header_len_list[p] - 1
-    for p in 0..num_instances {
-      for i in 0..header_len_list[p] {
+    for (p, header_len) in header_len_list.iter().enumerate() {
+      for i in 0..*header_len {
         self.openings[p][i].append_to_transcript(b"shift_header_entry", transcript);
       }
     }
@@ -829,7 +831,7 @@ impl SNARK {
   // Given information regarding a group of memory assignments, generate w2, w3, and w3_shifted
   fn mem_gen<const MEM_WIDTH: usize>(
     total_num_mem_accesses: usize,
-    mems_list: &Vec<Vec<Scalar>>,
+    mems_list: &[Vec<Scalar>],
     comb_r: &Scalar,
     comb_tau: &Scalar,
     vars_gens: &R1CSGens,
@@ -965,6 +967,7 @@ impl SNARK {
   }
 
   /// A method to produce a SNARK proof of the satisfiability of an R1CS instance
+  #[allow(clippy::too_many_arguments)]
   pub fn prove(
     input_block_num: usize,
     output_block_num: usize,
@@ -972,7 +975,7 @@ impl SNARK {
     func_input_width: usize,
     input_offset: usize,
     output_offset: usize,
-    input: &Vec<[u8; 32]>,
+    input: &[[u8; 32]],
     output: &[u8; 32],
     output_exec_num: usize,
 
@@ -1033,8 +1036,8 @@ impl SNARK {
     // ASSERTIONS
     // --
     assert!(0 < consis_num_proofs);
-    for p in 0..block_num_instances_bound {
-      assert!(block_num_proofs[p] <= block_max_num_proofs);
+    for &num_proofs in block_num_proofs.iter().take(block_num_instances_bound) {
+      assert!(num_proofs <= block_max_num_proofs);
     }
     let io_width = 2 * num_inputs_unpadded;
 
@@ -1271,10 +1274,11 @@ impl SNARK {
     // --
     // Note: perform pairwise sort after padding because pairwise sort uses padded values as parameter
     // Sort the pairwise instances: CONSIS_CHECK, PHY_MEM_COHERE
-    let mut inst_sorter = Vec::new();
-    inst_sorter.push(InstanceSortHelper::new(consis_num_proofs, 0));
-    inst_sorter.push(InstanceSortHelper::new(total_num_phy_mem_accesses, 1));
-    inst_sorter.push(InstanceSortHelper::new(total_num_vir_mem_accesses, 2));
+    let mut inst_sorter = [
+      InstanceSortHelper::new(consis_num_proofs, 0),
+      InstanceSortHelper::new(total_num_phy_mem_accesses, 1),
+      InstanceSortHelper::new(total_num_vir_mem_accesses, 2),
+    ];
     // Sort from high -> low
     inst_sorter.sort_by(|a, b| b.cmp(a));
 
@@ -2742,6 +2746,7 @@ impl SNARK {
   }
 
   /// A method to verify the SNARK proof of the satisfiability of an R1CS instance
+  #[allow(clippy::too_many_arguments)]
   pub fn verify(
     &self,
     input_block_num: usize,
@@ -2751,8 +2756,8 @@ impl SNARK {
     input_offset: usize,
     output_offset: usize,
     input: &Vec<[u8; 32]>,
-    input_stack: &Vec<[u8; 32]>,
-    input_mem: &Vec<[u8; 32]>,
+    input_stack: &[[u8; 32]],
+    input_mem: &[[u8; 32]],
     output: &[u8; 32],
     output_exec_num: usize,
 
@@ -2986,10 +2991,11 @@ impl SNARK {
     // PAIRWISE SORT
     // --
     // Sort the pairwise instances: CONSIS_CHECK, PHY_MEM_COHERE
-    let mut inst_sorter = Vec::new();
-    inst_sorter.push(InstanceSortHelper::new(consis_num_proofs, 0));
-    inst_sorter.push(InstanceSortHelper::new(total_num_phy_mem_accesses, 1));
-    inst_sorter.push(InstanceSortHelper::new(total_num_vir_mem_accesses, 2));
+    let mut inst_sorter = [
+      InstanceSortHelper::new(consis_num_proofs, 0),
+      InstanceSortHelper::new(total_num_phy_mem_accesses, 1),
+      InstanceSortHelper::new(total_num_vir_mem_accesses, 2),
+    ];
     // Sort from high -> low
     inst_sorter.sort_by(|a, b| b.cmp(a));
 
@@ -3067,15 +3073,15 @@ impl SNARK {
         self.block_comm_w3_list_shifted[p].append_to_transcript(b"poly_commitment", transcript);
       }
       (
-        VerifierWitnessSecInfo::new(vec![num_ios], &vec![1], vec![perm_comm_w0.clone()]),
+        VerifierWitnessSecInfo::new(vec![num_ios], &[1], vec![perm_comm_w0.clone()]),
         VerifierWitnessSecInfo::new(
           vec![num_ios],
-          &vec![consis_num_proofs],
+          &[consis_num_proofs],
           vec![self.perm_exec_comm_w2_list.clone()],
         ),
         VerifierWitnessSecInfo::new(
           vec![W3_WIDTH],
-          &vec![consis_num_proofs],
+          &[consis_num_proofs],
           vec![self.perm_exec_comm_w3_list.clone()],
         ),
         VerifierWitnessSecInfo::new(
