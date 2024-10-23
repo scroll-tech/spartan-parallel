@@ -91,9 +91,9 @@ impl R1CSInstance {
     max_num_cons: usize,
     num_cons: Vec<usize>,
     num_vars: usize,
-    A_list: &Vec<Vec<(usize, usize, Scalar)>>,
-    B_list: &Vec<Vec<(usize, usize, Scalar)>>,
-    C_list: &Vec<Vec<(usize, usize, Scalar)>>,
+    A_list: &[Vec<(usize, usize, Scalar)>],
+    B_list: &[Vec<(usize, usize, Scalar)>],
+    C_list: &[Vec<(usize, usize, Scalar)>],
   ) -> R1CSInstance {
     Timer::print(&format!("number_of_instances {num_instances}"));
     Timer::print(&format!("number_of_constraints {max_num_cons}"));
@@ -359,6 +359,7 @@ impl R1CSInstance {
 
   // Az(p, q, x) <- A(p, x) * z(p, q, x), where we require p for A and z are the same
   // Return Az, Bz, Cz as DensePolynomialPqx
+  #[allow(clippy::too_many_arguments)]
   pub fn multiply_vec_block(
     &self,
     num_instances: usize,
@@ -368,7 +369,7 @@ impl R1CSInstance {
     max_num_inputs: usize,
     max_num_cons: usize,
     num_cons: Vec<usize>,
-    z_mat: &Vec<Vec<Vec<Vec<Scalar>>>>,
+    z_mat: &[Vec<Vec<Vec<Scalar>>>],
   ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
     assert!(self.num_instances == 1 || self.num_instances == num_instances);
     assert_eq!(max_num_cons, self.max_num_cons);
@@ -479,13 +480,14 @@ impl R1CSInstance {
 
   // Store the result in a vector divided into num_segs segments
   // output[p][q][w] stores entry w * max_num_cols ~ w * max_num_cols + num_cols of the original vector
+  #[allow(clippy::type_complexity)]
   pub fn compute_eval_table_sparse_disjoint_rounds(
     &self,
     num_instances: usize,
     num_rows: &Vec<usize>,
     num_segs: usize,
     max_num_cols: usize,
-    num_cols: &Vec<usize>,
+    num_cols: &[usize],
     evals: &[Scalar],
     // Output in p, q, w, i format, where q section has length 1
   ) -> (
@@ -742,7 +744,7 @@ impl R1CSEvalProof {
     decomm: &R1CSDecommitment,
     rx: &[Scalar], // point at which the polynomial is evaluated
     ry: &[Scalar],
-    evals: &Vec<Scalar>,
+    evals: &[Scalar],
     gens: &R1CSCommitmentGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -767,7 +769,7 @@ impl R1CSEvalProof {
     comm: &R1CSCommitment,
     rx: &[Scalar], // point at which the R1CS matrix polynomials are evaluated
     ry: &[Scalar],
-    evals: &Vec<Scalar>,
+    evals: &[Scalar],
     gens: &R1CSCommitmentGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {

@@ -449,18 +449,6 @@ impl SparseMatPolynomial {
       .collect::<Vec<Scalar>>()
   }
 
-  pub fn multiply_vec(&self, num_rows: usize, num_cols: usize, z: &[Scalar]) -> Vec<Scalar> {
-    assert_eq!(z.len(), num_cols);
-
-    self.M.iter().fold(
-      vec![Scalar::zero(); num_rows],
-      |mut Mz, SparseMatEntry { row, col, val }| {
-        Mz[*row] += val * z[*col];
-        Mz
-      },
-    )
-  }
-
   // Z is consisted of vector segments
   // Z[i] contains entries i * max_num_cols ~ i * max_num_cols + num_cols
   pub fn multiply_vec_disjoint_rounds(
@@ -468,7 +456,7 @@ impl SparseMatPolynomial {
     num_rows: usize,
     max_num_cols: usize,
     _num_cols: usize,
-    z: &Vec<Vec<Scalar>>,
+    z: &[Vec<Scalar>],
   ) -> Vec<Scalar> {
     (0..self.M.len())
       .map(|i| {
@@ -1611,47 +1599,6 @@ impl SparseMatPolyEvalProof {
       nz,
       transcript,
     )
-  }
-}
-
-pub struct SparsePolyEntry {
-  pub idx: usize,
-  pub val: Scalar,
-}
-
-impl SparsePolyEntry {
-  pub fn new(idx: usize, val: Scalar) -> Self {
-    SparsePolyEntry { idx, val }
-  }
-}
-
-pub struct SparsePolynomial {
-  num_vars: usize,
-  Z: Vec<SparsePolyEntry>,
-}
-
-impl SparsePolynomial {
-  pub fn new(num_vars: usize, Z: Vec<SparsePolyEntry>) -> Self {
-    SparsePolynomial { num_vars, Z }
-  }
-
-  fn compute_chi(a: &[bool], r: &[Scalar]) -> Scalar {
-    assert_eq!(a.len(), r.len());
-    a.iter().zip(r.iter()).fold(Scalar::one(), |sum, (a, r)| {
-      sum * if *a { *r } else { Scalar::one() - r }
-    })
-  }
-
-  // Takes O(n log n). TODO: do this in O(n) where n is the number of entries in Z
-  pub fn evaluate(&self, r: &[Scalar]) -> Scalar {
-    assert_eq!(self.num_vars, r.len());
-
-    (0..self.Z.len())
-      .map(|i| {
-        let bits = self.Z[i].idx.get_bits(r.len());
-        SparsePolynomial::compute_chi(&bits, r) * self.Z[i].val
-      })
-      .sum()
   }
 }
 

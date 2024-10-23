@@ -2283,7 +2283,7 @@ impl SNARK {
             &block_comm_map[i]
               .iter()
               .map(|i| inst_evals_list[*i])
-              .collect(),
+              .collect::<Vec<_>>(),
             &block_gens.gens_r1cs_eval,
             transcript,
             &mut random_tape,
@@ -2515,7 +2515,7 @@ impl SNARK {
           &perm_root_decomm.decomm,
           &rx,
           &ry,
-          &inst_evals.to_vec(),
+          inst_evals.as_ref(),
           &perm_root_gens.gens_r1cs_eval,
           transcript,
           &mut random_tape,
@@ -3451,7 +3451,7 @@ impl SNARK {
           &block_comm_map[i]
             .iter()
             .map(|i| self.block_inst_evals_list[*i])
-            .collect(),
+            .collect::<Vec<_>>(),
           &block_gens.gens_r1cs_eval,
           transcript,
         )?;
@@ -3641,7 +3641,7 @@ impl SNARK {
         &perm_root_comm.comm,
         &rx,
         &ry,
-        &self.perm_root_inst_evals.to_vec(),
+        self.perm_root_inst_evals.as_ref(),
         &perm_root_gens.gens_r1cs_eval,
         transcript,
       )?;
