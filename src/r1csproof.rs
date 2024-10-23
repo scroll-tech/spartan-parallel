@@ -85,8 +85,8 @@ impl R1CSProof {
     num_rounds_x_max: usize,
     num_rounds_q_max: usize,
     num_rounds_p: usize,
-    num_proofs: &Vec<usize>,
-    num_cons: &Vec<usize>,
+    num_proofs: &[usize],
+    num_cons: &[usize],
     evals_tau_p: &mut DensePolynomial,
     evals_tau_q: &mut DensePolynomial,
     evals_tau_x: &mut DensePolynomial,
@@ -111,8 +111,8 @@ impl R1CSProof {
         num_rounds_x_max,
         num_rounds_q_max,
         num_rounds_p,
-        num_proofs.clone(),
-        num_cons.clone(),
+        num_proofs.to_vec(),
+        num_cons.to_vec(),
         evals_tau_p,
         evals_tau_q,
         evals_tau_x,
@@ -250,7 +250,7 @@ impl R1CSProof {
     assert!(inst.get_num_instances() == 1 || inst.get_num_instances() == num_instances);
 
     // Assert num_witness_secs is valid
-    assert!(num_witness_secs >= 1 && num_witness_secs <= 16);
+    assert!((1..=16).contains(&num_witness_secs));
     for w in &witness_secs {
       // assert size of w_mat
       assert!(w.w_mat.len() == 1 || w.w_mat.len() == num_instances);
@@ -329,7 +329,7 @@ impl R1CSProof {
       num_rounds_x,
       num_rounds_q,
       num_rounds_p,
-      &num_proofs,
+      num_proofs,
       &block_num_cons,
       &mut poly_tau_p,
       &mut poly_tau_q,
@@ -436,7 +436,7 @@ impl R1CSProof {
         inst.get_inst_num_cons(),
         num_witness_secs,
         max_num_inputs,
-        &num_inputs,
+        num_inputs,
         &evals_rx,
       );
 
@@ -456,7 +456,7 @@ impl R1CSProof {
     };
 
     let mut ABC_poly = DensePolynomialPqx::new_rev(
-      &evals_ABC,
+      evals_ABC,
       vec![1; num_instances],
       1,
       num_inputs.clone(),
@@ -467,7 +467,7 @@ impl R1CSProof {
     let timer_tmp = Timer::new("prove_z_gen");
     // Construct a p * q * len(z) matrix Z and bound it to r_q
     let mut Z_poly = DensePolynomialPqx::new_rev(
-      &z_mat,
+      z_mat,
       num_proofs.clone(),
       max_num_proofs,
       num_inputs.clone(),
@@ -688,7 +688,7 @@ impl R1CSProof {
     &self,
     num_instances: usize,
     max_num_proofs: usize,
-    num_proofs: &Vec<usize>,
+    num_proofs: &[usize],
     max_num_inputs: usize,
 
     // NUM_WITNESS_SECS
@@ -713,7 +713,7 @@ impl R1CSProof {
     let num_witness_secs = witness_secs.len();
 
     // Assert num_witness_secs is valid
-    assert!(num_witness_secs >= 1 && num_witness_secs <= 16);
+    assert!((1..=16).contains(&num_witness_secs));
 
     let (num_rounds_p, num_rounds_q, num_rounds_x, num_rounds_w, num_rounds_y) = (
       num_instances.next_power_of_two().log_2(),

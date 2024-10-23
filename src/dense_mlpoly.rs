@@ -283,17 +283,17 @@ impl DensePolynomial {
     cons_len: usize,
     proof_len: usize,
     instance_len: usize,
-    num_proofs: &Vec<usize>,
+    num_proofs: &[usize],
   ) {
     let n = self.len() / 2;
     assert_eq!(n, cons_len * proof_len * instance_len);
 
-    for p in 0..instance_len {
+    for (p, &num_proof) in num_proofs.iter().enumerate() {
       // Certain p, q combinations within the boolean hypercube always evaluate to 0
       let max_q = if proof_len != proof_space {
         proof_len
       } else {
-        num_proofs[p]
+        num_proof
       };
       for q in 0..max_q {
         for x in 0..cons_len {
@@ -311,7 +311,7 @@ impl DensePolynomial {
   // Use "num_proofs" to record how many "q"s need to process for each "p"
   pub fn bound_poly_var_front_rq(
     &mut self,
-    r_q: &Vec<Scalar>,
+    r_q: &[Scalar],
     mut max_proof_space: usize,
     instance_space: usize,
     cons_space: usize,
@@ -324,16 +324,16 @@ impl DensePolynomial {
       n /= 2;
       max_proof_space /= 2;
 
-      for p in 0..instance_space {
-        if num_proofs[p] == 1 {
+      for (p, num_proof) in num_proofs.iter_mut().enumerate() {
+        if *num_proof == 1 {
           // q = 0
           for x in 0..cons_space {
             let i = p * cons_space + x;
             self.Z[i] = (Scalar::one() - r) * self.Z[i];
           }
         } else {
-          num_proofs[p] /= 2;
-          let step = max_proof_space / num_proofs[p];
+          *num_proof /= 2;
+          let step = max_proof_space / *num_proof;
           for q in (0..max_proof_space).step_by(step) {
             for x in 0..cons_space {
               let i = q * instance_space * cons_space + p * cons_space + x;
@@ -606,7 +606,7 @@ impl PolyEvalProof {
         random_tape,
         &LZ,
         &LZ_blind,
-        &R,
+        R,
         &Zc_list[i],
         blind_Zr,
       );
@@ -622,7 +622,7 @@ impl PolyEvalProof {
   }
 
   pub fn verify_plain_batched_points(
-    proof_list: &Vec<PolyEvalProof>,
+    proof_list: &[PolyEvalProof],
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
     r_list: Vec<Vec<Scalar>>, // point at which the polynomial is evaluated
@@ -678,7 +678,7 @@ impl PolyEvalProof {
 
       proof_list[i]
         .proof
-        .verify(R.len(), &gens.gens, transcript, &R, &C_LZ, &C_Zc)?
+        .verify(R.len(), &gens.gens, transcript, R, &C_LZ, &C_Zc)?
     }
 
     Ok(())
@@ -687,10 +687,10 @@ impl PolyEvalProof {
   // Evaluation on multiple instances, each at different point
   // Size of each instance might be different, but all are larger than the evaluation point
   pub fn prove_batched_instances(
-    poly_list: &Vec<DensePolynomial>, // list of instances
+    poly_list: &[DensePolynomial], // list of instances
     blinds_opt: Option<&PolyCommitmentBlinds>,
     r_list: Vec<&Vec<Scalar>>, // point at which the polynomial is evaluated
-    Zr_list: &Vec<Scalar>,     // evaluation of \widetilde{Z}(r) on each instance
+    Zr_list: &[Scalar],        // evaluation of \widetilde{Z}(r) on each instance
     blind_Zr_opt: Option<&Scalar>, // specifies a blind for Zr
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
@@ -780,13 +780,13 @@ impl PolyEvalProof {
   }
 
   pub fn verify_plain_batched_instances(
-    proof_list: &Vec<PolyEvalProof>,
+    proof_list: &[PolyEvalProof],
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
     r_list: Vec<&Vec<Scalar>>, // point at which the polynomial is evaluated
-    Zr_list: &Vec<Scalar>,     // commitment to \widetilde{Z}(r) of each instance
-    comm_list: &Vec<PolyCommitment>, // commitment of each instance
-    num_vars_list: &Vec<usize>, // size of each polynomial
+    Zr_list: &[Scalar],        // commitment to \widetilde{Z}(r) of each instance
+    comm_list: &[PolyCommitment], // commitment of each instance
+    num_vars_list: &[usize],   // size of each polynomial
   ) -> Result<(), ProofVerifyError> {
     transcript.append_protocol_name(PolyEvalProof::protocol_name());
     assert_eq!(comm_list.len(), r_list.len());
@@ -859,13 +859,13 @@ impl PolyEvalProof {
   // Like prove_batched_instances, but r is divided into rq ++ ry
   // Each polynomial is supplemented with num_proofs and num_inputs
   pub fn prove_batched_instances_disjoint_rounds(
-    poly_list: &Vec<&DensePolynomial>,
-    num_proofs_list: &Vec<usize>,
-    num_inputs_list: &Vec<usize>,
+    poly_list: &[&DensePolynomial],
+    num_proofs_list: &[usize],
+    num_inputs_list: &[usize],
     blinds_opt: Option<&PolyCommitmentBlinds>,
     rq: &[Scalar],
     ry: &[Scalar],
-    Zr_list: &Vec<Scalar>,
+    Zr_list: &[Scalar],
     blind_Zr_opt: Option<&Scalar>,
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
@@ -893,7 +893,7 @@ impl PolyEvalProof {
       if let Some(index) = index_map.get(&(num_proofs, num_inputs)) {
         c *= c_base;
         let L = &L_list[*index].to_vec();
-        let LZ = poly.bound(&L);
+        let LZ = poly.bound(L);
         LZ_list[*index] = (0..LZ.len())
           .map(|j| LZ_list[*index][j] + c * LZ[j])
           .collect();
@@ -960,15 +960,15 @@ impl PolyEvalProof {
   }
 
   pub fn verify_batched_instances_disjoint_rounds(
-    proof_list: &Vec<PolyEvalProof>,
-    num_proofs_list: &Vec<usize>,
-    num_inputs_list: &Vec<usize>,
+    proof_list: &[PolyEvalProof],
+    num_proofs_list: &[usize],
+    num_inputs_list: &[usize],
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
     rq: &[Scalar],
     ry: &[Scalar],
-    Zr_list: &Vec<RistrettoPoint>,
-    comm_list: &Vec<&PolyCommitment>,
+    Zr_list: &[RistrettoPoint],
+    comm_list: &[&PolyCommitment],
   ) -> Result<(), ProofVerifyError> {
     transcript.append_protocol_name(PolyEvalProof::protocol_name());
 
@@ -1045,8 +1045,8 @@ impl PolyEvalProof {
   // Treat the polynomial(s) as univariate and open on a single point
   pub fn prove_uni_batched_instances(
     poly_list: &Vec<&DensePolynomial>,
-    r: &Scalar,       // point at which the polynomial is evaluated
-    Zr: &Vec<Scalar>, // evaluation of \widetilde{Z}(r)
+    r: &Scalar,    // point at which the polynomial is evaluated
+    Zr: &[Scalar], // evaluation of \widetilde{Z}(r)
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -1106,7 +1106,7 @@ impl PolyEvalProof {
         L_map.get(&num_vars).unwrap()
       };
 
-      let LZ = poly.bound(&L);
+      let LZ = poly.bound(L);
       LZ_comb = (0..R_size)
         .map(|i| LZ_comb[i] + if i < LZ.len() { c * LZ[i] } else { zero })
         .collect();
@@ -1133,9 +1133,9 @@ impl PolyEvalProof {
     &self,
     gens: &PolyCommitmentGens,
     transcript: &mut Transcript,
-    r: &Scalar,                 // point at which the polynomial is evaluated
-    C_Zr: &Vec<RistrettoPoint>, // commitment to \widetilde{Z}(r)
-    comm_list: &Vec<&PolyCommitment>,
+    r: &Scalar,              // point at which the polynomial is evaluated
+    C_Zr: &[RistrettoPoint], // commitment to \widetilde{Z}(r)
+    comm_list: &[&PolyCommitment],
     poly_size: Vec<usize>,
   ) -> Result<(), ProofVerifyError> {
     transcript.append_protocol_name(PolyEvalProof::protocol_name());

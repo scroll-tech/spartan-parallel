@@ -91,9 +91,9 @@ impl R1CSInstance {
     max_num_cons: usize,
     num_cons: Vec<usize>,
     num_vars: usize,
-    A_list: &Vec<Vec<(usize, usize, Scalar)>>,
-    B_list: &Vec<Vec<(usize, usize, Scalar)>>,
-    C_list: &Vec<Vec<(usize, usize, Scalar)>>,
+    A_list: &[Vec<(usize, usize, Scalar)>],
+    B_list: &[Vec<(usize, usize, Scalar)>],
+    C_list: &[Vec<(usize, usize, Scalar)>],
   ) -> R1CSInstance {
     Timer::print(&format!("number_of_instances {num_instances}"));
     Timer::print(&format!("number_of_constraints {max_num_cons}"));
@@ -183,7 +183,7 @@ impl R1CSInstance {
 
   // Sort A_list, B_list, C_list based on index
   // index[i] = j => the original jth entry should now be at the ith position
-  pub fn sort(&mut self, num_instances: usize, index: &Vec<usize>) {
+  pub fn sort(&mut self, num_instances: usize, index: &[usize]) {
     self.num_instances = num_instances;
     self.num_cons = (0..num_instances)
       .map(|i| self.num_cons[index[i]])
@@ -359,6 +359,7 @@ impl R1CSInstance {
 
   // Az(p, q, x) <- A(p, x) * z(p, q, x), where we require p for A and z are the same
   // Return Az, Bz, Cz as DensePolynomialPqx
+  #[allow(clippy::too_many_arguments)]
   pub fn multiply_vec_block(
     &self,
     num_instances: usize,
@@ -368,7 +369,7 @@ impl R1CSInstance {
     max_num_inputs: usize,
     max_num_cons: usize,
     num_cons: Vec<usize>,
-    z_mat: &Vec<Vec<Vec<Vec<Scalar>>>>,
+    z_mat: &[Vec<Vec<Vec<Scalar>>>],
   ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
     assert!(self.num_instances == 1 || self.num_instances == num_instances);
     assert_eq!(max_num_cons, self.max_num_cons);
@@ -389,19 +390,19 @@ impl R1CSInstance {
         let z = &z_list[q];
 
         Az[p].push(vec![self.A_list[p_inst].multiply_vec_disjoint_rounds(
-          num_cons[p_inst].clone(),
+          num_cons[p_inst],
           max_num_inputs,
           num_inputs[p],
           z,
         )]);
         Bz[p].push(vec![self.B_list[p_inst].multiply_vec_disjoint_rounds(
-          num_cons[p_inst].clone(),
+          num_cons[p_inst],
           max_num_inputs,
           num_inputs[p],
           z,
         )]);
         Cz[p].push(vec![self.C_list[p_inst].multiply_vec_disjoint_rounds(
-          num_cons[p_inst].clone(),
+          num_cons[p_inst],
           max_num_inputs,
           num_inputs[p],
           z,
@@ -411,21 +412,21 @@ impl R1CSInstance {
 
     (
       DensePolynomialPqx::new_rev(
-        &Az,
+        Az,
         num_proofs.clone(),
         max_num_proofs,
         num_cons.clone(),
         max_num_cons,
       ),
       DensePolynomialPqx::new_rev(
-        &Bz,
+        Bz,
         num_proofs.clone(),
         max_num_proofs,
         num_cons.clone(),
         max_num_cons,
       ),
       DensePolynomialPqx::new_rev(
-        &Cz,
+        Cz,
         num_proofs,
         max_num_proofs,
         num_cons.clone(),
@@ -433,44 +434,6 @@ impl R1CSInstance {
       ),
     )
   }
-
-  /*
-  // Multiply one instance by a list of inputs
-  // Length of each input might be smaller than the length of the instance,
-  // in that case need to append the result by 0
-  pub fn multiply_vec_single(
-    &self,
-    num_instances: usize,
-    num_proofs: &Vec<usize>,
-    max_num_proofs_bound: usize,
-    max_num_proofs: usize,
-    num_rows: usize,
-    num_cols: usize,
-        z_list: &Vec<Vec<Scalar>>,
-  ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
-    assert!(max_num_proofs <= max_num_proofs_bound);
-    assert!(max_num_proofs_bound * num_rows <= self.num_cons);
-    assert!(max_num_proofs_bound * num_cols <= self.num_vars);
-    let mut Az = Vec::new();
-    let mut Bz = Vec::new();
-    let mut Cz = Vec::new();
-
-    // Non-zero instances
-    for p in 0..num_instances {
-      let z = &z_list[p];
-      assert!(num_proofs[p] <= max_num_proofs);
-      // Each returns a num_proofs[p] * num_rows matrix
-      Az.push(self.A_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
-      Bz.push(self.B_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
-      Cz.push(self.C_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
-    }
-    (
-         DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
-      DensePolynomialPqx::new_rev(&Bz, num_proofs, max_num_proofs),
-      DensePolynomialPqx::new_rev(&Cz, num_proofs, max_num_proofs)
-    )
-  }
-  */
 
   pub fn compute_eval_table_sparse(
     &self,
@@ -517,13 +480,14 @@ impl R1CSInstance {
 
   // Store the result in a vector divided into num_segs segments
   // output[p][q][w] stores entry w * max_num_cols ~ w * max_num_cols + num_cols of the original vector
+  #[allow(clippy::type_complexity)]
   pub fn compute_eval_table_sparse_disjoint_rounds(
     &self,
     num_instances: usize,
     num_rows: &Vec<usize>,
     num_segs: usize,
     max_num_cols: usize,
-    num_cols: &Vec<usize>,
+    num_cols: &[usize],
     evals: &[Scalar],
     // Output in p, q, w, i format, where q section has length 1
   ) -> (
@@ -684,7 +648,7 @@ impl R1CSInstance {
     while base < val {
       base *= 8;
     }
-    return base;
+    base
   }
 
   pub fn multi_commit(
@@ -780,7 +744,7 @@ impl R1CSEvalProof {
     decomm: &R1CSDecommitment,
     rx: &[Scalar], // point at which the polynomial is evaluated
     ry: &[Scalar],
-    evals: &Vec<Scalar>,
+    evals: &[Scalar],
     gens: &R1CSCommitmentGens,
     transcript: &mut Transcript,
     random_tape: &mut RandomTape,
@@ -805,7 +769,7 @@ impl R1CSEvalProof {
     comm: &R1CSCommitment,
     rx: &[Scalar], // point at which the R1CS matrix polynomials are evaluated
     ry: &[Scalar],
-    evals: &Vec<Scalar>,
+    evals: &[Scalar],
     gens: &R1CSCommitmentGens,
     transcript: &mut Transcript,
   ) -> Result<(), ProofVerifyError> {
