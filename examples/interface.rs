@@ -1,9 +1,9 @@
 //! Reads in constraints and inputs from zok_tests/constraints and zok_tests/inputs
 //! Used as a temporary interface to / from CirC
 #![allow(clippy::assertions_on_result_states)]
-use std::{fs::File, io::BufReader};
-use std::io::{BufRead, Read};
-use std::{default, env};
+use std::fs::File;
+use std::io::Read;
+use std::env;
 
 use libspartan::{instance::Instance, SNARKGens, VarsAssignment, SNARK, InputsAssignment, MemsAssignment};
 use merlin::Transcript;
