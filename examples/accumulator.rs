@@ -98,7 +98,6 @@ fn produce_r1cs() -> (
   //
   // Separate vars into three lists
   // BLOCK, CONSIS, PERM
-
   let zero = Scalar::zero().to_bytes();
   let one = Scalar::one().to_bytes();
   let two = Scalar::from(2u32).to_bytes();

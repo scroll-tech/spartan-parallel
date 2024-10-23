@@ -1240,7 +1240,7 @@ impl ProductLayerProof {
 
     // produce a batched proof of memory-related product circuits
     let (proof_mem, rand_mem) = ProductCircuitEvalProofBatched::prove(
-      &mut [
+      &mut vec![
         &mut row_prod_layer.init,
         &mut row_prod_layer.audit,
         &mut col_prod_layer.init,
