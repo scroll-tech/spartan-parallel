@@ -3086,7 +3086,7 @@ impl SNARK {
         ),
         VerifierWitnessSecInfo::new(
           vec![W3_WIDTH],
-          &vec![consis_num_proofs],
+          &[consis_num_proofs],
           vec![self.perm_exec_comm_w3_shifted.clone()],
         ),
         block_w2_verifier,
@@ -3117,17 +3117,17 @@ impl SNARK {
         (
           VerifierWitnessSecInfo::new(
             vec![INIT_PHY_MEM_WIDTH],
-            &vec![total_num_init_phy_mem_accesses],
+            &[total_num_init_phy_mem_accesses],
             vec![self.init_phy_mem_comm_w2.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![W3_WIDTH],
-            &vec![total_num_init_phy_mem_accesses],
+            &[total_num_init_phy_mem_accesses],
             vec![self.init_phy_mem_comm_w3.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![W3_WIDTH],
-            &vec![total_num_init_phy_mem_accesses],
+            &[total_num_init_phy_mem_accesses],
             vec![self.init_phy_mem_comm_w3_shifted.clone()],
           ),
         )
@@ -3154,17 +3154,17 @@ impl SNARK {
         (
           VerifierWitnessSecInfo::new(
             vec![INIT_VIR_MEM_WIDTH],
-            &vec![total_num_init_vir_mem_accesses],
+            &[total_num_init_vir_mem_accesses],
             vec![self.init_vir_mem_comm_w2.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![W3_WIDTH],
-            &vec![total_num_init_vir_mem_accesses],
+            &[total_num_init_vir_mem_accesses],
             vec![self.init_vir_mem_comm_w3.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![W3_WIDTH],
-            &vec![total_num_init_vir_mem_accesses],
+            &[total_num_init_vir_mem_accesses],
             vec![self.init_vir_mem_comm_w3_shifted.clone()],
           ),
         )
@@ -3191,17 +3191,17 @@ impl SNARK {
         (
           VerifierWitnessSecInfo::new(
             vec![PHY_MEM_WIDTH],
-            &vec![total_num_phy_mem_accesses],
+            &[total_num_phy_mem_accesses],
             vec![self.phy_mem_addr_comm_w2.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![W3_WIDTH],
-            &vec![total_num_phy_mem_accesses],
+            &[total_num_phy_mem_accesses],
             vec![self.phy_mem_addr_comm_w3.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![W3_WIDTH],
-            &vec![total_num_phy_mem_accesses],
+            &[total_num_phy_mem_accesses],
             vec![self.phy_mem_addr_comm_w3_shifted.clone()],
           ),
         )
@@ -3228,17 +3228,17 @@ impl SNARK {
         (
           VerifierWitnessSecInfo::new(
             vec![VIR_MEM_WIDTH],
-            &vec![total_num_vir_mem_accesses],
+            &[total_num_vir_mem_accesses],
             vec![self.vir_mem_addr_comm_w2.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![W3_WIDTH],
-            &vec![total_num_vir_mem_accesses],
+            &[total_num_vir_mem_accesses],
             vec![self.vir_mem_addr_comm_w3.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![W3_WIDTH],
-            &vec![total_num_vir_mem_accesses],
+            &[total_num_vir_mem_accesses],
             vec![self.vir_mem_addr_comm_w3_shifted.clone()],
           ),
         )
@@ -3265,7 +3265,7 @@ impl SNARK {
         ),
         VerifierWitnessSecInfo::new(
           vec![num_ios],
-          &vec![consis_num_proofs],
+          &[consis_num_proofs],
           self.exec_comm_inputs.clone(),
         ),
       )
@@ -3294,7 +3294,7 @@ impl SNARK {
 
         VerifierWitnessSecInfo::new(
           vec![INIT_PHY_MEM_WIDTH],
-          &vec![total_num_init_phy_mem_accesses],
+          &[total_num_init_phy_mem_accesses],
           vec![comm_init_stacks],
         )
       } else {
@@ -3324,7 +3324,7 @@ impl SNARK {
 
         VerifierWitnessSecInfo::new(
           vec![INIT_VIR_MEM_WIDTH],
-          &vec![total_num_init_vir_mem_accesses],
+          &[total_num_init_vir_mem_accesses],
           vec![comm_init_mems],
         )
       } else {
@@ -3343,12 +3343,12 @@ impl SNARK {
         (
           VerifierWitnessSecInfo::new(
             vec![PHY_MEM_WIDTH],
-            &vec![total_num_phy_mem_accesses],
+            &[total_num_phy_mem_accesses],
             vec![self.addr_comm_phy_mems.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![PHY_MEM_WIDTH],
-            &vec![total_num_phy_mem_accesses],
+            &[total_num_phy_mem_accesses],
             vec![self.addr_comm_phy_mems_shifted.clone()],
           ),
         )
@@ -3374,17 +3374,17 @@ impl SNARK {
         (
           VerifierWitnessSecInfo::new(
             vec![VIR_MEM_WIDTH],
-            &vec![total_num_vir_mem_accesses],
+            &[total_num_vir_mem_accesses],
             vec![self.addr_comm_vir_mems.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![VIR_MEM_WIDTH],
-            &vec![total_num_vir_mem_accesses],
+            &[total_num_vir_mem_accesses],
             vec![self.addr_comm_vir_mems_shifted.clone()],
           ),
           VerifierWitnessSecInfo::new(
             vec![mem_addr_ts_bits_size],
-            &vec![total_num_vir_mem_accesses],
+            &[total_num_vir_mem_accesses],
             vec![self.addr_comm_ts_bits.clone()],
           ),
         )
