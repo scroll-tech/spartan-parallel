@@ -353,18 +353,18 @@ impl Instance {
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
         // constraints for correctness
-        for i in 0..arg.len() {
-          tmp_nnz_A += arg[i].0.len();
-          tmp_nnz_B += arg[i].1.len();
-          tmp_nnz_C += arg[i].2.len();
+        for (i, arg_elem) in arg.iter().enumerate() {
+          tmp_nnz_A += arg_elem.0.len();
+          tmp_nnz_B += arg_elem.1.len();
+          tmp_nnz_C += arg_elem.2.len();
           (A, B, C) = Instance::gen_constr_bytes(
             A,
             B,
             C,
             i,
-            arg[i].0.clone(),
-            arg[i].1.clone(),
-            arg[i].2.clone(),
+            arg_elem.0.clone(),
+            arg_elem.1.clone(),
+            arg_elem.2.clone(),
           );
         }
 
@@ -711,6 +711,7 @@ impl Instance {
   /// 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
   /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
   /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (val[k + 1] - val[k]) = 0: either address difference is 1, or value are the same, unless the next entry is invalid
+  ///
   /// So we set D = v[k + 1] * (1 - addr[k + 1] + addr[k])
   ///
   /// Input composition:
@@ -728,6 +729,7 @@ impl Instance {
   /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * C_>=(ts[k + 1], ts[k]) = 0: either addr difference is 1, or ts is increasing
   /// 4. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (ls[k + 1] - STORE) * (data[k + 1] - data[k]) = 0: either addr difference is 1, or next op is STORE, or data are the same
   /// 5. v[k + 1] * (addr[k + 1] - addr[k]) * (ls[k + 1] - STORE) = 0: either phy addr are the same, or next op is STORE
+  ///
   /// So we set D1 = v[k + 1] * (1 - phy_addr[k + 1] + phy_addr[k])
   ///           D2 = D1 * (ls[i+1] - STORE)
   /// Where STORE = 0

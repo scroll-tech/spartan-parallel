@@ -133,8 +133,8 @@ fn write_bytes(mut f: &File, bytes: &[u8; 32]) -> std::io::Result<()> {
   while size > 0 && bytes[size - 1] == 0 {
     size -= 1;
   }
-  for i in 0..size {
-    write!(&mut f, "{} ", bytes[i])?;
+  for &byte in &bytes[..size] {
+    write!(&mut f, "{} ", byte)?;
   }
   writeln!(&mut f)?;
   Ok(())
@@ -196,6 +196,7 @@ struct IOProofs {
 
 impl IOProofs {
   // Given the polynomial in execution order, generate all proofs
+  #[allow(clippy::too_many_arguments)]
   fn prove(
     exec_poly_inputs: &DensePolynomial,
 
@@ -205,7 +206,7 @@ impl IOProofs {
     input_block_num: Scalar,
     output_block_num: Scalar,
 
-    input_liveness: &Vec<bool>,
+    input_liveness: &[bool],
     input_offset: usize,
     output_offset: usize,
     input: Vec<Scalar>,
@@ -286,7 +287,7 @@ impl IOProofs {
     input_block_num: Scalar,
     output_block_num: Scalar,
 
-    input_liveness: &Vec<bool>,
+    input_liveness: &[bool],
     input_offset: usize,
     output_offset: usize,
     input: Vec<Scalar>,
@@ -609,7 +610,7 @@ impl VerifierWitnessSecInfo {
   // Unfortunately, cannot obtain all metadata from the commitment
   fn new(
     num_inputs: Vec<usize>,
-    num_proofs: &Vec<usize>,
+    num_proofs: &[usize],
     comm_w: Vec<PolyCommitment>,
   ) -> VerifierWitnessSecInfo {
     assert!(
@@ -967,7 +968,7 @@ impl SNARK {
   pub fn prove(
     input_block_num: usize,
     output_block_num: usize,
-    input_liveness: &Vec<bool>,
+    input_liveness: &[bool],
     func_input_width: usize,
     input_offset: usize,
     output_offset: usize,
@@ -978,20 +979,20 @@ impl SNARK {
     num_vars: usize,
     num_ios: usize,
     max_block_num_phy_ops: usize,
-    block_num_phy_ops: &Vec<usize>,
+    block_num_phy_ops: &[usize],
     max_block_num_vir_ops: usize,
-    block_num_vir_ops: &Vec<usize>,
+    block_num_vir_ops: &[usize],
     mem_addr_ts_bits_size: usize,
     num_inputs_unpadded: usize,
-    block_num_vars: &Vec<usize>,
+    block_num_vars: &[usize],
 
     block_num_instances_bound: usize,
     block_max_num_proofs: usize,
-    block_num_proofs: &Vec<usize>,
+    block_num_proofs: &[usize],
     block_inst: &mut Instance,
     block_comm_map: &Vec<Vec<usize>>,
-    block_comm_list: &Vec<ComputationCommitment>,
-    block_decomm_list: &Vec<ComputationDecommitment>,
+    block_comm_list: &[ComputationCommitment],
+    block_decomm_list: &[ComputationDecommitment],
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
@@ -2745,7 +2746,7 @@ impl SNARK {
     &self,
     input_block_num: usize,
     output_block_num: usize,
-    input_liveness: &Vec<bool>,
+    input_liveness: &[bool],
     func_input_width: usize,
     input_offset: usize,
     output_offset: usize,
@@ -2758,21 +2759,21 @@ impl SNARK {
     num_vars: usize,
     num_ios: usize,
     max_block_num_phy_ops: usize,
-    block_num_phy_ops: &Vec<usize>,
+    block_num_phy_ops: &[usize],
     max_block_num_vir_ops: usize,
-    block_num_vir_ops: &Vec<usize>,
+    block_num_vir_ops: &[usize],
     mem_addr_ts_bits_size: usize,
 
     num_inputs_unpadded: usize,
     // How many variables (witnesses) are used by each block? Round to the next power of 2
-    block_num_vars: &Vec<usize>,
+    block_num_vars: &[usize],
     block_num_instances_bound: usize,
 
     block_max_num_proofs: usize,
-    block_num_proofs: &Vec<usize>,
+    block_num_proofs: &[usize],
     block_num_cons: usize,
     block_comm_map: &Vec<Vec<usize>>,
-    block_comm_list: &Vec<ComputationCommitment>,
+    block_comm_list: &[ComputationCommitment],
     block_gens: &SNARKGens,
 
     consis_num_proofs: usize,
@@ -2793,9 +2794,9 @@ impl SNARK {
   ) -> Result<(), ProofVerifyError> {
     let proof_size = bincode::serialize(&self).unwrap().len();
     let commit_size = bincode::serialize(&block_comm_list).unwrap().len() +
-      // bincode::serialize(&block_gens).unwrap().len() + 
+      // bincode::serialize(&block_gens).unwrap().len() +
       bincode::serialize(&pairwise_check_comm).unwrap().len() +
-      // bincode::serialize(&pairwise_check_gens).unwrap().len() + 
+      // bincode::serialize(&pairwise_check_gens).unwrap().len() +
       bincode::serialize(&perm_root_comm).unwrap().len();
     // bincode::serialize(&perm_root_gens).unwrap().len();
     let meta_size =
