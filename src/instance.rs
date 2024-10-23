@@ -21,9 +21,9 @@ impl Instance {
     max_num_cons: usize,
     num_cons: Vec<usize>,
     num_vars: usize,
-    A: &Vec<Vec<(usize, usize, [u8; 32])>>,
-    B: &Vec<Vec<(usize, usize, [u8; 32])>>,
-    C: &Vec<Vec<(usize, usize, [u8; 32])>>,
+    A: &[Vec<(usize, usize, [u8; 32])>],
+    B: &[Vec<(usize, usize, [u8; 32])>],
+    C: &[Vec<(usize, usize, [u8; 32])>],
   ) -> Result<Instance, R1CSError> {
     let (num_vars_padded, max_num_cons_padded, num_cons_padded) = {
       let num_vars_padded = {
@@ -52,11 +52,11 @@ impl Instance {
       };
 
       let mut num_cons_padded = Vec::new();
-      for i in 0..num_cons.len() {
-        if num_cons[i] == 0 || num_cons[i] == 1 {
+      for &num_con in num_cons.iter() {
+        if num_con == 0 || num_con == 1 {
           num_cons_padded.push(2);
         } else {
-          num_cons_padded.push(num_cons[i].next_power_of_two());
+          num_cons_padded.push(num_con.next_power_of_two());
         }
       }
 
@@ -146,11 +146,12 @@ impl Instance {
 
   /// Sort the instances based on index
   // index[i] = j => the original jth entry should now be at the ith position
-  pub fn sort(&mut self, num_instances: usize, index: &Vec<usize>) {
+  pub fn sort(&mut self, num_instances: usize, index: &[usize]) {
     self.inst.sort(num_instances, index);
     self.digest = self.inst.get_digest();
   }
 
+  #[allow(clippy::type_complexity)]
   // Generates a constraints based on supplied (variable, constant) pairs
   fn gen_constr(
     mut A: Vec<(usize, usize, [u8; 32])>,
@@ -166,7 +167,7 @@ impl Instance {
     Vec<(usize, usize, [u8; 32])>,
   ) {
     let int_to_scalar = |i: isize| {
-      let abs_scalar = Scalar::from(i.abs() as u64);
+      let abs_scalar = Scalar::from(i.unsigned_abs() as u64);
       if i < 0 {
         abs_scalar.neg().to_bytes()
       } else {
@@ -188,6 +189,7 @@ impl Instance {
     (A, B, C)
   }
 
+  #[allow(clippy::type_complexity)]
   // gen_constr from byte lists
   fn gen_constr_bytes(
     mut A: Vec<(usize, usize, [u8; 32])>,
@@ -235,6 +237,7 @@ impl Instance {
   /// Which is then divided into 2 witnesses for each (PA, PD)
   /// - PMR = r * PD
   /// - PMC = (1 or PMC[i-1]) * (tau - PA - PMR)
+  ///
   /// The final product is stored in X = MC[NP - 1]
   /// VIR_W2 is similar to PHY_W2, except now with 4-tuples
   ///                           PI(tau - VA - r * VD - r^2 * VL - r^3 * VT)
@@ -243,24 +246,25 @@ impl Instance {
   /// - VMR2 = r^2 * VL
   /// - VMR3 = r^3 * VT
   /// - VMC = (1 or VMC[i-1]) * (tau - VA - VMR1 - VMR2 - VMR3)
+  ///
   /// The final product is stored in X = MC[NV - 1]
+  #[allow(clippy::too_many_arguments)]
+  #[allow(clippy::type_complexity)]
   pub fn gen_block_inst<const PRINT_SIZE: bool>(
     num_instances: usize,
     num_vars: usize,
-    args: &Vec<
-      Vec<(
-        Vec<(usize, [u8; 32])>,
-        Vec<(usize, [u8; 32])>,
-        Vec<(usize, [u8; 32])>,
-      )>,
-    >,
+    args: &[Vec<(
+      Vec<(usize, [u8; 32])>,
+      Vec<(usize, [u8; 32])>,
+      Vec<(usize, [u8; 32])>,
+    )>],
     num_inputs_unpadded: usize,
     // Number of physical & memory accesses per block
-    num_phy_ops: &Vec<usize>,
-    num_vir_ops: &Vec<usize>,
+    num_phy_ops: &[usize],
+    num_vir_ops: &[usize],
     // Information used only by printing
-    num_vars_per_block: &Vec<usize>,
-    block_num_proofs: &Vec<usize>,
+    num_vars_per_block: &[usize],
+    block_num_proofs: &[usize],
   ) -> (usize, usize, usize, Instance) {
     assert_eq!(num_instances, args.len());
 
@@ -349,18 +353,18 @@ impl Instance {
         let mut C: Vec<(usize, usize, [u8; 32])> = Vec::new();
 
         // constraints for correctness
-        for i in 0..arg.len() {
-          tmp_nnz_A += arg[i].0.len();
-          tmp_nnz_B += arg[i].1.len();
-          tmp_nnz_C += arg[i].2.len();
+        for (i, arg_elem) in arg.iter().enumerate() {
+          tmp_nnz_A += arg_elem.0.len();
+          tmp_nnz_B += arg_elem.1.len();
+          tmp_nnz_C += arg_elem.2.len();
           (A, B, C) = Instance::gen_constr_bytes(
             A,
             B,
             C,
             i,
-            arg[i].0.clone(),
-            arg[i].1.clone(),
-            arg[i].2.clone(),
+            arg_elem.0.clone(),
+            arg_elem.1.clone(),
+            arg_elem.2.clone(),
           );
         }
 
@@ -707,6 +711,7 @@ impl Instance {
   /// 1. (v[k] - 1) * v[k + 1] = 0: if the current entry is invalid, the next entry is also invalid
   /// 2. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (addr[k + 1] - addr[k]) = 0: address difference is 0 or 1, unless the next entry is invalid
   /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (val[k + 1] - val[k]) = 0: either address difference is 1, or value are the same, unless the next entry is invalid
+  ///
   /// So we set D = v[k + 1] * (1 - addr[k + 1] + addr[k])
   ///
   /// Input composition:
@@ -724,6 +729,7 @@ impl Instance {
   /// 3. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * C_>=(ts[k + 1], ts[k]) = 0: either addr difference is 1, or ts is increasing
   /// 4. v[k + 1] * (1 - (addr[k + 1] - addr[k])) * (ls[k + 1] - STORE) * (data[k + 1] - data[k]) = 0: either addr difference is 1, or next op is STORE, or data are the same
   /// 5. v[k + 1] * (addr[k + 1] - addr[k]) * (ls[k + 1] - STORE) = 0: either phy addr are the same, or next op is STORE
+  ///
   /// So we set D1 = v[k + 1] * (1 - phy_addr[k + 1] + phy_addr[k])
   ///           D2 = D1 * (ls[i+1] - STORE)
   /// Where STORE = 0
@@ -1044,7 +1050,7 @@ impl Instance {
         println!("Total Cons Exec Size: {}", total_cons_exec_size);
       }
 
-      let pairwise_check_inst = Instance::new(
+      Instance::new(
         3,
         pairwise_check_max_num_cons,
         pairwise_check_num_cons,
@@ -1053,8 +1059,7 @@ impl Instance {
         &B_list,
         &C_list,
       )
-      .unwrap();
-      pairwise_check_inst
+      .unwrap()
     };
     (
       pairwise_check_num_vars,
@@ -1295,7 +1300,7 @@ impl Instance {
         println!("Total Cons Exec Size: {}", total_cons_exec_size);
       }
 
-      let perm_root_inst = Instance::new(
+      Instance::new(
         1,
         perm_root_num_cons,
         vec![perm_root_num_cons],
@@ -1304,8 +1309,7 @@ impl Instance {
         &B_list,
         &C_list,
       )
-      .unwrap();
-      perm_root_inst
+      .unwrap()
     };
     (
       perm_root_num_cons,

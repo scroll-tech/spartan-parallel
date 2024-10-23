@@ -37,13 +37,13 @@ pub fn rev_bits(q: usize, max_num_proofs: usize) -> usize {
   (0..max_num_proofs.log_2())
     .rev()
     .map(|i| q / (i.pow2()) % 2 * (max_num_proofs / i.pow2() / 2))
-    .fold(0, |a, b| a + b)
+    .sum::<usize>()
 }
 
 impl DensePolynomialPqx {
   // Assume z_mat is of form (p, q_rev, x), construct DensePoly
   pub fn new(
-    z_mat: &Vec<Vec<Vec<Vec<Scalar>>>>,
+    z_mat: Vec<Vec<Vec<Vec<Scalar>>>>,
     num_proofs: Vec<usize>,
     max_num_proofs: usize,
     num_inputs: Vec<usize>,
@@ -58,14 +58,14 @@ impl DensePolynomialPqx {
       num_witness_secs,
       num_inputs,
       max_num_inputs,
-      Z: z_mat.clone(),
+      Z: z_mat,
     }
   }
 
   // Assume z_mat is in its standard form of (p, q, x)
   // Reverse q and x and convert it to (p, q_rev, x_rev)
   pub fn new_rev(
-    z_mat: &Vec<Vec<Vec<Vec<Scalar>>>>,
+    z_mat: Vec<Vec<Vec<Vec<Scalar>>>>,
     num_proofs: Vec<usize>,
     max_num_proofs: usize,
     num_inputs: Vec<usize>,
@@ -111,7 +111,7 @@ impl DensePolynomialPqx {
   }
 
   pub fn len(&self) -> usize {
-    return self.num_instances * self.max_num_proofs * self.max_num_inputs;
+    self.num_instances * self.max_num_proofs * self.max_num_inputs
   }
 
   // Given (p, q_rev, x_rev) return Z[p][q_rev][x_rev]
@@ -121,9 +121,9 @@ impl DensePolynomialPqx {
       && w < self.Z[p][q_rev].len()
       && x_rev < self.Z[p][q_rev][w].len()
     {
-      return self.Z[p][q_rev][w][x_rev];
+      self.Z[p][q_rev][w][x_rev]
     } else {
-      return ZERO;
+      ZERO
     }
   }
 
@@ -137,31 +137,31 @@ impl DensePolynomialPqx {
     match mode {
       MODE_P => {
         if p + self.num_instances / 2 < self.Z.len() {
-          return self.Z[p + self.num_instances / 2][q_rev][w][x_rev];
+          self.Z[p + self.num_instances / 2][q_rev][w][x_rev]
         } else {
-          return ZERO;
+          ZERO
         }
       }
       MODE_Q => {
-        return if self.num_proofs[p] == 1 {
+        if self.num_proofs[p] == 1 {
           ZERO
         } else {
           self.Z[p][q_rev + self.num_proofs[p] / 2][w][x_rev]
-        };
+        }
       }
       MODE_W => {
         if w + self.num_witness_secs / 2 < self.Z[p][q_rev].len() {
-          return self.Z[p][q_rev][w + self.num_witness_secs / 2][x_rev];
+          self.Z[p][q_rev][w + self.num_witness_secs / 2][x_rev]
         } else {
-          return ZERO;
+          ZERO
         }
       }
       MODE_X => {
-        return if self.num_inputs[p] == 1 {
+        if self.num_inputs[p] == 1 {
           ZERO
         } else {
           self.Z[p][q_rev][w][x_rev + self.num_inputs[p] / 2]
-        };
+        }
       }
       _ => {
         panic!(
@@ -329,7 +329,7 @@ impl DensePolynomialPqx {
     cl.bound_poly_vars_rw(r_w);
     cl.bound_poly_vars_rq(r_q);
     cl.bound_poly_vars_rp(r_p);
-    return cl.index(0, 0, 0, 0);
+    cl.index(0, 0, 0, 0)
   }
 
   // Convert to a (p, q_rev, x_rev) regular dense poly of form (p, q, x)
