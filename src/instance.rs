@@ -52,11 +52,11 @@ impl Instance {
       };
 
       let mut num_cons_padded = Vec::new();
-      for i in 0..num_cons.len() {
-        if num_cons[i] == 0 || num_cons[i] == 1 {
+      for &num_con in num_cons.iter() {
+        if num_con == 0 || num_con == 1 {
           num_cons_padded.push(2);
         } else {
-          num_cons_padded.push(num_cons[i].next_power_of_two());
+          num_cons_padded.push(num_con.next_power_of_two());
         }
       }
 
@@ -146,11 +146,12 @@ impl Instance {
 
   /// Sort the instances based on index
   // index[i] = j => the original jth entry should now be at the ith position
-  pub fn sort(&mut self, num_instances: usize, index: &Vec<usize>) {
+  pub fn sort(&mut self, num_instances: usize, index: &[usize]) {
     self.inst.sort(num_instances, index);
     self.digest = self.inst.get_digest();
   }
 
+  #[allow(clippy::type_complexity)]
   // Generates a constraints based on supplied (variable, constant) pairs
   fn gen_constr(
     mut A: Vec<(usize, usize, [u8; 32])>,
@@ -188,6 +189,7 @@ impl Instance {
     (A, B, C)
   }
 
+  #[allow(clippy::type_complexity)]
   // gen_constr from byte lists
   fn gen_constr_bytes(
     mut A: Vec<(usize, usize, [u8; 32])>,
@@ -235,6 +237,7 @@ impl Instance {
   /// Which is then divided into 2 witnesses for each (PA, PD)
   /// - PMR = r * PD
   /// - PMC = (1 or PMC[i-1]) * (tau - PA - PMR)
+  ///
   /// The final product is stored in X = MC[NP - 1]
   /// VIR_W2 is similar to PHY_W2, except now with 4-tuples
   ///                           PI(tau - VA - r * VD - r^2 * VL - r^3 * VT)
@@ -243,24 +246,25 @@ impl Instance {
   /// - VMR2 = r^2 * VL
   /// - VMR3 = r^3 * VT
   /// - VMC = (1 or VMC[i-1]) * (tau - VA - VMR1 - VMR2 - VMR3)
+  ///
   /// The final product is stored in X = MC[NV - 1]
+  #[allow(clippy::too_many_arguments)]
+  #[allow(clippy::type_complexity)]
   pub fn gen_block_inst<const PRINT_SIZE: bool>(
     num_instances: usize,
     num_vars: usize,
-    args: &Vec<
-      Vec<(
-        Vec<(usize, [u8; 32])>,
-        Vec<(usize, [u8; 32])>,
-        Vec<(usize, [u8; 32])>,
-      )>,
-    >,
+    args: &[Vec<(
+      Vec<(usize, [u8; 32])>,
+      Vec<(usize, [u8; 32])>,
+      Vec<(usize, [u8; 32])>,
+    )>],
     num_inputs_unpadded: usize,
     // Number of physical & memory accesses per block
-    num_phy_ops: &Vec<usize>,
-    num_vir_ops: &Vec<usize>,
+    num_phy_ops: &[usize],
+    num_vir_ops: &[usize],
     // Information used only by printing
-    num_vars_per_block: &Vec<usize>,
-    block_num_proofs: &Vec<usize>,
+    num_vars_per_block: &[usize],
+    block_num_proofs: &[usize],
   ) -> (usize, usize, usize, Instance) {
     assert_eq!(num_instances, args.len());
 

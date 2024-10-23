@@ -183,7 +183,7 @@ impl R1CSInstance {
 
   // Sort A_list, B_list, C_list based on index
   // index[i] = j => the original jth entry should now be at the ith position
-  pub fn sort(&mut self, num_instances: usize, index: &Vec<usize>) {
+  pub fn sort(&mut self, num_instances: usize, index: &[usize]) {
     self.num_instances = num_instances;
     self.num_cons = (0..num_instances)
       .map(|i| self.num_cons[index[i]])
@@ -433,44 +433,6 @@ impl R1CSInstance {
       ),
     )
   }
-
-  /*
-  // Multiply one instance by a list of inputs
-  // Length of each input might be smaller than the length of the instance,
-  // in that case need to append the result by 0
-  pub fn multiply_vec_single(
-    &self,
-    num_instances: usize,
-    num_proofs: &Vec<usize>,
-    max_num_proofs_bound: usize,
-    max_num_proofs: usize,
-    num_rows: usize,
-    num_cols: usize,
-        z_list: &Vec<Vec<Scalar>>,
-  ) -> (DensePolynomialPqx, DensePolynomialPqx, DensePolynomialPqx) {
-    assert!(max_num_proofs <= max_num_proofs_bound);
-    assert!(max_num_proofs_bound * num_rows <= self.num_cons);
-    assert!(max_num_proofs_bound * num_cols <= self.num_vars);
-    let mut Az = Vec::new();
-    let mut Bz = Vec::new();
-    let mut Cz = Vec::new();
-
-    // Non-zero instances
-    for p in 0..num_instances {
-      let z = &z_list[p];
-      assert!(num_proofs[p] <= max_num_proofs);
-      // Each returns a num_proofs[p] * num_rows matrix
-      Az.push(self.A_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
-      Bz.push(self.B_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
-      Cz.push(self.C_list[0].multiply_vec_pad(max_num_proofs_bound, num_proofs[p], num_rows, num_cols, z));
-    }
-    (
-         DensePolynomialPqx::new_rev(&Az, num_proofs, max_num_proofs),
-      DensePolynomialPqx::new_rev(&Bz, num_proofs, max_num_proofs),
-      DensePolynomialPqx::new_rev(&Cz, num_proofs, max_num_proofs)
-    )
-  }
-  */
 
   pub fn compute_eval_table_sparse(
     &self,
